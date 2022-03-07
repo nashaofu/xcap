@@ -1,9 +1,3 @@
-# screenshots-rs
-A cross-platform screenshots library
-
-## example
-
-```rust
 use screenshots::Capturer;
 use std::{fs::File, io::Write, time::Instant};
 
@@ -32,4 +26,3 @@ fn main() {
 
   println!("运行耗时: {:?}", start.elapsed());
 }
-```

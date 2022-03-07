@@ -1,0 +1,29 @@
+[package]
+name = "screenshots"
+version = "0.0.6"
+edition = "2021"
+description = "A cross-platform screenshots library"
+license-file = "LICENSE"
+documentation = "https://docs.rs/screenshots"
+homepage = "https://github.com/nashaofu/screenshots-rs"
+repository = "https://github.com/nashaofu/screenshots-rs.git"
+keywords = ["screenshots", "screenshot", "screen", "capture"]
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+png = "0.17.5"
+display-info = "0.0.6"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.22.3"
+
+[target.'cfg(target_os="windows")'.dependencies]
+sfhash = "0.1.1"
+widestring = "0.5.1"
+
+[target.'cfg(target_os = "windows")'.dependencies.windows]
+version = "0.33.0"
+features = ["Win32_Foundation", "Win32_Graphics_Gdi"]
+
+[target.'cfg(target_os="linux")'.dependencies]
+x11 = "2.19.1"
