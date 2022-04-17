@@ -1,6 +1,6 @@
 [package]
 name = "screenshots"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 description = "A cross-platform screenshots library"
 license-file = "LICENSE"
@@ -12,7 +12,7 @@ keywords = ["screenshots", "screenshot", "screen", "capture"]
 
 [dependencies]
 png = "0.17.5"
-display-info = "0.0.6"
+display-info = "0.0.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.22.3"

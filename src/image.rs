@@ -1,32 +1,18 @@
 use png::{BitDepth, ColorType, Encoder, ScaledFloat, SourceChromaticities};
-use std::slice;
-use x11::xlib::{XDestroyImage, XImage};
 
-#[derive(Debug)]
 pub struct Image {
-  ximage: *mut XImage,
+  pub width: u32,
+  pub height: u32,
+  pub bytes: Vec<u8>,
 }
 
 impl Image {
-  pub fn new(ximage: *mut XImage) -> Self {
-    Image { ximage }
-  }
-
-  pub fn width(&self) -> usize {
-    unsafe { (*(self.ximage)).width as usize }
-  }
-
-  pub fn height(&self) -> usize {
-    unsafe { (*(self.ximage)).height as usize }
-  }
-
-  pub fn bytes(&self) -> Vec<u8> {
-    unsafe {
-      let data = (*(self.ximage)).data;
-      let mut bytes = Vec::from(slice::from_raw_parts(
-        data as *mut u8,
-        self.width() * self.height() * 4,
-      ));
+  pub fn png(&self) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    {
+      let width = self.width as u32;
+      let height = self.height as u32;
+      let mut bytes = self.bytes.clone();
 
       // BGR 转换为 RGB
       for i in (0..bytes.len()).step_by(4) {
@@ -36,17 +22,6 @@ impl Image {
         bytes[i] = r;
         bytes[i + 2] = b;
       }
-
-      return bytes;
-    }
-  }
-
-  pub fn png(&self) -> Vec<u8> {
-    let mut buffer = Vec::new();
-    {
-      let width = self.width() as u32;
-      let height = self.height() as u32;
-      let bytes = self.bytes();
 
       let mut encoder = Encoder::new(&mut buffer, width, height);
 
@@ -75,13 +50,5 @@ impl Image {
     }
 
     return buffer;
-  }
-}
-
-impl Drop for Image {
-  fn drop(&mut self) {
-    unsafe {
-      XDestroyImage(self.ximage);
-    }
   }
 }

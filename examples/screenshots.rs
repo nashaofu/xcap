@@ -1,25 +1,25 @@
-use screenshots::Capturer;
+use screenshots::ScreenCapturer;
 use std::{fs::File, io::Write, time::Instant};
 
 fn main() {
   let start = Instant::now();
 
-  let capturers = Capturer::screen_capturers();
+  let screen_capturers = ScreenCapturer::all();
 
-  for capturer in capturers {
-    println!("capturer {:?}", capturer);
-    let image = capturer.capture_screen().unwrap();
+  for screen_capturer in screen_capturers {
+    println!("capturer {:?}", screen_capturer);
+    let image = screen_capturer.capture().unwrap();
     let buffer = image.png();
-    let display_id = capturer.display_info.id.to_string();
+    let display_id = screen_capturer.display_info.id.to_string();
     let path = String::from("") + &display_id + ".png";
     let mut file = File::create(path).unwrap();
     file.write_all(&buffer[..]).unwrap();
   }
 
-  let capturer = Capturer::screen_capturer_from_point(100, 100).unwrap();
-  println!("capturer {:?}", capturer);
+  let screen_capturer = ScreenCapturer::from_point(100, 100).unwrap();
+  println!("capturer {:?}", screen_capturer);
 
-  let image = capturer.capture_screen().unwrap();
+  let image = screen_capturer.capture().unwrap();
   let buffer = image.png();
   let mut file = File::create("capture_display_with_point.png").unwrap();
   file.write_all(&buffer[..]).unwrap();
