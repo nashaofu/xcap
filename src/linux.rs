@@ -12,14 +12,18 @@ pub fn capture_display(screen_capturer: &ScreenCapturer) -> Option<Image> {
 
     let window_id = XDefaultRootWindow(display_ptr);
     let display_info = screen_capturer.display_info;
+    let x = ((display_info.x as f32) * display_info.scale) as i32;
+    let y = ((display_info.y as f32) * display_info.scale) as i32;
+    let width = ((display_info.width as f32) * display_info.scale) as u32;
+    let height = ((display_info.height as f32) * display_info.scale) as u32;
 
     let ximage = XGetImage(
       display_ptr,
       window_id,
-      display_info.x,
-      display_info.y,
-      display_info.width,
-      display_info.height,
+      x,
+      y,
+      width,
+      height,
       XAllPlanes(),
       ZPixmap,
     );
