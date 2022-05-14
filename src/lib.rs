@@ -11,12 +11,12 @@ use darwin::*;
 #[cfg(target_os = "windows")]
 mod win32;
 #[cfg(target_os = "windows")]
-pub use win32::*;
+use win32::*;
 
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-pub use linux::*;
+use linux::*;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ScreenCapturer {
