@@ -45,12 +45,9 @@ fn get_monitor_info_exw_from_id<'a>(id: u32) -> Option<MONITORINFOEXW> {
           let sz_device_ptr = monitor_info_exw.szDevice.as_ptr();
           let sz_device_string = U16CString::from_ptr_str(sz_device_ptr).to_string_lossy();
           digest(sz_device_string.as_bytes()) == id
-        });
+        })?;
 
-        match monitor_info_exw {
-          Some(monitor_info_exw) => Some(*monitor_info_exw),
-          None => None,
-        }
+        Some(*monitor_info_exw)
       }
     }
   }
@@ -79,10 +76,9 @@ pub fn capture_display(screen_capturer: &ScreenCapturer) -> Option<Image> {
   unsafe {
     let display_info = screen_capturer.display_info;
 
-    let sz_device = match get_monitor_info_exw_from_id(display_info.id) {
-      Some(monitor_info_exw) => monitor_info_exw.szDevice,
-      None => return None,
-    };
+    let monitor_info_exw = get_monitor_info_exw_from_id(display_info.id)?;
+
+    let sz_device = monitor_info_exw.szDevice;
 
     let width = (display_info.width as f32 * display_info.scale) as i32;
     let height = (display_info.height as f32 * display_info.scale) as i32;

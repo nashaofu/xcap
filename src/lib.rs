@@ -36,11 +36,10 @@ impl ScreenCapturer {
   }
 
   pub fn from_point(x: i32, y: i32) -> Option<ScreenCapturer> {
-    match DisplayInfo::from_point(x, y) {
-      Some(display_info) => Some(ScreenCapturer::new(display_info)),
-      None => None,
-    }
+    let display_info = DisplayInfo::from_point(x, y)?;
+    Some(ScreenCapturer::new(display_info))
   }
+  
   pub fn capture(&self) -> Option<Image> {
     capture_display(&self)
   }

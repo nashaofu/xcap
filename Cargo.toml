@@ -1,6 +1,6 @@
 [package]
 name = "screenshots"
-version = "0.0.8"
+version = "0.1.0"
 edition = "2021"
 description = "A cross-platform screenshots library"
 license-file = "LICENSE"
