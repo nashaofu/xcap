@@ -1,6 +1,6 @@
 # screenshots-rs
 
-A cross-platform screenshots library
+A cross-platform screenshots library for MacOS、Windows、Linux(X11).
 
 ## example
 
