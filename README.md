@@ -16,7 +16,7 @@ fn main() {
   for screen_capturer in screen_capturers {
     println!("capturer {:?}", screen_capturer);
     let image = screen_capturer.capture().unwrap();
-    let buffer = image.png();
+    let buffer = image.png().unwrap();
     let display_id = screen_capturer.display_info.id.to_string();
     let path = String::from("") + &display_id + ".png";
     let mut file = File::create(path).unwrap();
@@ -27,10 +27,11 @@ fn main() {
   println!("capturer {:?}", screen_capturer);
 
   let image = screen_capturer.capture().unwrap();
-  let buffer = image.png();
+  let buffer = image.png().unwrap();
   let mut file = File::create("capture_display_with_point.png").unwrap();
   file.write_all(&buffer[..]).unwrap();
 
   println!("运行耗时: {:?}", start.elapsed());
 }
+
 ```
