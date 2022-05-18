@@ -1,4 +1,4 @@
-use screenshots::ScreenCapturer;
+use screen_capturer::ScreenCapturer;
 use std::{fs::File, io::Write, time::Instant};
 
 fn main() {

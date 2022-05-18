@@ -1,13 +1,13 @@
 [package]
-name = "screenshots"
+name = "screen-capturer"
 version = "0.1.0"
 edition = "2021"
-description = "A cross-platform screenshots library"
+description = "A cross-platform screen capturer library"
 license-file = "LICENSE"
-documentation = "https://docs.rs/screenshots"
-homepage = "https://github.com/nashaofu/screenshots-rs"
-repository = "https://github.com/nashaofu/screenshots-rs.git"
-keywords = ["screenshots", "screenshot", "screen", "capture"]
+documentation = "https://docs.rs/screen-capturer"
+homepage = "https://github.com/nashaofu/screen-capturer"
+repository = "https://github.com/nashaofu/screen-capturer.git"
+keywords = ["screen-capturer", "screenshot", "screen", "capture"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]

@@ -1,11 +1,11 @@
-# screenshots-rs
+# screen-capturer
 
-A cross-platform screenshots library for MacOS、Windows、Linux(X11).
+A cross-platform screen capturer library for MacOS、Windows、Linux(X11).
 
 ## example
 
 ```rust
-use screenshots::ScreenCapturer;
+use screen_capturer::ScreenCapturer;
 use std::{fs::File, io::Write, time::Instant};
 
 fn main() {
