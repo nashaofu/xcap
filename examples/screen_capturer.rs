@@ -3,7 +3,6 @@ use std::{fs::File, io::Write, time::Instant};
 
 fn main() {
   let start = Instant::now();
-
   let screen_capturers = ScreenCapturer::all();
 
   for screen_capturer in screen_capturers {
