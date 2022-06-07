@@ -21,13 +21,16 @@ fn screenshot(screen_capturer: &ScreenCapturer) -> Result<String, Error> {
   let width = ((display_info.width as f32) * display_info.scale) as i32;
   let height = ((display_info.height as f32) * display_info.scale) as i32;
 
-  let path = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-    Ok(duration) => {
-      let time_string = duration.as_micros().to_string();
-      temp_dir().join(String::from("screenshot-") + &time_string + ".png")
-    }
+  let timestamp = match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+    Ok(duration) => duration.as_micros().to_string(),
     Err(_) => return Err(Error::new_failed("org.gnome.Shell.Screenshot failed")),
   };
+
+  let dirname = temp_dir().join("screenshot");
+  fs::create_dir_all(&dirname).unwrap();
+
+  let mut path = dirname.join(timestamp);
+  path.set_extension("png");
 
   let filename = match path.to_str() {
     Some(filename) => filename,
@@ -44,7 +47,7 @@ fn screenshot(screen_capturer: &ScreenCapturer) -> Result<String, Error> {
 }
 
 pub fn capture_display(screen_capturer: &ScreenCapturer) -> Option<Image> {
-  let file = match screenshot(&screen_capturer) {
+  let filename = match screenshot(&screen_capturer) {
     Ok(file) => file,
     Err(_) => return None,
   };
@@ -53,8 +56,13 @@ pub fn capture_display(screen_capturer: &ScreenCapturer) -> Option<Image> {
   let width = ((display_info.width as f32) * display_info.scale) as u32;
   let height = ((display_info.height as f32) * display_info.scale) as u32;
 
-  match fs::read(file) {
-    Ok(buffer) => Some(Image::new(width, height, buffer)),
+  println!("filename {:?}", filename);
+
+  match fs::read(&filename) {
+    Ok(buffer) => {
+      fs::remove_file(filename).unwrap();
+      Some(Image::new(width, height, buffer))
+    }
     Err(_) => None,
   }
 }
