@@ -46,7 +46,7 @@ fn screenshot(screen_capturer: &ScreenCapturer) -> Result<String, Error> {
   Ok(String::from(filename))
 }
 
-pub fn capture_display(screen_capturer: &ScreenCapturer) -> Option<Image> {
+pub fn wayland_capture_display(screen_capturer: &ScreenCapturer) -> Option<Image> {
   let filename = match screenshot(&screen_capturer) {
     Ok(file) => file,
     Err(_) => return None,
