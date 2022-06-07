@@ -2,7 +2,7 @@ use crate::{Image, ScreenCapturer};
 use std::{ptr, slice};
 use x11::xlib::{XAllPlanes, XCloseDisplay, XDefaultRootWindow, XGetImage, XOpenDisplay, ZPixmap};
 
-pub fn x11_capture_display(screen_capturer: &ScreenCapturer) -> Option<Image> {
+pub fn xorg_capture_display(screen_capturer: &ScreenCapturer) -> Option<Image> {
   unsafe {
     let display_ptr = XOpenDisplay(ptr::null_mut());
 
@@ -42,6 +42,9 @@ pub fn x11_capture_display(screen_capturer: &ScreenCapturer) -> Option<Image> {
       (width * height * 4) as usize,
     ));
 
-    Some(Image::from_bgr(width as u32, height as u32, bytes))
+    match Image::from_bgr(width as u32, height as u32, bytes) {
+      Ok(image) => Some(image),
+      Err(_) => None,
+    }
   }
 }
