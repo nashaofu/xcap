@@ -1,17 +1,23 @@
 use png::{BitDepth, ColorType, Encoder, EncodingError};
 
 pub struct Image {
-  pub width: u32,
-  pub height: u32,
-  pub bytes: Vec<u8>,
+  width: u32,
+  height: u32,
+  buffer: Vec<u8>,
 }
 
 impl Image {
-  pub fn png(&self) -> Result<Vec<u8>, EncodingError> {
+  pub fn new(width: u32, height: u32, buffer: Vec<u8>) -> Self {
+    Image {
+      width,
+      height,
+      buffer,
+    }
+  }
+
+  pub fn from_bgr(width: u32, height: u32, bgr: Vec<u8>) -> Result<Self, EncodingError> {
     let mut buffer = Vec::new();
-    let width = self.width as u32;
-    let height = self.height as u32;
-    let mut bytes = self.bytes.clone();
+    let mut bytes = bgr.clone();
 
     // BGR 转换为 RGB
     for i in (0..bytes.len()).step_by(4) {
@@ -32,6 +38,18 @@ impl Image {
     writer.write_image_data(&bytes)?;
     writer.finish()?;
 
-    Ok(buffer)
+    Ok(Image::new(width, height, buffer))
+  }
+
+  pub fn width(&self) -> u32 {
+    self.width
+  }
+
+  pub fn height(&self) -> u32 {
+    self.height
+  }
+
+  pub fn buffer(&self) -> Vec<u8> {
+    self.buffer.clone()
   }
 }
