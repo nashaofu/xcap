@@ -42,10 +42,6 @@ pub fn capture_display(screen_capturer: &ScreenCapturer) -> Option<Image> {
       (width * height * 4) as usize,
     ));
 
-    Some(Image {
-      width: width as u32,
-      height: height as u32,
-      bytes,
-    })
+    Some(Image::from_bgr(width as u32, height as u32, bytes))
   }
 }

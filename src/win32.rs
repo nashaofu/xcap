@@ -171,10 +171,10 @@ pub fn capture_display(screen_capturer: &ScreenCapturer) -> Option<Image> {
 
     release_data((h_dc, compatible_dc, h_bitmap));
 
-    Some(Image {
-      width: bitmap.bmWidth as u32,
-      height: bitmap.bmHeight as u32,
-      bytes: chunks.concat(),
-    })
+    Some(Image::from_bgr(
+      bitmap.bmWidth as u32,
+      bitmap.bmHeight as u32,
+      chunks.concat(),
+    ))
   }
 }
