@@ -56,8 +56,6 @@ pub fn wayland_capture_display(screen_capturer: &ScreenCapturer) -> Option<Image
   let width = ((display_info.width as f32) * display_info.scale) as u32;
   let height = ((display_info.height as f32) * display_info.scale) as u32;
 
-  println!("filename {:?}", filename);
-
   match fs::read(&filename) {
     Ok(buffer) => {
       fs::remove_file(filename).unwrap();
