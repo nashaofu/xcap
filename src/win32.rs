@@ -72,9 +72,9 @@ extern "system" fn monitor_enum_proc(
   }
 }
 
-pub fn capture_display(screen_capturer: &Screenshots) -> Option<Image> {
+pub fn capture_display(screenshots: &Screenshots) -> Option<Image> {
   unsafe {
-    let display_info = screen_capturer.display_info;
+    let display_info = screenshots.display_info;
 
     let monitor_info_exw = get_monitor_info_exw_from_id(display_info.id)?;
 

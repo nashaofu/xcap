@@ -1,8 +1,8 @@
 use crate::{Image, Screenshots};
 use core_graphics::display::CGDisplay;
 
-pub fn capture_display(screen_capturer: &Screenshots) -> Option<Image> {
-  let cg_display = CGDisplay::new(screen_capturer.display_info.id);
+pub fn capture_display(screenshots: &Screenshots) -> Option<Image> {
+  let cg_display = CGDisplay::new(screenshots.display_info.id);
   let cg_image = cg_display.image()?;
 
   match Image::from_bgr(
