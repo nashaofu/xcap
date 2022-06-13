@@ -1,17 +1,17 @@
-# screen-capturer
+# screenshots
 
 A cross-platform screen capturer library for MacOS、Windows、Linux(X11).
 
 ## example
 
 ```rust
-use screen_capturer::ScreenCapturer;
+use screen_capturer::Screenshots;
 use std::{fs::File, io::Write, time::Instant};
 
 fn main() {
   let start = Instant::now();
 
-  let screen_capturers = ScreenCapturer::all();
+  let screen_capturers = Screenshots::all();
 
   for screen_capturer in screen_capturers {
     println!("capturer {:?}", screen_capturer);
@@ -23,7 +23,7 @@ fn main() {
     file.write_all(&buffer[..]).unwrap();
   }
 
-  let screen_capturer = ScreenCapturer::from_point(100, 100).unwrap();
+  let screen_capturer = Screenshots::from_point(100, 100).unwrap();
   println!("capturer {:?}", screen_capturer);
 
   let image = screen_capturer.capture().unwrap();
