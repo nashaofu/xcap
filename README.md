@@ -1,6 +1,6 @@
 # screenshots
 
-A cross-platform screen capturer library for MacOS、Windows、Linux(X11).
+A cross-platform screenshots library for MacOS、Windows、Linux(X11、wayland).
 
 ## example
 
