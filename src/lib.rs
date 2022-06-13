@@ -39,7 +39,7 @@ impl Screenshots {
     let display_info = DisplayInfo::from_point(x, y)?;
     Some(Screenshots::new(display_info))
   }
-  
+
   pub fn capture(&self) -> Option<Image> {
     capture_display(&self)
   }

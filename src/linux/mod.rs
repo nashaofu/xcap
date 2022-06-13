@@ -22,10 +22,10 @@ fn wayland_dectected() -> bool {
   return xdg_session_type.eq("wayland") || wayland_display.to_lowercase().contains("wayland");
 }
 
-pub fn capture_display(screen_capturer: &Screenshots) -> Option<Image> {
+pub fn capture_display(screenshots: &Screenshots) -> Option<Image> {
   if wayland_dectected() {
-    wayland_capture_display(&screen_capturer)
+    wayland_capture_display(&screenshots)
   } else {
-    xorg_capture_display(&screen_capturer)
+    xorg_capture_display(&screenshots)
   }
 }
