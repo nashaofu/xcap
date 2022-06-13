@@ -1,4 +1,4 @@
-use crate::{Image, ScreenCapturer};
+use crate::{Image, Screenshots};
 use sfhash::digest;
 use std::{mem, ptr};
 use widestring::U16CString;
@@ -72,7 +72,7 @@ extern "system" fn monitor_enum_proc(
   }
 }
 
-pub fn capture_display(screen_capturer: &ScreenCapturer) -> Option<Image> {
+pub fn capture_display(screen_capturer: &Screenshots) -> Option<Image> {
   unsafe {
     let display_info = screen_capturer.display_info;
 

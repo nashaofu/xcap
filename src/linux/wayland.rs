@@ -1,4 +1,4 @@
-use crate::{Image, ScreenCapturer};
+use crate::{Image, Screenshots};
 use dbus::{blocking::Connection, Error};
 use std::{
   env::temp_dir,
@@ -6,7 +6,7 @@ use std::{
   time::{Duration, SystemTime},
 };
 
-fn screenshot(screen_capturer: &ScreenCapturer) -> Result<String, Error> {
+fn screenshot(screen_capturer: &Screenshots) -> Result<String, Error> {
   let conn = Connection::new_session()?;
 
   let proxy = conn.with_proxy(
@@ -46,7 +46,7 @@ fn screenshot(screen_capturer: &ScreenCapturer) -> Result<String, Error> {
   Ok(String::from(filename))
 }
 
-pub fn wayland_capture_display(screen_capturer: &ScreenCapturer) -> Option<Image> {
+pub fn wayland_capture_display(screen_capturer: &Screenshots) -> Option<Image> {
   let filename = match screenshot(&screen_capturer) {
     Ok(file) => file,
     Err(_) => return None,
