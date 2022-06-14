@@ -49,7 +49,7 @@ impl Image {
     self.height
   }
 
-  pub fn buffer(&self) -> Vec<u8> {
-    self.buffer.clone()
+  pub fn buffer(&self) -> &Vec<u8> {
+    &self.buffer
   }
 }
