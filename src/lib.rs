@@ -19,28 +19,42 @@ mod linux;
 use linux::*;
 
 #[derive(Debug, Clone, Copy)]
-pub struct Screenshots {
-  pub display_info: DisplayInfo,
+pub struct Screen {
+  pub id: u32,
+  pub x: i32,
+  pub y: i32,
+  pub width: u32,
+  pub height: u32,
+  pub scale: f32,
+  pub rotation: f32,
 }
 
-impl Screenshots {
+impl Screen {
   pub fn new(display_info: DisplayInfo) -> Self {
-    Screenshots { display_info }
+    Screen {
+      id: display_info.id,
+      x: display_info.x,
+      y: display_info.y,
+      width: display_info.width,
+      height: display_info.height,
+      scale: display_info.scale,
+      rotation: display_info.rotation,
+    }
   }
 
-  pub fn all() -> Vec<Screenshots> {
+  pub fn all() -> Vec<Screen> {
     DisplayInfo::all()
       .iter()
-      .map(move |display_info| Screenshots::new(*display_info))
+      .map(move |display_info| Screen::new(*display_info))
       .collect()
   }
 
-  pub fn from_point(x: i32, y: i32) -> Option<Screenshots> {
+  pub fn from_point(x: i32, y: i32) -> Option<Screen> {
     let display_info = DisplayInfo::from_point(x, y)?;
-    Some(Screenshots::new(display_info))
+    Some(Screen::new(display_info))
   }
 
   pub fn capture(&self) -> Option<Image> {
-    capture_display(&self)
+    capture_screen(&self)
   }
 }

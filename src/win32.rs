@@ -1,4 +1,4 @@
-use crate::{Image, Screenshots};
+use crate::{Image, Screen};
 use sfhash::digest;
 use std::{mem, ptr};
 use widestring::U16CString;
@@ -72,16 +72,14 @@ extern "system" fn monitor_enum_proc(
   }
 }
 
-pub fn capture_display(screenshots: &Screenshots) -> Option<Image> {
+pub fn capture_screen(screen: &Screen) -> Option<Image> {
   unsafe {
-    let display_info = screenshots.display_info;
-
-    let monitor_info_exw = get_monitor_info_exw_from_id(display_info.id)?;
+    let monitor_info_exw = get_monitor_info_exw_from_id(screen.id)?;
 
     let sz_device = monitor_info_exw.szDevice;
 
-    let width = (display_info.width as f32 * display_info.scale) as i32;
-    let height = (display_info.height as f32 * display_info.scale) as i32;
+    let width = (screen.width as f32 * screen.scale) as i32;
+    let height = (screen.height as f32 * screen.scale) as i32;
 
     let h_dc = CreateDCW(
       PCWSTR(sz_device.as_ptr()),

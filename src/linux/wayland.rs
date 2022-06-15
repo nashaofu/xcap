@@ -1,4 +1,4 @@
-use crate::{Image, Screenshots};
+use crate::{Image, Screen};
 use dbus::{self, blocking::Connection};
 use std::{
   env::temp_dir,
@@ -6,7 +6,7 @@ use std::{
   time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-fn screenshot(screenshots: &Screenshots) -> Result<String, dbus::Error> {
+fn screenshot(screen: &Screen) -> Result<String, dbus::Error> {
   let conn = Connection::new_session()?;
 
   let proxy = conn.with_proxy(
@@ -15,11 +15,10 @@ fn screenshot(screenshots: &Screenshots) -> Result<String, dbus::Error> {
     Duration::from_secs(10),
   );
 
-  let display_info = screenshots.display_info;
-  let x = ((display_info.x as f32) * display_info.scale) as i32;
-  let y = ((display_info.y as f32) * display_info.scale) as i32;
-  let width = ((display_info.width as f32) * display_info.scale) as i32;
-  let height = ((display_info.height as f32) * display_info.scale) as i32;
+  let x = ((screen.x as f32) * screen.scale) as i32;
+  let y = ((screen.y as f32) * screen.scale) as i32;
+  let width = ((screen.width as f32) * screen.scale) as i32;
+  let height = ((screen.height as f32) * screen.scale) as i32;
 
   let timestamp = match SystemTime::now().duration_since(UNIX_EPOCH) {
     Ok(duration) => duration.as_micros().to_string(),
@@ -51,15 +50,14 @@ fn read_image(filename: String) -> Result<Vec<u8>, io::Error> {
   Ok(buffer)
 }
 
-pub fn wayland_capture_display(screenshots: &Screenshots) -> Option<Image> {
-  let filename = match screenshot(&screenshots) {
+pub fn wayland_capture_screen(screen: &Screen) -> Option<Image> {
+  let filename = match screenshot(&screen) {
     Ok(file) => file,
     Err(_) => return None,
   };
 
-  let display_info = screenshots.display_info;
-  let width = ((display_info.width as f32) * display_info.scale) as u32;
-  let height = ((display_info.height as f32) * display_info.scale) as u32;
+  let width = ((screen.width as f32) * screen.scale) as u32;
+  let height = ((screen.height as f32) * screen.scale) as u32;
 
   match read_image(filename) {
     Ok(buffer) => Some(Image::new(width, height, buffer)),

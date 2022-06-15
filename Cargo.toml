@@ -1,12 +1,12 @@
 [package]
 name = "screenshots"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "A cross-platform screen capturer library"
-license-file = "LICENSE"
+license = "Apache-2.0"
 documentation = "https://docs.rs/screenshots"
-homepage = "https://github.com/nashaofu/screenshots"
-repository = "https://github.com/nashaofu/screenshots.git"
+homepage = "https://github.com/nashaofu/screenshots-rs"
+repository = "https://github.com/nashaofu/screenshots-rs.git"
 keywords = ["screenshots", "screenshot", "screen", "capture"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
