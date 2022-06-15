@@ -2,11 +2,11 @@ mod wayland;
 mod xorg;
 
 use crate::Image;
-use crate::Screenshots;
+use crate::Screen;
 
 use std::env::var_os;
-use wayland::wayland_capture_display;
-use xorg::xorg_capture_display;
+use wayland::wayland_capture_screen;
+use xorg::xorg_capture_screen;
 
 fn wayland_dectected() -> bool {
   let xdg_session_type = var_os("XDG_SESSION_TYPE")
@@ -22,10 +22,10 @@ fn wayland_dectected() -> bool {
   return xdg_session_type.eq("wayland") || wayland_display.to_lowercase().contains("wayland");
 }
 
-pub fn capture_display(screenshots: &Screenshots) -> Option<Image> {
+pub fn capture_screen(screen: &Screen) -> Option<Image> {
   if wayland_dectected() {
-    wayland_capture_display(&screenshots)
+    wayland_capture_screen(&screen)
   } else {
-    xorg_capture_display(&screenshots)
+    xorg_capture_screen(&screen)
   }
 }

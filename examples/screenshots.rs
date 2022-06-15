@@ -1,27 +1,23 @@
-use screenshots::Screenshots;
-use std::{fs::File, io::Write, time::Instant};
+use screenshots::Screen;
+use std::{fs, time::Instant};
 
 fn main() {
   let start = Instant::now();
-  let screenshotss = Screenshots::all();
+  let screens = Screen::all();
 
-  for screenshots in screenshotss {
-    println!("capturer {:?}", screenshots);
-    let image = screenshots.capture().unwrap();
+  for screen in screens {
+    println!("capturer {:?}", screen);
+    let image = screen.capture().unwrap();
     let buffer = image.buffer();
-    let display_id = screenshots.display_info.id.to_string();
-    let path = String::from("") + &display_id + ".png";
-    let mut file = File::create(path).unwrap();
-    file.write_all(&buffer[..]).unwrap();
+    fs::write(format!("{}.png", screen.id.to_string()), &buffer).unwrap();
   }
 
-  let screenshots = Screenshots::from_point(100, 100).unwrap();
-  println!("capturer {:?}", screenshots);
+  let screen = Screen::from_point(100, 100).unwrap();
+  println!("capturer {:?}", screen);
 
-  let image = screenshots.capture().unwrap();
+  let image = screen.capture().unwrap();
   let buffer = image.buffer();
-  let mut file = File::create("capture_display_with_point.png").unwrap();
-  file.write_all(&buffer[..]).unwrap();
+  fs::write("capture_display_with_point.png", &buffer).unwrap();
 
   println!("运行耗时: {:?}", start.elapsed());
 }

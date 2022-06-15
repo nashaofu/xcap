@@ -1,8 +1,8 @@
-use crate::{Image, Screenshots};
+use crate::{Image, Screen};
 use std::{ptr, slice};
 use x11::xlib::{XAllPlanes, XCloseDisplay, XDefaultRootWindow, XGetImage, XOpenDisplay, ZPixmap};
 
-pub fn xorg_capture_display(screenshots: &Screenshots) -> Option<Image> {
+pub fn xorg_capture_screen(screen: &Screen) -> Option<Image> {
   unsafe {
     let display_ptr = XOpenDisplay(ptr::null_mut());
 
@@ -11,11 +11,10 @@ pub fn xorg_capture_display(screenshots: &Screenshots) -> Option<Image> {
     }
 
     let window_id = XDefaultRootWindow(display_ptr);
-    let display_info = screenshots.display_info;
-    let x = ((display_info.x as f32) * display_info.scale) as i32;
-    let y = ((display_info.y as f32) * display_info.scale) as i32;
-    let width = ((display_info.width as f32) * display_info.scale) as u32;
-    let height = ((display_info.height as f32) * display_info.scale) as u32;
+    let x = ((screen.x as f32) * screen.scale) as i32;
+    let y = ((screen.y as f32) * screen.scale) as i32;
+    let width = ((screen.width as f32) * screen.scale) as u32;
+    let height = ((screen.height as f32) * screen.scale) as u32;
 
     let ximage = XGetImage(
       display_ptr,
