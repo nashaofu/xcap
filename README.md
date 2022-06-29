@@ -30,3 +30,12 @@ fn main() {
 }
 
 ```
+
+## API
+
+### `Screen`: Screen capturer
+
+- `Screen::all()`: Get all screen, return `Vec<Screen>`.
+- `Screen::from_point(x, y)`: Get screen from point, return `Option<Screen>`.
+- `Screen::new(display_info)`: Get screen from [display info](https://docs.rs/display-info/latest/display_info/struct.DisplayInfo.html), return `Option<Screen>`.
+- `screen.capture()`: capture screen screenshot [image](https://docs.rs/screenshots/latest/screenshots/struct.Image.html), return `Option<Image>`.
