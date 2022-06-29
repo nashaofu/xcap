@@ -169,7 +169,7 @@ pub fn capture_screen(screen: &Screen) -> Option<Image> {
 
     release_data((h_dc, compatible_dc, h_bitmap));
 
-    match Image::from_bgr(
+    match Image::from_bgra(
       bitmap.bmWidth as u32,
       bitmap.bmHeight as u32,
       chunks.concat(),

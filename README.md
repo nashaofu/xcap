@@ -35,7 +35,15 @@ fn main() {
 
 ### `Screen`: Screen capturer
 
+- `Screen::new(display_info)`: Get screen from [display info](https://docs.rs/display-info/latest/display_info/struct.DisplayInfo.html), return `Option<Screen>`.
 - `Screen::all()`: Get all screen, return `Vec<Screen>`.
 - `Screen::from_point(x, y)`: Get screen from point, return `Option<Screen>`.
-- `Screen::new(display_info)`: Get screen from [display info](https://docs.rs/display-info/latest/display_info/struct.DisplayInfo.html), return `Option<Screen>`.
 - `screen.capture()`: capture screen screenshot [image](https://docs.rs/screenshots/latest/screenshots/struct.Image.html), return `Option<Image>`.
+
+### `Image`: Screen screenshot image
+
+- `Image::new(width, height, buffer)`: Get image from width、height and rgba buffer, return `Image`.
+- `Image::from_bgra(width, height, buffer)`: Get image from width、height and bgra buffer, return `Result<Image, EncodingError>`.
+- `image.width()`: Get image width, return `u32`.
+- `image.height()`: Get image height, return `u32`.
+- `image.buffer()`: Get image buffer, return `Vec<u8>`.

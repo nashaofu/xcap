@@ -41,7 +41,7 @@ pub fn xorg_capture_screen(screen: &Screen) -> Option<Image> {
       (width * height * 4) as usize,
     ));
 
-    match Image::from_bgr(width as u32, height as u32, bytes) {
+    match Image::from_bgra(width as u32, height as u32, bytes) {
       Ok(image) => Some(image),
       Err(_) => None,
     }
