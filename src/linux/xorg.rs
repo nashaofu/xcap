@@ -27,11 +27,11 @@ pub fn xorg_capture_screen(screen: &Screen) -> Option<Image> {
       ZPixmap,
     );
 
+    XCloseDisplay(display_ptr);
+
     if ximage.is_null() {
       return None;
     }
-
-    XCloseDisplay(display_ptr);
 
     let data = (*ximage).data;
     let width = (*ximage).width;
