@@ -15,7 +15,7 @@ fn main() {
   let screen = Screen::from_point(100, 100).unwrap();
   println!("capturer {:?}", screen);
 
-  let image = screen.capture_area(300, 300, 1680, 1680).unwrap();
+  let image = screen.capture_area(300, 300, 300, 300).unwrap();
   let buffer = image.buffer();
   fs::write("target/capture_display_with_point.png", &buffer).unwrap();
 

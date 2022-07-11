@@ -72,14 +72,14 @@ extern "system" fn monitor_enum_proc(
   }
 }
 
-pub fn capture_screen(screen: &Screen) -> Option<Image> {
+fn capture(screen: &Screen, x: i32, y: i32, width: u32, height: u32) -> Option<Image> {
   unsafe {
     let monitor_info_exw = get_monitor_info_exw_from_id(screen.id)?;
 
     let sz_device = monitor_info_exw.szDevice;
 
-    let width = (screen.width as f32 * screen.scale) as i32;
-    let height = (screen.height as f32 * screen.scale) as i32;
+    let w = (width as f32 * screen.scale) as i32;
+    let h = (height as f32 * screen.scale) as i32;
 
     let h_dc = CreateDCW(
       PCWSTR(sz_device.as_ptr()),
@@ -89,7 +89,7 @@ pub fn capture_screen(screen: &Screen) -> Option<Image> {
     );
 
     let compatible_dc = CreateCompatibleDC(h_dc);
-    let h_bitmap = CreateCompatibleBitmap(h_dc, width, height);
+    let h_bitmap = CreateCompatibleBitmap(h_dc, w, h);
 
     let release_data = |(h_dc, compatible_dc, h_bitmap): (CreatedHDC, CreatedHDC, HBITMAP)| {
       DeleteDC(h_dc);
@@ -100,19 +100,7 @@ pub fn capture_screen(screen: &Screen) -> Option<Image> {
     SelectObject(compatible_dc, h_bitmap);
     SetStretchBltMode(h_dc, STRETCH_HALFTONE);
 
-    let stretch_blt_result = StretchBlt(
-      compatible_dc,
-      0,
-      0,
-      width,
-      height,
-      h_dc,
-      0,
-      0,
-      width,
-      height,
-      SRCCOPY,
-    );
+    let stretch_blt_result = StretchBlt(compatible_dc, 0, 0, w, h, h_dc, x, y, w, h, SRCCOPY);
 
     if !stretch_blt_result.as_bool() {
       release_data((h_dc, compatible_dc, h_bitmap));
@@ -122,8 +110,8 @@ pub fn capture_screen(screen: &Screen) -> Option<Image> {
     let mut bitmap_info = BITMAPINFO {
       bmiHeader: BITMAPINFOHEADER {
         biSize: mem::size_of::<BITMAPINFOHEADER>() as u32,
-        biWidth: width,
-        biHeight: height, // 这里可以传递负数, 但是不知道为什么会报错
+        biWidth: w,
+        biHeight: h, // 这里可以传递负数, 但是不知道为什么会报错
         biPlanes: 1,
         biBitCount: 32,
         biCompression: 0,
@@ -136,14 +124,14 @@ pub fn capture_screen(screen: &Screen) -> Option<Image> {
       bmiColors: [RGBQUAD::default(); 1],
     };
 
-    let data = vec![0u8; (width * height) as usize * 4];
+    let data = vec![0u8; (w * h) as usize * 4];
     let buf_prt = data.as_ptr() as *mut _;
 
     if GetDIBits(
       compatible_dc,
       h_bitmap,
       0,
-      height as u32,
+      h as u32,
       buf_prt,
       &mut bitmap_info,
       DIB_RGB_COLORS,
@@ -160,10 +148,7 @@ pub fn capture_screen(screen: &Screen) -> Option<Image> {
     GetObjectW(h_bitmap, mem::size_of::<BITMAP>() as i32, bitmap_ptr);
 
     // 旋转图像,图像数据是倒置的
-    let mut chunks: Vec<Vec<u8>> = data
-      .chunks(width as usize * 4)
-      .map(|x| x.to_vec())
-      .collect();
+    let mut chunks: Vec<Vec<u8>> = data.chunks(w as usize * 4).map(|x| x.to_vec()).collect();
 
     chunks.reverse();
 
@@ -178,4 +163,19 @@ pub fn capture_screen(screen: &Screen) -> Option<Image> {
       Err(_) => None,
     }
   }
+}
+
+pub fn capture_screen(screen: &Screen) -> Option<Image> {
+  capture(screen, 0, 0, screen.width, screen.height)
+}
+
+pub fn capture_screen_area(
+  screen: &Screen,
+  x: i32,
+  y: i32,
+  width: u32,
+  height: u32,
+) -> Option<Image> {
+  println!("{} {} {} {}", x,y,width,height);
+  capture(screen, x, y, width, height)
 }
