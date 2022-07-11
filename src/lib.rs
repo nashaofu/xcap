@@ -65,7 +65,7 @@ impl Screen {
     let mut x1 = x;
     let mut y1 = y;
     let mut x2 = x1 + width as i32;
-    let mut y2 = x2 + height as i32;
+    let mut y2 = y1 + height as i32;
 
     // x y 必须在屏幕范围内
     if x1 < self.x {
