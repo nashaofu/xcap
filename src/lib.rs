@@ -58,12 +58,16 @@ impl Screen {
     capture_screen(&self)
   }
 
+  /**
+   * 截取指定区域
+   * 区域x,y为相对于当前屏幕的x,y坐标
+   */
   pub fn capture_area(&self, x: i32, y: i32, width: u32, height: u32) -> Option<Image> {
     let screen_x2 = self.x + self.width as i32;
     let screen_y2 = self.y + self.height as i32;
 
-    let mut x1 = x;
-    let mut y1 = y;
+    let mut x1 = x + self.x;
+    let mut y1 = y + self.y;
     let mut x2 = x1 + width as i32;
     let mut y2 = y1 + height as i32;
 
@@ -92,6 +96,12 @@ impl Screen {
       return None;
     }
 
-    capture_screen_area(&self, x1, y1, (x2 - x1) as u32, (y2 - y1) as u32)
+    capture_screen_area(
+      &self,
+      x1 - self.x,
+      y1 - self.y,
+      (x2 - x1) as u32,
+      (y2 - y1) as u32,
+    )
   }
 }
