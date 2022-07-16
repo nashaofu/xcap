@@ -15,10 +15,10 @@ fn screenshot(screen: &Screen) -> Result<String, dbus::Error> {
     Duration::from_secs(10),
   );
 
-  let x = ((screen.x as f32) * screen.scale) as i32;
-  let y = ((screen.y as f32) * screen.scale) as i32;
-  let width = ((screen.width as f32) * screen.scale) as i32;
-  let height = ((screen.height as f32) * screen.scale) as i32;
+  let x = ((screen.x as f32) * screen.scale_factor) as i32;
+  let y = ((screen.y as f32) * screen.scale_factor) as i32;
+  let width = ((screen.width as f32) * screen.scale_factor) as i32;
+  let height = ((screen.height as f32) * screen.scale_factor) as i32;
 
   let timestamp = match SystemTime::now().duration_since(UNIX_EPOCH) {
     Ok(duration) => duration.as_micros().to_string(),
@@ -56,8 +56,8 @@ pub fn wayland_capture_screen(screen: &Screen) -> Option<Image> {
     Err(_) => return None,
   };
 
-  let width = ((screen.width as f32) * screen.scale) as u32;
-  let height = ((screen.height as f32) * screen.scale) as u32;
+  let width = ((screen.width as f32) * screen.scale_factor) as u32;
+  let height = ((screen.height as f32) * screen.scale_factor) as u32;
 
   match read_image(filename) {
     Ok(buffer) => Some(Image::new(width, height, buffer)),

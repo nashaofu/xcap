@@ -25,8 +25,9 @@ pub struct Screen {
   pub y: i32,
   pub width: u32,
   pub height: u32,
-  pub scale: f32,
   pub rotation: f32,
+  pub scale_factor: f32,
+  pub is_primary: bool,
 }
 
 impl Screen {
@@ -37,8 +38,9 @@ impl Screen {
       y: display_info.y,
       width: display_info.width,
       height: display_info.height,
-      scale: display_info.scale,
       rotation: display_info.rotation,
+      scale_factor: display_info.scale_factor,
+      is_primary: display_info.is_primary,
     }
   }
 

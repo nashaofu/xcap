@@ -25,8 +25,8 @@ pub fn capture_screen_area(
   let cg_display = CGDisplay::new(screen.id);
   let full_cg_image = cg_display.image()?;
 
-  let w = width as f32 * screen.scale;
-  let h = height as f32 * screen.scale;
+  let w = width as f32 * screen.scale_factor;
+  let h = height as f32 * screen.scale_factor;
 
   let cg_rect = CGRect::new(
     &CGPoint::new(x as f64, y as f64),
