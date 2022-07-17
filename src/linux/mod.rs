@@ -5,7 +5,7 @@ use crate::Image;
 use crate::Screen;
 
 use std::env::var_os;
-use wayland::wayland_capture_screen;
+use wayland::{wayland_capture_screen, wayland_capture_screen_area};
 use xorg::{xorg_capture_screen, xorg_capture_screen_area};
 
 fn wayland_detect() -> bool {
@@ -38,7 +38,7 @@ pub fn capture_screen_area(
   height: u32,
 ) -> Option<Image> {
   if wayland_detect() {
-    wayland_capture_screen(&screen)
+    wayland_capture_screen_area(&screen, x, y, width, height)
   } else {
     xorg_capture_screen_area(&screen, x, y, width, height)
   }
