@@ -39,6 +39,7 @@ fn main() {
 - `Screen::all()`: Get all screen, return `Vec<Screen>`.
 - `Screen::from_point(x, y)`: Get screen from point, return `Option<Screen>`.
 - `screen.capture()`: capture screen screenshot [image](https://docs.rs/screenshots/latest/screenshots/struct.Image.html), return `Option<Image>`.
+- `screen.capture_area(x, y, width, height)`: Capture the current screen the designated area, return `Option<Image>`.
 
 ### `Image`: Screen screenshot image
 
