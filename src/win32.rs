@@ -72,9 +72,9 @@ extern "system" fn monitor_enum_proc(
   }
 }
 
-fn capture(screen_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<Image> {
+fn capture(screen: &Screen, x: i32, y: i32, width: i32, height: i32) -> Option<Image> {
   unsafe {
-    let monitor_info_exw = get_monitor_info_exw_from_id(screen_id)?;
+    let monitor_info_exw = get_monitor_info_exw_from_id(screen.id)?;
 
     let sz_device = monitor_info_exw.szDevice;
 
@@ -178,12 +178,10 @@ fn capture(screen_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<Im
 }
 
 pub fn capture_screen(screen: &Screen) -> Option<Image> {
-  let x = screen.x;
-  let y =  screen.y;
   let width = ((screen.width as f32) * screen.scale_factor) as i32;
   let height = ((screen.height as f32) * screen.scale_factor) as i32;
 
-  capture(screen.id, x, y, width, height)
+  capture(&screen, 0, 0, width, height)
 }
 
 pub fn capture_screen_area(
@@ -193,10 +191,10 @@ pub fn capture_screen_area(
   width: u32,
   height: u32,
 ) -> Option<Image> {
-  let area_x = ((x as f32) * screen.scale_factor) as i32  + screen.x;
-  let area_y = ((y as f32) * screen.scale_factor) as i32  + screen.y;
+  let area_x = ((x as f32) * screen.scale_factor) as i32;
+  let area_y = ((y as f32) * screen.scale_factor) as i32;
   let area_width = ((width as f32) * screen.scale_factor) as i32;
   let area_height = ((height as f32) * screen.scale_factor) as i32;
 
-  capture(screen.id, area_x, area_y, area_width, area_height)
+  capture(&screen, area_x, area_y, area_width, area_height)
 }
