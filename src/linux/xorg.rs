@@ -1,6 +1,10 @@
-use crate::{Image, Screen};
 use std::{ptr, slice};
-use x11::xlib::{XAllPlanes, XCloseDisplay, XDefaultRootWindow, XGetImage, XOpenDisplay, ZPixmap};
+
+use x11::xlib::{
+  XAllPlanes, XCloseDisplay, XDefaultRootWindow, XDestroyImage, XGetImage, XOpenDisplay, ZPixmap,
+};
+
+use crate::{Image, Screen};
 
 fn capture(x: i32, y: i32, width: u32, height: u32) -> Option<Image> {
   unsafe {
@@ -36,6 +40,8 @@ fn capture(x: i32, y: i32, width: u32, height: u32) -> Option<Image> {
       data as *mut u8,
       (width * height * 4) as usize,
     ));
+
+    XDestroyImage(ximage);
 
     match Image::from_bgra(width as u32, height as u32, bytes) {
       Ok(image) => Some(image),
