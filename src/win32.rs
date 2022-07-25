@@ -28,7 +28,7 @@ fn get_monitor_info_exw(h_monitor: HMONITOR) -> Option<MONITORINFOEXW> {
   }
 }
 
-fn get_monitor_info_exw_from_id<'a>(id: u32) -> Option<MONITORINFOEXW> {
+fn get_monitor_info_exw_from_id(id: u32) -> Option<MONITORINFOEXW> {
   unsafe {
     let monitor_info_exws = Box::into_raw(Box::new(Vec::<MONITORINFOEXW>::new()));
 
