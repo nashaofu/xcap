@@ -1,4 +1,4 @@
-use crate::{Image, Screen};
+use crate::{DisplayInfo, Image};
 use sfhash::digest;
 use std::{mem, ptr};
 use widestring::U16CString;
@@ -72,9 +72,9 @@ extern "system" fn monitor_enum_proc(
   }
 }
 
-fn capture(screen_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<Image> {
+fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<Image> {
   unsafe {
-    let monitor_info_exw = get_monitor_info_exw_from_id(screen_id)?;
+    let monitor_info_exw = get_monitor_info_exw_from_id(display_id)?;
 
     let sz_device = monitor_info_exw.szDevice;
 
@@ -166,35 +166,33 @@ fn capture(screen_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<Im
 
     release_data((h_dc, compatible_dc, h_bitmap));
 
-    match Image::from_bgra(
+    Image::from_bgra(
       bitmap.bmWidth as u32,
       bitmap.bmHeight as u32,
       chunks.concat(),
-    ) {
-      Ok(image) => Some(image),
-      Err(_) => None,
-    }
+    )
+    .ok()
   }
 }
 
-pub fn capture_screen(screen: &Screen) -> Option<Image> {
-  let width = ((screen.width as f32) * screen.scale_factor) as i32;
-  let height = ((screen.height as f32) * screen.scale_factor) as i32;
+pub fn capture_screen(display_info: &DisplayInfo) -> Option<Image> {
+  let width = ((display_info.width as f32) * display_info.scale_factor) as i32;
+  let height = ((display_info.height as f32) * display_info.scale_factor) as i32;
 
-  capture(screen.id, 0, 0, width, height)
+  capture(display_info.id, 0, 0, width, height)
 }
 
 pub fn capture_screen_area(
-  screen: &Screen,
+  display_info: &DisplayInfo,
   x: i32,
   y: i32,
   width: u32,
   height: u32,
 ) -> Option<Image> {
-  let area_x = ((x as f32) * screen.scale_factor) as i32;
-  let area_y = ((y as f32) * screen.scale_factor) as i32;
-  let area_width = ((width as f32) * screen.scale_factor) as i32;
-  let area_height = ((height as f32) * screen.scale_factor) as i32;
+  let area_x = ((x as f32) * display_info.scale_factor) as i32;
+  let area_y = ((y as f32) * display_info.scale_factor) as i32;
+  let area_width = ((width as f32) * display_info.scale_factor) as i32;
+  let area_height = ((height as f32) * display_info.scale_factor) as i32;
 
-  capture(screen.id, area_x, area_y, area_width, area_height)
+  capture(display_info.id, area_x, area_y, area_width, area_height)
 }
