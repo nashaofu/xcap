@@ -18,14 +18,14 @@ fn wayland_detect() -> bool {
     .to_string_lossy()
     .to_string();
 
-  return xdg_session_type.eq("wayland") || wayland_display.to_lowercase().contains("wayland");
+  xdg_session_type.eq("wayland") || wayland_display.to_lowercase().contains("wayland")
 }
 
 pub fn capture_screen(display_info: &DisplayInfo) -> Option<Image> {
   if wayland_detect() {
-    wayland_capture_screen(&display_info)
+    wayland_capture_screen(display_info)
   } else {
-    xorg_capture_screen(&display_info)
+    xorg_capture_screen(display_info)
   }
 }
 
@@ -37,8 +37,8 @@ pub fn capture_screen_area(
   height: u32,
 ) -> Option<Image> {
   if wayland_detect() {
-    wayland_capture_screen_area(&display_info, x, y, width, height)
+    wayland_capture_screen_area(display_info, x, y, width, height)
   } else {
-    xorg_capture_screen_area(&display_info, x, y, width, height)
+    xorg_capture_screen_area(display_info, x, y, width, height)
   }
 }

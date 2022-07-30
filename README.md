@@ -52,3 +52,19 @@ fn main() {
 - `image.width()`: Get image width, return `u32`.
 - `image.height()`: Get image height, return `u32`.
 - `image.buffer()`: Get image buffer, return `Vec<u8>`.
+
+## Linux requirements
+
+On Linux, you need to install `libxcb1`、`libxrandr`、`dbus`
+
+Debian/Ubuntu:
+
+```sh
+apt-get install libxcb1 libxrandr2 libdbus-1-3
+```
+
+Alpine:
+
+```sh
+apk add libxcb1 libxrandr dbus
+```
