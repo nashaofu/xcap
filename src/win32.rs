@@ -1,6 +1,6 @@
 use crate::{DisplayInfo, Image};
 use sfhash::digest;
-use std::{mem, ptr};
+use std::{mem, ops::Deref, ptr};
 use widestring::U16CString;
 use windows::{
   core::PCWSTR,
@@ -72,38 +72,86 @@ extern "system" fn monitor_enum_proc(
   }
 }
 
+struct CreatedHDCBox {
+  h_dc: CreatedHDC,
+  compatible_dc: CreatedHDC,
+}
+
+impl Drop for CreatedHDCBox {
+  fn drop(&mut self) {
+    unsafe {
+      DeleteDC(self.h_dc);
+      DeleteDC(self.compatible_dc);
+    };
+  }
+}
+
+impl CreatedHDCBox {
+  fn new(sz_device: *const u16) -> Self {
+    let h_dc = unsafe {
+      CreateDCW(
+        PCWSTR(sz_device),
+        PCWSTR(sz_device),
+        PCWSTR(ptr::null()),
+        ptr::null(),
+      )
+    };
+
+    let compatible_dc = unsafe { CreateCompatibleDC(h_dc) };
+
+    CreatedHDCBox {
+      h_dc,
+      compatible_dc,
+    }
+  }
+}
+
+struct HBITMAPBox(HBITMAP);
+
+impl Deref for HBITMAPBox {
+  type Target = HBITMAP;
+
+  fn deref(&self) -> &Self::Target {
+    &self.0
+  }
+}
+
+impl Drop for HBITMAPBox {
+  fn drop(&mut self) {
+    unsafe {
+      DeleteObject(self.0);
+    };
+  }
+}
+
+impl HBITMAPBox {
+  fn new(h_dc: CreatedHDC, width: i32, height: i32) -> Self {
+    let h_bitmap = unsafe { CreateCompatibleBitmap(h_dc, width, height) };
+
+    HBITMAPBox(h_bitmap)
+  }
+}
+
 fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<Image> {
   unsafe {
     let monitor_info_exw = get_monitor_info_exw_from_id(display_id)?;
 
     let sz_device = monitor_info_exw.szDevice;
 
-    let h_dc = CreateDCW(
-      PCWSTR(sz_device.as_ptr()),
-      PCWSTR(sz_device.as_ptr()),
-      PCWSTR(ptr::null()),
-      ptr::null(),
-    );
+    let created_hdc_box = CreatedHDCBox::new(sz_device.as_ptr());
 
-    let compatible_dc = CreateCompatibleDC(h_dc);
-    let h_bitmap = CreateCompatibleBitmap(h_dc, width, height);
+    let h_bitmap_box = HBITMAPBox::new(created_hdc_box.h_dc, width, height);
 
-    let release_data = |(h_dc, compatible_dc, h_bitmap): (CreatedHDC, CreatedHDC, HBITMAP)| {
-      DeleteDC(h_dc);
-      DeleteDC(compatible_dc);
-      DeleteObject(h_bitmap);
-    };
-
-    SelectObject(compatible_dc, h_bitmap);
-    SetStretchBltMode(h_dc, STRETCH_HALFTONE);
+    SelectObject(created_hdc_box.compatible_dc, *h_bitmap_box);
+    SetStretchBltMode(created_hdc_box.h_dc, STRETCH_HALFTONE);
 
     let stretch_blt_result = StretchBlt(
-      compatible_dc,
+      created_hdc_box.compatible_dc,
       0,
       0,
       width,
       height,
-      h_dc,
+      created_hdc_box.h_dc,
       x,
       y,
       width,
@@ -112,7 +160,6 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<I
     );
 
     if !stretch_blt_result.as_bool() {
-      release_data((h_dc, compatible_dc, h_bitmap));
       return None;
     }
 
@@ -137,8 +184,8 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<I
     let buf_prt = data.as_ptr() as *mut _;
 
     if GetDIBits(
-      compatible_dc,
-      h_bitmap,
+      created_hdc_box.compatible_dc,
+      *h_bitmap_box,
       0,
       height as u32,
       buf_prt,
@@ -146,7 +193,6 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<I
       DIB_RGB_COLORS,
     ) == 0
     {
-      release_data((h_dc, compatible_dc, h_bitmap));
       return None;
     }
 
@@ -154,7 +200,7 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<I
     let bitmap_ptr = <*mut _>::cast(&mut bitmap);
 
     // Get the BITMAP from the HBITMAP.
-    GetObjectW(h_bitmap, mem::size_of::<BITMAP>() as i32, bitmap_ptr);
+    GetObjectW(*h_bitmap_box, mem::size_of::<BITMAP>() as i32, bitmap_ptr);
 
     // 旋转图像,图像数据是倒置的
     let mut chunks: Vec<Vec<u8>> = data
@@ -163,8 +209,6 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<I
       .collect();
 
     chunks.reverse();
-
-    release_data((h_dc, compatible_dc, h_bitmap));
 
     Image::from_bgra(
       bitmap.bmWidth as u32,
