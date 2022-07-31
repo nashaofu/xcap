@@ -1,9 +1,9 @@
-use crate::{Image, Screen};
+use crate::{DisplayInfo, Image};
 use sfhash::digest;
-use std::{mem, ptr};
+use std::{mem, ops::Deref, ptr};
 use widestring::U16CString;
 use windows::{
-  core::PCWSTR,
+  core::{Error, PCWSTR},
   Win32::{
     Foundation::{BOOL, LPARAM, RECT},
     Graphics::Gdi::{
@@ -15,42 +15,61 @@ use windows::{
   },
 };
 
-fn get_monitor_info_exw(h_monitor: HMONITOR) -> Option<MONITORINFOEXW> {
-  unsafe {
-    let mut monitor_info_exw: MONITORINFOEXW = mem::zeroed();
-    monitor_info_exw.monitorInfo.cbSize = mem::size_of::<MONITORINFOEXW>() as u32;
-    let monitor_info_exw_ptr = <*mut _>::cast(&mut monitor_info_exw);
+// 自动释放资源
+macro_rules! drop_box {
+  ($type:tt, $value:expr, $drop:expr) => {{
+    struct DropBox($type);
 
-    match GetMonitorInfoW(h_monitor, monitor_info_exw_ptr) {
-      BOOL(0) => None,
-      _ => Some(monitor_info_exw),
+    impl Deref for DropBox {
+      type Target = $type;
+
+      fn deref(&self) -> &Self::Target {
+        &self.0
+      }
     }
-  }
+
+    impl Drop for DropBox {
+      fn drop(&mut self) {
+        $drop(self.0);
+      }
+    }
+
+    DropBox($value)
+  }};
 }
 
-fn get_monitor_info_exw_from_id<'a>(id: u32) -> Option<MONITORINFOEXW> {
-  unsafe {
-    let monitor_info_exws = Box::into_raw(Box::new(Vec::<MONITORINFOEXW>::new()));
+fn get_monitor_info_exw(h_monitor: HMONITOR) -> Result<MONITORINFOEXW, Error> {
+  let mut monitor_info_exw: MONITORINFOEXW = unsafe { mem::zeroed() };
+  monitor_info_exw.monitorInfo.cbSize = mem::size_of::<MONITORINFOEXW>() as u32;
+  let monitor_info_exw_ptr = <*mut _>::cast(&mut monitor_info_exw);
 
-    match EnumDisplayMonitors(
+  unsafe { GetMonitorInfoW(h_monitor, monitor_info_exw_ptr).ok()? };
+  Ok(monitor_info_exw)
+}
+
+fn get_monitor_info_exw_from_id(id: u32) -> Option<MONITORINFOEXW> {
+  let monitor_info_exws = Box::into_raw(Box::new(Vec::<MONITORINFOEXW>::new()));
+
+  unsafe {
+    EnumDisplayMonitors(
       HDC::default(),
       ptr::null_mut(),
       Some(monitor_enum_proc),
       LPARAM(monitor_info_exws as isize),
-    ) {
-      BOOL(0) => None,
-      _ => {
-        let monitor_info_exws_borrow = &Box::from_raw(monitor_info_exws);
-        let monitor_info_exw = monitor_info_exws_borrow.iter().find(|&&monitor_info_exw| {
-          let sz_device_ptr = monitor_info_exw.szDevice.as_ptr();
-          let sz_device_string = U16CString::from_ptr_str(sz_device_ptr).to_string_lossy();
-          digest(sz_device_string.as_bytes()) == id
-        })?;
+    )
+    .ok()
+    .ok()?
+  };
 
-        Some(*monitor_info_exw)
-      }
-    }
-  }
+  let monitor_info_exws_borrow = unsafe { &Box::from_raw(monitor_info_exws) };
+
+  let monitor_info_exw = monitor_info_exws_borrow.iter().find(|&&monitor_info_exw| {
+    let sz_device_ptr = monitor_info_exw.szDevice.as_ptr();
+    let sz_device_string = unsafe { U16CString::from_ptr_str(sz_device_ptr).to_string_lossy() };
+    digest(sz_device_string.as_bytes()) == id
+  })?;
+
+  Some(*monitor_info_exw)
 }
 
 extern "system" fn monitor_enum_proc(
@@ -59,142 +78,154 @@ extern "system" fn monitor_enum_proc(
   _: *mut RECT,
   state: LPARAM,
 ) -> BOOL {
-  unsafe {
-    let state = Box::leak(Box::from_raw(state.0 as *mut Vec<MONITORINFOEXW>));
+  let box_monitor_info_exw = unsafe { Box::from_raw(state.0 as *mut Vec<MONITORINFOEXW>) };
+  let state = Box::leak(box_monitor_info_exw);
 
-    match get_monitor_info_exw(h_monitor) {
-      Some(monitor_info_exw) => {
-        state.push(monitor_info_exw);
-        BOOL::from(true)
-      }
-      None => BOOL::from(false),
+  match get_monitor_info_exw(h_monitor) {
+    Ok(monitor_info_exw) => {
+      state.push(monitor_info_exw);
+      BOOL::from(true)
     }
+    Err(_) => BOOL::from(false),
   }
 }
 
-fn capture(screen_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<Image> {
+fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<Image> {
+  let monitor_info_exw = get_monitor_info_exw_from_id(display_id)?;
+
+  let sz_device = monitor_info_exw.szDevice;
+  let sz_device_ptr = sz_device.as_ptr();
+
+  let dcw_drop_box = drop_box!(
+    CreatedHDC,
+    unsafe {
+      CreateDCW(
+        PCWSTR(sz_device_ptr),
+        PCWSTR(sz_device_ptr),
+        PCWSTR(ptr::null()),
+        ptr::null(),
+      )
+    },
+    |dcw| unsafe { DeleteDC(dcw) }
+  );
+
+  let compatible_dc_drop_box = drop_box!(
+    CreatedHDC,
+    unsafe { CreateCompatibleDC(*dcw_drop_box) },
+    |compatible_dc| unsafe { DeleteDC(compatible_dc) }
+  );
+
+  let h_bitmap_drop_box = drop_box!(
+    HBITMAP,
+    unsafe { CreateCompatibleBitmap(*dcw_drop_box, width, height) },
+    |h_bitmap| unsafe { DeleteObject(h_bitmap) }
+  );
+
   unsafe {
-    let monitor_info_exw = get_monitor_info_exw_from_id(screen_id)?;
+    SelectObject(*compatible_dc_drop_box, *h_bitmap_drop_box);
+    SetStretchBltMode(*dcw_drop_box, STRETCH_HALFTONE);
+  };
 
-    let sz_device = monitor_info_exw.szDevice;
-
-    let h_dc = CreateDCW(
-      PCWSTR(sz_device.as_ptr()),
-      PCWSTR(sz_device.as_ptr()),
-      PCWSTR(ptr::null()),
-      ptr::null(),
-    );
-
-    let compatible_dc = CreateCompatibleDC(h_dc);
-    let h_bitmap = CreateCompatibleBitmap(h_dc, width, height);
-
-    let release_data = |(h_dc, compatible_dc, h_bitmap): (CreatedHDC, CreatedHDC, HBITMAP)| {
-      DeleteDC(h_dc);
-      DeleteDC(compatible_dc);
-      DeleteObject(h_bitmap);
-    };
-
-    SelectObject(compatible_dc, h_bitmap);
-    SetStretchBltMode(h_dc, STRETCH_HALFTONE);
-
-    let stretch_blt_result = StretchBlt(
-      compatible_dc,
+  unsafe {
+    StretchBlt(
+      *compatible_dc_drop_box,
       0,
       0,
       width,
       height,
-      h_dc,
+      *dcw_drop_box,
       x,
       y,
       width,
       height,
       SRCCOPY,
-    );
+    )
+    .ok()
+    .ok()?
+  };
 
-    if !stretch_blt_result.as_bool() {
-      release_data((h_dc, compatible_dc, h_bitmap));
-      return None;
-    }
+  let mut bitmap_info = BITMAPINFO {
+    bmiHeader: BITMAPINFOHEADER {
+      biSize: mem::size_of::<BITMAPINFOHEADER>() as u32,
+      biWidth: width,
+      biHeight: height, // 这里可以传递负数, 但是不知道为什么会报错
+      biPlanes: 1,
+      biBitCount: 32,
+      biCompression: 0,
+      biSizeImage: 0,
+      biXPelsPerMeter: 0,
+      biYPelsPerMeter: 0,
+      biClrUsed: 0,
+      biClrImportant: 0,
+    },
+    bmiColors: [RGBQUAD::default(); 1],
+  };
 
-    let mut bitmap_info = BITMAPINFO {
-      bmiHeader: BITMAPINFOHEADER {
-        biSize: mem::size_of::<BITMAPINFOHEADER>() as u32,
-        biWidth: width,
-        biHeight: height, // 这里可以传递负数, 但是不知道为什么会报错
-        biPlanes: 1,
-        biBitCount: 32,
-        biCompression: 0,
-        biSizeImage: 0,
-        biXPelsPerMeter: 0,
-        biYPelsPerMeter: 0,
-        biClrUsed: 0,
-        biClrImportant: 0,
-      },
-      bmiColors: [RGBQUAD::default(); 1],
-    };
+  let data = vec![0u8; (width * height) as usize * 4];
+  let buf_prt = data.as_ptr() as *mut _;
 
-    let data = vec![0u8; (width * height) as usize * 4];
-    let buf_prt = data.as_ptr() as *mut _;
-
-    if GetDIBits(
-      compatible_dc,
-      h_bitmap,
+  let is_success = unsafe {
+    GetDIBits(
+      *compatible_dc_drop_box,
+      *h_bitmap_drop_box,
       0,
       height as u32,
       buf_prt,
       &mut bitmap_info,
       DIB_RGB_COLORS,
     ) == 0
-    {
-      release_data((h_dc, compatible_dc, h_bitmap));
-      return None;
-    }
+  };
 
-    let mut bitmap = BITMAP::default();
-    let bitmap_ptr = <*mut _>::cast(&mut bitmap);
-
-    // Get the BITMAP from the HBITMAP.
-    GetObjectW(h_bitmap, mem::size_of::<BITMAP>() as i32, bitmap_ptr);
-
-    // 旋转图像,图像数据是倒置的
-    let mut chunks: Vec<Vec<u8>> = data
-      .chunks(width as usize * 4)
-      .map(|x| x.to_vec())
-      .collect();
-
-    chunks.reverse();
-
-    release_data((h_dc, compatible_dc, h_bitmap));
-
-    match Image::from_bgra(
-      bitmap.bmWidth as u32,
-      bitmap.bmHeight as u32,
-      chunks.concat(),
-    ) {
-      Ok(image) => Some(image),
-      Err(_) => None,
-    }
+  if is_success {
+    return None;
   }
+
+  let mut bitmap = BITMAP::default();
+  let bitmap_ptr = <*mut _>::cast(&mut bitmap);
+
+  unsafe {
+    // Get the BITMAP from the HBITMAP.
+    GetObjectW(
+      *h_bitmap_drop_box,
+      mem::size_of::<BITMAP>() as i32,
+      bitmap_ptr,
+    );
+  }
+
+  // 旋转图像,图像数据是倒置的
+  let mut chunks: Vec<Vec<u8>> = data
+    .chunks(width as usize * 4)
+    .map(|x| x.to_vec())
+    .collect();
+
+  chunks.reverse();
+
+  Image::from_bgra(
+    bitmap.bmWidth as u32,
+    bitmap.bmHeight as u32,
+    chunks.concat(),
+  )
+  .ok()
 }
 
-pub fn capture_screen(screen: &Screen) -> Option<Image> {
-  let width = ((screen.width as f32) * screen.scale_factor) as i32;
-  let height = ((screen.height as f32) * screen.scale_factor) as i32;
+pub fn capture_screen(display_info: &DisplayInfo) -> Option<Image> {
+  let width = ((display_info.width as f32) * display_info.scale_factor) as i32;
+  let height = ((display_info.height as f32) * display_info.scale_factor) as i32;
 
-  capture(screen.id, 0, 0, width, height)
+  capture(display_info.id, 0, 0, width, height)
 }
 
 pub fn capture_screen_area(
-  screen: &Screen,
+  display_info: &DisplayInfo,
   x: i32,
   y: i32,
   width: u32,
   height: u32,
 ) -> Option<Image> {
-  let area_x = ((x as f32) * screen.scale_factor) as i32;
-  let area_y = ((y as f32) * screen.scale_factor) as i32;
-  let area_width = ((width as f32) * screen.scale_factor) as i32;
-  let area_height = ((height as f32) * screen.scale_factor) as i32;
+  let area_x = ((x as f32) * display_info.scale_factor) as i32;
+  let area_y = ((y as f32) * display_info.scale_factor) as i32;
+  let area_width = ((width as f32) * display_info.scale_factor) as i32;
+  let area_height = ((height as f32) * display_info.scale_factor) as i32;
 
-  capture(screen.id, area_x, area_y, area_width, area_height)
+  capture(display_info.id, area_x, area_y, area_width, area_height)
 }

@@ -17,7 +17,7 @@ impl Image {
 
   pub fn from_bgra(width: u32, height: u32, bgra: Vec<u8>) -> Result<Self, EncodingError> {
     let mut buffer = Vec::new();
-    let mut bytes = bgra.clone();
+    let mut bytes = bgra;
 
     // BGRA 转换为 RGBA
     for i in (0..bytes.len()).step_by(4) {

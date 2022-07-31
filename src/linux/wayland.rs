@@ -1,4 +1,4 @@
-use crate::{Image, Screen};
+use crate::{DisplayInfo, Image};
 use dbus::{self, blocking::Connection};
 use std::{
   env::temp_dir,
@@ -45,42 +45,32 @@ fn read_image(filename: String) -> Result<Vec<u8>, io::Error> {
   Ok(buffer)
 }
 
-pub fn wayland_capture_screen(screen: &Screen) -> Option<Image> {
-  let x = ((screen.x as f32) * screen.scale_factor) as i32;
-  let y = ((screen.y as f32) * screen.scale_factor) as i32;
-  let width = (screen.width as f32) * screen.scale_factor;
-  let height = (screen.height as f32) * screen.scale_factor;
+pub fn wayland_capture_screen(display_info: &DisplayInfo) -> Option<Image> {
+  let x = ((display_info.x as f32) * display_info.scale_factor) as i32;
+  let y = ((display_info.y as f32) * display_info.scale_factor) as i32;
+  let width = (display_info.width as f32) * display_info.scale_factor;
+  let height = (display_info.height as f32) * display_info.scale_factor;
 
-  let filename = match screenshot(x, y, width as i32, height as i32) {
-    Ok(file) => file,
-    Err(_) => return None,
-  };
+  let filename = screenshot(x, y, width as i32, height as i32).ok()?;
+  let buffer = read_image(filename).ok()?;
 
-  match read_image(filename) {
-    Ok(buffer) => Some(Image::new(width as u32, height as u32, buffer)),
-    Err(_) => None,
-  }
+  Some(Image::new(width as u32, height as u32, buffer))
 }
 
 pub fn wayland_capture_screen_area(
-  screen: &Screen,
+  display_info: &DisplayInfo,
   x: i32,
   y: i32,
   width: u32,
   height: u32,
 ) -> Option<Image> {
-  let area_x = (((x + screen.x) as f32) * screen.scale_factor) as i32;
-  let area_y = (((y + screen.y) as f32) * screen.scale_factor) as i32;
-  let area_width = (width as f32) * screen.scale_factor;
-  let area_height = (height as f32) * screen.scale_factor;
+  let area_x = (((x + display_info.x) as f32) * display_info.scale_factor) as i32;
+  let area_y = (((y + display_info.y) as f32) * display_info.scale_factor) as i32;
+  let area_width = (width as f32) * display_info.scale_factor;
+  let area_height = (height as f32) * display_info.scale_factor;
 
-  let filename = match screenshot(area_x, area_y, area_width as i32, area_height as i32) {
-    Ok(file) => file,
-    Err(_) => return None,
-  };
+  let filename = screenshot(area_x, area_y, area_width as i32, area_height as i32).ok()?;
+  let buffer = read_image(filename).ok()?;
 
-  match read_image(filename) {
-    Ok(buffer) => Some(Image::new(width as u32, height as u32, buffer)),
-    Err(_) => None,
-  }
+  Some(Image::new(width as u32, height as u32, buffer))
 }
