@@ -55,7 +55,7 @@ fn main() {
 
 ## Linux requirements
 
-On Linux, you need to install `libxcb1`、`libxrandr`、`dbus`
+On Linux, you need to install `libxcb`、`libxrandr`、`dbus`
 
 Debian/Ubuntu:
 
@@ -66,5 +66,5 @@ apt-get install libxcb1 libxrandr2 libdbus-1-3
 Alpine:
 
 ```sh
-apk add libxcb1 libxrandr dbus
+apk add libxcb libxrandr dbus
 ```
