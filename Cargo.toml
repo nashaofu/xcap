@@ -1,6 +1,6 @@
 [package]
 name = "screenshots"
-version = "0.4.2"
+version = "0.4.3"
 edition = "2021"
 description = "A cross-platform screen capturer library"
 license = "Apache-2.0"
@@ -12,7 +12,7 @@ keywords = ["screenshots", "screenshot", "screen", "capture"]
 
 [dependencies]
 png = "0.17.5"
-display-info = "0.3.1"
+display-info = "0.3.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.22.3"
