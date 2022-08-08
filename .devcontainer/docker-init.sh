@@ -12,6 +12,7 @@ startInBackgroundIfNotRunning() {
     if ! pidof $1 >/dev/null; then
         $@ &
         while ! pidof $1 >/dev/null; do
+            echo "Waiting $1 start"
             sleep 1
         done
         echo "$1 started."
@@ -20,7 +21,7 @@ startInBackgroundIfNotRunning() {
     fi
 }
 
-startInBackgroundIfNotRunning fluxbox
 startInBackgroundIfNotRunning Xvfb ${DISPLAY} -screen 0 ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT}x24 -dpi 96 -listen tcp -ac
-startInBackgroundIfNotRunning x11vnc -display ${DISPLAY} -rfbport ${VNC_PORT} -forever
+startInBackgroundIfNotRunning fluxbox -display ${DISPLAY}
+startInBackgroundIfNotRunning x11vnc -display ${DISPLAY} -ncache 10 -rfbport ${VNC_PORT} -forever
 startInBackgroundIfNotRunning websockify --web /usr/share/novnc ${NOVNC_PORT} localhost:${VNC_PORT}
