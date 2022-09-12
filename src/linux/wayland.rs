@@ -51,7 +51,14 @@ pub fn wayland_capture_screen(display_info: &DisplayInfo) -> Option<Image> {
   let width = (display_info.width as f32) * display_info.scale_factor;
   let height = (display_info.height as f32) * display_info.scale_factor;
 
-  let filename = screenshot(x, y, width as i32, height as i32).ok()?;
+  let filename = match screenshot(x, y, width as i32, height as i32) {
+    Ok(filename) => filename,
+    Err(err) => {
+      println!("screenshot error {:?}", err);
+      return None;
+    }
+  };
+
   let buffer = read_image(filename).ok()?;
 
   Some(Image::new(width as u32, height as u32, buffer))
