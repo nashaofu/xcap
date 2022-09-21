@@ -1,4 +1,5 @@
 mod wayland;
+mod wayland_screenshot;
 mod xorg;
 
 use crate::{DisplayInfo, Image};
