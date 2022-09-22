@@ -35,6 +35,16 @@ fn main() {
 
 ```
 
+## Wayland
+
+[Wayland doesn’t support third-party screenshots/capture](https://drewdevault.com/2019/02/10/Wayland-misconceptions-debunked.html), I refer to other screenshots or screen recording programs and implement the screenshot in the same way. However, there is a defect. Every time you take a screenshot, a system screenshot prompt will pop up, and you need to click share to complete the screenshot.
+
+![screenshot](https://user-images.githubusercontent.com/19303058/191504323-a2d638ee-3612-4692-a72c-5189c58bcdf2.png)
+
+screenshot prompt pop-up conditions: Wayland desktop environment and cannot call `org.gnome.Shell.Screenshot` failed.
+
+issue: https://github.com/nashaofu/screenshots-rs/issues/18
+
 ## API
 
 ### `Screen`: Screen capturer
