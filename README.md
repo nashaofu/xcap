@@ -12,15 +12,15 @@ fn main() {
   let start = Instant::now();
   let screens = Screen::all();
 
-  for screen in screens {
+  for screen in screens.unwrap() {
     println!("capturer {:?}", screen);
     let mut image = screen.capture().unwrap();
     let mut buffer = image.buffer();
-    fs::write(format!("target/{}.png", screen.id.to_string()), &buffer).unwrap();
+    fs::write(format!("target/{}.png", screen.display_info.id.to_string()), &buffer).unwrap();
 
     image = screen.capture_area(300, 300, 300, 300).unwrap();
     buffer = image.buffer();
-    fs::write(format!("target/{}-2.png", screen.id.to_string()), &buffer).unwrap();
+    fs::write(format!("target/{}-2.png", screen.display_info.id.to_string()), &buffer).unwrap();
   }
 
   let screen = Screen::from_point(100, 100).unwrap();
