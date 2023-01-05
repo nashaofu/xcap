@@ -68,3 +68,9 @@ Alpine:
 ```sh
 apk add libxcb libxrandr dbus
 ```
+
+Arch:
+
+```sh
+pacman -Syu libxcb libxrandr
+```
