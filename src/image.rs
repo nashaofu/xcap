@@ -53,3 +53,9 @@ impl Image {
     &self.buffer
   }
 }
+
+impl Into<Vec<u8>> for Image {
+  fn into(self) -> Vec<u8> {
+      self.buffer
+  }
+}
