@@ -1,3 +1,4 @@
+use anyhow::{anyhow, Result};
 use dbus::{
   arg::{AppendAll, Iter, IterAppend, PropMap, ReadAll, RefArg, TypeMismatchError, Variant},
   blocking::Connection,
@@ -7,8 +8,6 @@ use png::{BitDepth, ColorType, Decoder, Encoder};
 use std::{
   collections::HashMap,
   env::temp_dir,
-  error::Error,
-  fmt,
   fs::{self, File},
   sync::{Arc, Mutex},
   time::{Duration, SystemTime, UNIX_EPOCH},
@@ -41,38 +40,13 @@ impl SignalArgs for OrgFreedesktopPortalRequestResponse {
   const INTERFACE: &'static str = "org.freedesktop.portal.Request";
 }
 
-#[derive(Debug)]
-struct WaylandScreenshotsError {
-  message: String,
-}
-
-impl fmt::Display for WaylandScreenshotsError {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(f, "OrgFreedesktopPortalError {}", self.message)
-  }
-}
-
-impl WaylandScreenshotsError {
-  fn new(message: &str) -> Self {
-    WaylandScreenshotsError {
-      message: message.to_string(),
-    }
-  }
-}
-
-impl Error for WaylandScreenshotsError {
-  fn source(&self) -> Option<&(dyn Error + 'static)> {
-    None
-  }
-}
-
 fn org_gnome_shell_screenshot(
   conn: &Connection,
   x: i32,
   y: i32,
   width: i32,
   height: i32,
-) -> Result<Vec<u8>, Box<dyn Error>> {
+) -> Result<Vec<u8>> {
   let proxy = conn.with_proxy(
     "org.gnome.Shell.Screenshot",
     "/org/gnome/Shell/Screenshot",
@@ -108,7 +82,7 @@ fn org_freedesktop_portal_screenshot(
   y: i32,
   width: i32,
   height: i32,
-) -> Result<Vec<u8>, Box<dyn Error>> {
+) -> Result<Vec<u8>> {
   let status: Arc<Mutex<Option<u32>>> = Arc::new(Mutex::new(None));
   let status_res = status.clone();
   let path: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
@@ -156,7 +130,7 @@ fn org_freedesktop_portal_screenshot(
     let result = conn.process(Duration::from_millis(1000))?;
     let status = status_res
       .lock()
-      .map_err(|_| WaylandScreenshotsError::new("Get status lock failed"))?;
+      .map_err(|_| anyhow!("Get status lock failed"))?;
 
     if result && status.is_some() {
       break;
@@ -165,21 +139,19 @@ fn org_freedesktop_portal_screenshot(
 
   let status = status_res
     .lock()
-    .map_err(|_| WaylandScreenshotsError::new("Get status lock failed"))?;
+    .map_err(|_| anyhow!("Get status lock failed"))?;
   let status = *status;
 
   let path = path_res
     .lock()
-    .map_err(|_| WaylandScreenshotsError::new("Get path lock failed"))?;
+    .map_err(|_| anyhow!("Get path lock failed"))?;
   let path = &*path;
 
   if status.ne(&Some(0)) || path.is_empty() {
     if !path.is_empty() {
       fs::remove_file(path)?;
     }
-    return Err(Box::new(WaylandScreenshotsError::new(
-      "Screenshot failed or canceled",
-    )));
+    return Err(anyhow!("Screenshot failed or canceled",));
   }
 
   let decoder = Decoder::new(File::open(path)?);
@@ -201,10 +173,10 @@ fn org_freedesktop_portal_screenshot(
       let index = (((r - y) * width + (c - x)) * 4) as usize;
       let i = ((r * info.width as i32 + c) * 4) as usize;
       // 防止获取到的图片尺寸小于指定大小而 panic
-      rgba[index] = bytes.get(i).unwrap_or(0);
-      rgba[index + 1] = bytes.get(i + 1).unwrap_or(0);
-      rgba[index + 2] = bytes.get(i + 2).unwrap_or(0);
-      rgba[index + 3] = bytes.get(i + 3).unwrap_or(0);
+      rgba[index] = bytes.get(i).copied().unwrap_or(0);
+      rgba[index + 1] = bytes.get(i + 1).copied().unwrap_or(0);
+      rgba[index + 2] = bytes.get(i + 2).copied().unwrap_or(0);
+      rgba[index + 3] = bytes.get(i + 3).copied().unwrap_or(0);
     }
   }
 
@@ -222,10 +194,9 @@ fn org_freedesktop_portal_screenshot(
 }
 
 // TODO: 失败后尝试删除文件
-pub fn wayland_screenshot(x: i32, y: i32, width: i32, height: i32) -> Option<Vec<u8>> {
-  let conn = Connection::new_session().ok()?;
+pub fn wayland_screenshot(x: i32, y: i32, width: i32, height: i32) -> Result<Vec<u8>> {
+  let conn = Connection::new_session()?;
 
   org_gnome_shell_screenshot(&conn, x, y, width, height)
     .or_else(|_| org_freedesktop_portal_screenshot(&conn, x, y, width, height))
-    .ok()
 }

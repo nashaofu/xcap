@@ -39,11 +39,11 @@ fn main() {
 
 ### `Screen`: Screen capturer
 
-- `Screen::new(display_info)`: Get screen from [display info](https://docs.rs/display-info/latest/display_info/struct.DisplayInfo.html), return `Option<Screen>`.
-- `Screen::all()`: Get all screen, return `Vec<Screen>`.
-- `Screen::from_point(x, y)`: Get screen from point, return `Option<Screen>`.
-- `screen.capture()`: capture screen screenshot [image](https://docs.rs/screenshots/latest/screenshots/struct.Image.html), return `Option<Image>`.
-- `screen.capture_area(x, y, width, height)`: Capture the current screen the designated area, return `Option<Image>`.
+- `Screen::new(display_info)`: Get screen from [display info](https://docs.rs/display-info/latest/display_info/struct.DisplayInfo.html), return `Screen`.
+- `Screen::all()`: Get all screen, return `Result<Vec<Screen>>`.
+- `Screen::from_point(x, y)`: Get screen from point, return `Result<Screen>`.
+- `screen.capture()`: capture screen screenshot [image](https://docs.rs/screenshots/latest/screenshots/struct.Image.html), return `Result<Image>`.
+- `screen.capture_area(x, y, width, height)`: Capture the current screen the designated area, return `Result<Image>`.
 
 ### `Image`: Screen screenshot image
 

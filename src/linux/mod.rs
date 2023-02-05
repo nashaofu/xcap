@@ -3,6 +3,7 @@ mod wayland_screenshot;
 mod xorg;
 
 use crate::{DisplayInfo, Image};
+use anyhow::Result;
 
 use std::env::var_os;
 use wayland::{wayland_capture_screen, wayland_capture_screen_area};
@@ -22,7 +23,7 @@ fn wayland_detect() -> bool {
   xdg_session_type.eq("wayland") || wayland_display.to_lowercase().contains("wayland")
 }
 
-pub fn capture_screen(display_info: &DisplayInfo) -> Option<Image> {
+pub fn capture_screen(display_info: &DisplayInfo) -> Result<Image> {
   if wayland_detect() {
     wayland_capture_screen(display_info)
   } else {
@@ -36,7 +37,7 @@ pub fn capture_screen_area(
   y: i32,
   width: u32,
   height: u32,
-) -> Option<Image> {
+) -> Result<Image> {
   if wayland_detect() {
     wayland_capture_screen_area(display_info, x, y, width, height)
   } else {
