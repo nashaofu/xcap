@@ -1,16 +1,20 @@
 use crate::{DisplayInfo, Image};
+use anyhow::{anyhow, Result};
 use core_graphics::display::CGDisplay;
 
-pub fn capture_screen(display_info: &DisplayInfo) -> Option<Image> {
+pub fn capture_screen(display_info: &DisplayInfo) -> Result<Image> {
   let cg_display = CGDisplay::new(display_info.id);
-  let cg_image = cg_display.image()?;
+  let cg_image = cg_display
+    .image()
+    .ok_or_else(|| anyhow!("capture screen:{} failed", display_info.id))?;
 
-  Image::from_bgra(
+  let image = Image::from_bgra(
     cg_image.width() as u32,
     cg_image.height() as u32,
     Vec::from(cg_image.data().bytes()),
-  )
-  .ok()
+  )?;
+
+  Ok(image)
 }
 
 pub fn capture_screen_area(
@@ -19,9 +23,11 @@ pub fn capture_screen_area(
   y: i32,
   width: u32,
   height: u32,
-) -> Option<Image> {
+) -> Result<Image> {
   let cg_display = CGDisplay::new(display_info.id);
-  let cg_image = cg_display.image()?;
+  let cg_image = cg_display
+    .image()
+    .ok_or_else(|| anyhow!("capture screen:{} failed", display_info.id))?;
 
   let w = (width as f32 * display_info.scale_factor) as i32;
   let h = (height as f32 * display_info.scale_factor) as i32;
@@ -42,5 +48,7 @@ pub fn capture_screen_area(
     }
   }
 
-  Image::from_bgra(w as u32, h as u32, bgra).ok()
+  let image = Image::from_bgra(w as u32, h as u32, bgra)?;
+
+  Ok(image)
 }
