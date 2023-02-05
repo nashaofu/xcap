@@ -1,16 +1,17 @@
 use crate::{DisplayInfo, Image};
+use anyhow::{anyhow, Result};
 use sfhash::digest;
 use std::{mem, ops::Deref, ptr};
 use widestring::U16CString;
 use windows::{
-  core::{Error, PCWSTR},
+  core::PCWSTR,
   Win32::{
     Foundation::{BOOL, LPARAM, RECT},
     Graphics::Gdi::{
       CreateCompatibleBitmap, CreateCompatibleDC, CreateDCW, CreatedHDC, DeleteDC, DeleteObject,
       EnumDisplayMonitors, GetDIBits, GetMonitorInfoW, GetObjectW, SelectObject, SetStretchBltMode,
-      StretchBlt, BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, HBITMAP, HDC, HMONITOR,
-      MONITORINFOEXW, RGBQUAD, SRCCOPY, STRETCH_HALFTONE,
+      StretchBlt, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC,
+      HMONITOR, MONITORINFOEXW, RGBQUAD, SRCCOPY, STRETCH_HALFTONE,
     },
   },
 };
@@ -38,38 +39,42 @@ macro_rules! drop_box {
   }};
 }
 
-fn get_monitor_info_exw(h_monitor: HMONITOR) -> Result<MONITORINFOEXW, Error> {
+fn get_monitor_info_exw(h_monitor: HMONITOR) -> Result<MONITORINFOEXW> {
   let mut monitor_info_exw: MONITORINFOEXW = unsafe { mem::zeroed() };
   monitor_info_exw.monitorInfo.cbSize = mem::size_of::<MONITORINFOEXW>() as u32;
   let monitor_info_exw_ptr = <*mut _>::cast(&mut monitor_info_exw);
 
-  unsafe { GetMonitorInfoW(h_monitor, monitor_info_exw_ptr).ok()? };
+  unsafe {
+    GetMonitorInfoW(h_monitor, monitor_info_exw_ptr).ok()?;
+  };
   Ok(monitor_info_exw)
 }
 
-fn get_monitor_info_exw_from_id(id: u32) -> Option<MONITORINFOEXW> {
-  let monitor_info_exws = Box::into_raw(Box::new(Vec::<MONITORINFOEXW>::new()));
+fn get_monitor_info_exw_from_id(id: u32) -> Result<MONITORINFOEXW> {
+  let monitor_info_exws: *mut Vec<MONITORINFOEXW> = Box::into_raw(Box::default());
 
   unsafe {
     EnumDisplayMonitors(
       HDC::default(),
-      ptr::null_mut(),
+      None,
       Some(monitor_enum_proc),
       LPARAM(monitor_info_exws as isize),
     )
-    .ok()
-    .ok()?
+    .ok()?;
   };
 
   let monitor_info_exws_borrow = unsafe { &Box::from_raw(monitor_info_exws) };
 
-  let monitor_info_exw = monitor_info_exws_borrow.iter().find(|&&monitor_info_exw| {
-    let sz_device_ptr = monitor_info_exw.szDevice.as_ptr();
-    let sz_device_string = unsafe { U16CString::from_ptr_str(sz_device_ptr).to_string_lossy() };
-    digest(sz_device_string.as_bytes()) == id
-  })?;
+  let monitor_info_exw = monitor_info_exws_borrow
+    .iter()
+    .find(|&&monitor_info_exw| {
+      let sz_device_ptr = monitor_info_exw.szDevice.as_ptr();
+      let sz_device_string = unsafe { U16CString::from_ptr_str(sz_device_ptr).to_string_lossy() };
+      digest(sz_device_string.as_bytes()) == id
+    })
+    .ok_or_else(|| anyhow!("Get monitor info exw failed"))?;
 
-  Some(*monitor_info_exw)
+  Ok(*monitor_info_exw)
 }
 
 extern "system" fn monitor_enum_proc(
@@ -90,7 +95,7 @@ extern "system" fn monitor_enum_proc(
   }
 }
 
-fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<Image> {
+fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Result<Image> {
   let monitor_info_exw = get_monitor_info_exw_from_id(display_id)?;
 
   let sz_device = monitor_info_exw.szDevice;
@@ -103,7 +108,7 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<I
         PCWSTR(sz_device_ptr),
         PCWSTR(sz_device_ptr),
         PCWSTR(ptr::null()),
-        ptr::null(),
+        None,
       )
     },
     |dcw| unsafe { DeleteDC(dcw) }
@@ -140,8 +145,7 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<I
       height,
       SRCCOPY,
     )
-    .ok()
-    .ok()?
+    .ok()?;
   };
 
   let mut bitmap_info = BITMAPINFO {
@@ -151,7 +155,7 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<I
       biHeight: height, // 这里可以传递负数, 但是不知道为什么会报错
       biPlanes: 1,
       biBitCount: 32,
-      biCompression: 0,
+      biCompression: BI_RGB,
       biSizeImage: 0,
       biXPelsPerMeter: 0,
       biYPelsPerMeter: 0,
@@ -170,14 +174,14 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<I
       *h_bitmap_drop_box,
       0,
       height as u32,
-      buf_prt,
+      Some(buf_prt),
       &mut bitmap_info,
       DIB_RGB_COLORS,
     ) == 0
   };
 
   if is_success {
-    return None;
+    return Err(anyhow!("Get RGBA data failed"));
   }
 
   let mut bitmap = BITMAP::default();
@@ -188,7 +192,7 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<I
     GetObjectW(
       *h_bitmap_drop_box,
       mem::size_of::<BITMAP>() as i32,
-      bitmap_ptr,
+      Some(bitmap_ptr),
     );
   }
 
@@ -200,15 +204,16 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Option<I
 
   chunks.reverse();
 
-  Image::from_bgra(
+  let image = Image::from_bgra(
     bitmap.bmWidth as u32,
     bitmap.bmHeight as u32,
     chunks.concat(),
-  )
-  .ok()
+  )?;
+
+  Ok(image)
 }
 
-pub fn capture_screen(display_info: &DisplayInfo) -> Option<Image> {
+pub fn capture_screen(display_info: &DisplayInfo) -> Result<Image> {
   let width = ((display_info.width as f32) * display_info.scale_factor) as i32;
   let height = ((display_info.height as f32) * display_info.scale_factor) as i32;
 
@@ -221,7 +226,7 @@ pub fn capture_screen_area(
   y: i32,
   width: u32,
   height: u32,
-) -> Option<Image> {
+) -> Result<Image> {
   let area_x = ((x as f32) * display_info.scale_factor) as i32;
   let area_y = ((y as f32) * display_info.scale_factor) as i32;
   let area_width = ((width as f32) * display_info.scale_factor) as i32;

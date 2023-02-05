@@ -1,3 +1,4 @@
+use anyhow::{anyhow, Result};
 pub use display_info::DisplayInfo;
 
 mod image;
@@ -30,17 +31,17 @@ impl Screen {
     }
   }
 
-  pub fn all() -> Option<Vec<Screen>> {
+  pub fn all() -> Result<Vec<Screen>> {
     let screens = DisplayInfo::all()?.iter().map(Screen::new).collect();
-    Some(screens)
+    Ok(screens)
   }
 
-  pub fn from_point(x: i32, y: i32) -> Option<Screen> {
+  pub fn from_point(x: i32, y: i32) -> Result<Screen> {
     let display_info = DisplayInfo::from_point(x, y)?;
-    Some(Screen::new(&display_info))
+    Ok(Screen::new(&display_info))
   }
 
-  pub fn capture(&self) -> Option<Image> {
+  pub fn capture(&self) -> Result<Image> {
     capture_screen(&self.display_info)
   }
 
@@ -48,7 +49,7 @@ impl Screen {
    * 截取指定区域
    * 区域x,y为相对于当前屏幕的x,y坐标
    */
-  pub fn capture_area(&self, x: i32, y: i32, width: u32, height: u32) -> Option<Image> {
+  pub fn capture_area(&self, x: i32, y: i32, width: u32, height: u32) -> Result<Image> {
     let display_info = self.display_info;
     let screen_x2 = display_info.x + display_info.width as i32;
     let screen_y2 = display_info.y + display_info.height as i32;
@@ -80,7 +81,7 @@ impl Screen {
     }
 
     if x1 >= x2 || y1 >= y2 {
-      return None;
+      return Err(anyhow!("Area size is invalid"));
     }
 
     capture_screen_area(
