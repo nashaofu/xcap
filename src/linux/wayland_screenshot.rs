@@ -200,10 +200,11 @@ fn org_freedesktop_portal_screenshot(
     for c in x..(x + width) {
       let index = (((r - y) * width + (c - x)) * 4) as usize;
       let i = ((r * info.width as i32 + c) * 4) as usize;
-      rgba[index] = bytes[i];
-      rgba[index + 1] = bytes[i + 1];
-      rgba[index + 2] = bytes[i + 2];
-      rgba[index + 3] = bytes[i + 3];
+      // 防止获取到的图片尺寸小于指定大小而 panic
+      rgba[index] = bytes.get(i).unwrap_or(0);
+      rgba[index + 1] = bytes.get(i + 1).unwrap_or(0);
+      rgba[index + 2] = bytes.get(i + 2).unwrap_or(0);
+      rgba[index + 3] = bytes.get(i + 3).unwrap_or(0);
     }
   }
 
