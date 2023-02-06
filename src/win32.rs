@@ -1,6 +1,5 @@
 use crate::{DisplayInfo, Image};
 use anyhow::{anyhow, Result};
-use sfhash::digest;
 use std::{mem, ops::Deref, ptr};
 use widestring::U16CString;
 use windows::{
@@ -70,7 +69,7 @@ fn get_monitor_info_exw_from_id(id: u32) -> Result<MONITORINFOEXW> {
     .find(|&&monitor_info_exw| {
       let sz_device_ptr = monitor_info_exw.szDevice.as_ptr();
       let sz_device_string = unsafe { U16CString::from_ptr_str(sz_device_ptr).to_string_lossy() };
-      digest(sz_device_string.as_bytes()) == id
+      fxhash::hash32(sz_device_string.as_bytes()) == id
     })
     .ok_or_else(|| anyhow!("Get monitor info exw failed"))?;
 

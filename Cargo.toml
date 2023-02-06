@@ -12,14 +12,14 @@ keywords = ["screenshots", "screenshot", "screen", "capture"]
 
 [dependencies]
 png = "0.17.7"
-display-info = "0.4.0"
+display-info = {git = "https://github.com/Olssdani/display-info"}
 anyhow = "1.0.69"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.22.3"
 
 [target.'cfg(target_os="windows")'.dependencies]
-sfhash = "0.1.1"
+fxhash = "0.2.1"
 widestring = "1.0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies.windows]
