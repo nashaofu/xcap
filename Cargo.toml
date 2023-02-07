@@ -19,7 +19,7 @@ anyhow = "1.0.69"
 core-graphics = "0.22.3"
 
 [target.'cfg(target_os="windows")'.dependencies]
-sfhash = "0.1.1"
+fxhash = "0.2.1"
 widestring = "1.0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies.windows]
