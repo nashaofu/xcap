@@ -17,7 +17,11 @@ impl Image {
 
   pub fn from_bgra(width: u32, height: u32, bgra: Vec<u8>) -> Result<Self, EncodingError> {
     let mut buffer = Vec::new();
-    let mut bytes = bgra;
+    let size = (width * height * 4) as usize;
+
+    // https://github.com/nashaofu/screenshots-rs/issues/38
+    // bgra 长度保证为 width * height * 4
+    let mut bytes = Vec::from(&bgra[..size]);
 
     // BGRA 转换为 RGBA
     for i in (0..bytes.len()).step_by(4) {
@@ -56,6 +60,6 @@ impl Image {
 
 impl Into<Vec<u8>> for Image {
   fn into(self) -> Vec<u8> {
-      self.buffer
+    self.buffer
   }
 }
