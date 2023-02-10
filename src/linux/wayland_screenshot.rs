@@ -158,7 +158,7 @@ fn org_freedesktop_portal_screenshot(
 
   let mut reader = decoder.read_info()?;
   // Allocate the output buffer.
-  let mut buf = vec![0; reader.output_buffer_size()];
+  let mut buf = vec![0u8; reader.output_buffer_size()];
   // Read the next frame. An APNG might contain multiple frames.
   let info = reader.next_frame(&mut buf)?;
   // Grab the bytes of the image.
@@ -166,7 +166,7 @@ fn org_freedesktop_portal_screenshot(
 
   fs::remove_file(path)?;
 
-  let mut rgba = vec![0; (width * height * 4) as usize];
+  let mut rgba = vec![0u8; (width * height * 4) as usize];
   // 图片裁剪
   for r in y..(y + height) {
     for c in x..(x + width) {
