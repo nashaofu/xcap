@@ -1,17 +1,25 @@
 use crate::{DisplayInfo, Image};
 use anyhow::{anyhow, Result};
-use core_graphics::display::CGDisplay;
+use core_graphics::{
+  display::{kCGNullWindowID, kCGWindowImageDefault, kCGWindowListOptionOnScreenOnly, CGDisplay},
+  geometry::{CGPoint, CGSize},
+};
 
 pub fn capture_screen(display_info: &DisplayInfo) -> Result<Image> {
   let cg_display = CGDisplay::new(display_info.id);
-  let cg_image = cg_display
-    .image()
-    .ok_or_else(|| anyhow!("capture screen:{} failed", display_info.id))?;
+  let cg_image = CGDisplay::screenshot(
+    cg_display.bounds(),
+    kCGWindowListOptionOnScreenOnly,
+    kCGNullWindowID,
+    kCGWindowImageDefault,
+  )
+  .ok_or_else(|| anyhow!("Screen:{} screenshot failed", display_info.id))?;
 
   let image = Image::from_bgra(
+    Vec::from(cg_image.data().bytes()),
     cg_image.width() as u32,
     cg_image.height() as u32,
-    Vec::from(cg_image.data().bytes()),
+    cg_image.bytes_per_row(),
   )?;
 
   Ok(image)
@@ -25,30 +33,31 @@ pub fn capture_screen_area(
   height: u32,
 ) -> Result<Image> {
   let cg_display = CGDisplay::new(display_info.id);
-  let cg_image = cg_display
-    .image()
-    .ok_or_else(|| anyhow!("capture screen:{} failed", display_info.id))?;
+  let mut cg_rect = cg_display.bounds();
+  let origin = cg_rect.origin;
 
-  let w = (width as f32 * display_info.scale_factor) as i32;
-  let h = (height as f32 * display_info.scale_factor) as i32;
+  let rect_x = origin.x + (x as f64);
+  let rect_y = origin.y + (y as f64);
+  let rect_width = width as f64;
+  let rect_height = height as f64;
 
-  let mut bgra = vec![0; (w * h * 4) as usize];
-  let data = cg_image.data();
-  let bytes = data.bytes();
+  cg_rect.origin = CGPoint::new(rect_x, rect_y);
+  cg_rect.size = CGSize::new(rect_width, rect_height);
 
-  // 图片裁剪
-  for r in y..(y + h) {
-    for c in x..(x + w) {
-      let index = (((r - y) * w + (c - x)) * 4) as usize;
-      let i = ((r * cg_image.width() as i32 + c) * 4) as usize;
-      bgra[index] = bytes[i];
-      bgra[index + 1] = bytes[i + 1];
-      bgra[index + 2] = bytes[i + 2];
-      bgra[index + 3] = bytes[i + 3];
-    }
-  }
+  let cg_image = CGDisplay::screenshot(
+    cg_rect,
+    kCGWindowListOptionOnScreenOnly,
+    kCGNullWindowID,
+    kCGWindowImageDefault,
+  )
+  .ok_or_else(|| anyhow!("Screen:{} screenshot failed", display_info.id))?;
 
-  let image = Image::from_bgra(w as u32, h as u32, bgra)?;
+  let image = Image::from_bgra(
+    Vec::from(cg_image.data().bytes()),
+    cg_image.width() as u32,
+    cg_image.height() as u32,
+    cg_image.bytes_per_row(),
+  )?;
 
   Ok(image)
 }

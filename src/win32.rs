@@ -205,9 +205,10 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Result<I
   chunks.reverse();
 
   let image = Image::from_bgra(
+    chunks.concat(),
     bitmap.bmWidth as u32,
     bitmap.bmHeight as u32,
-    chunks.concat(),
+    bitmap.bmWidthBytes as usize
   )?;
 
   Ok(image)

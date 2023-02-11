@@ -24,7 +24,7 @@ fn capture(x: i32, y: i32, width: u32, height: u32) -> Result<Image> {
   let get_image_reply = conn.wait_for_reply(get_image_cookie)?;
   let bytes = Vec::from(get_image_reply.data());
 
-  let image = Image::from_bgra(width, height, bytes)?;
+  let image = Image::from_bgra(bytes, width, height, (width as usize) * 4)?;
   Ok(image)
 }
 
