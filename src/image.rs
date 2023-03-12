@@ -43,7 +43,7 @@ impl Image {
         bytes[index] = r;
         bytes[index + 1] = bgra[i + 1];
         bytes[index + 2] = b;
-        bytes[index + 3] = bgra[i + 3];
+        bytes[index + 3] = 255;
       }
     }
 
