@@ -15,14 +15,14 @@ png = "0.17.7"
 display-info = "0.4.1"
 anyhow = "1.0.69"
 
-[target.'cfg(target_os = "macos")'.dependencies]
+[target.'cfg(target_os="macos")'.dependencies]
 core-graphics = "0.22.3"
 
 [target.'cfg(target_os="windows")'.dependencies]
 fxhash = "0.2.1"
 widestring = "1.0.2"
 
-[target.'cfg(target_os = "windows")'.dependencies.windows]
+[target.'cfg(target_os="windows")'.dependencies.windows]
 version = "0.44.0"
 features = ["Win32_Foundation", "Win32_Graphics_Gdi"]
 
