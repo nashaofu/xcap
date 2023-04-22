@@ -1,5 +1,5 @@
 use crate::{linux::wayland_screenshot::wayland_screenshot, DisplayInfo, Image};
-use anyhow::{Result};
+use anyhow::Result;
 
 pub fn wayland_capture_screen(display_info: &DisplayInfo) -> Result<Image> {
   let x = ((display_info.x as f32) * display_info.scale_factor) as i32;

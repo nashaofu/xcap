@@ -10,8 +10,8 @@ use windows::{
     Graphics::Gdi::{
       CreateCompatibleBitmap, CreateCompatibleDC, CreateDCW, CreatedHDC, DeleteDC, DeleteObject,
       EnumDisplayMonitors, GetDIBits, GetMonitorInfoW, GetObjectW, SelectObject, SetStretchBltMode,
-      StretchBlt, BITMAP, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC,
-      HMONITOR, MONITORINFOEXW, RGBQUAD, SRCCOPY, STRETCH_HALFTONE,
+      StretchBlt, BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, HBITMAP, HDC, HMONITOR,
+      MONITORINFOEXW, RGBQUAD, SRCCOPY, STRETCH_HALFTONE,
     },
   },
 };
@@ -155,7 +155,7 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Result<I
       biHeight: height, // 这里可以传递负数, 但是不知道为什么会报错
       biPlanes: 1,
       biBitCount: 32,
-      biCompression: BI_RGB,
+      biCompression: 0,
       biSizeImage: 0,
       biXPelsPerMeter: 0,
       biYPelsPerMeter: 0,
@@ -208,7 +208,7 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Result<I
     chunks.concat(),
     bitmap.bmWidth as u32,
     bitmap.bmHeight as u32,
-    bitmap.bmWidthBytes as usize
+    bitmap.bmWidthBytes as usize,
   )?;
 
   Ok(image)

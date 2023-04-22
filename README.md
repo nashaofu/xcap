@@ -1,8 +1,10 @@
-# screenshots
+# 📷 Screenshots
 
-A cross-platform screenshots library for MacOS、Windows、Linux(X11、wayland).
+Screenshots is a cross-platform screenshots library for MacOS, Windows, Linux (X11, Wayland) written in Rust. It provides a simple API for capturing screenshots of a screen or a specific area of a screen.
 
-## example
+## Example
+
+The following example shows how to capture screenshots of all screens and a specific area of a screen.
 
 ```rust
 use screenshots::Screen;
@@ -30,31 +32,35 @@ fn main() {
   let buffer = image.buffer();
   fs::write("target/capture_display_with_point.png", buffer).unwrap();
 
-  println!("运行耗时: {:?}", start.elapsed());
+  println!("Elapsed time: {:?}", start.elapsed());
 }
 ```
 
 ## API
 
-### `Screen`: Screen capturer
+### `Screen`
 
-- `Screen::new(display_info)`: Get screen from [display info](https://docs.rs/display-info/latest/display_info/struct.DisplayInfo.html), return `Screen`.
-- `Screen::all()`: Get all screen, return `Result<Vec<Screen>>`.
-- `Screen::from_point(x, y)`: Get screen from point, return `Result<Screen>`.
-- `screen.capture()`: capture screen screenshot [image](https://docs.rs/screenshots/latest/screenshots/struct.Image.html), return `Result<Image>`.
-- `screen.capture_area(x, y, width, height)`: Capture the current screen the designated area, return `Result<Image>`.
+The `Screen` struct represents a screen capturer and provides the following methods:
 
-### `Image`: Screen screenshot image
+- `Screen::new(display_info)`: Get a screen from the [display info](https://docs.rs/display-info/latest/display_info/struct.DisplayInfo.html), returns a `Screen`.
+- `Screen::all()`: Get all screens, returns `Result<Vec<Screen>>`.
+- `Screen::from_point(x, y)`: Get a screen from a point, returns `Result<Screen>`.
+- `screen.capture()`: Capture a screenshot of the screen, returns a [image](https://docs.rs/screenshots/latest/screenshots/struct.Image.html).
+- `screen.capture_area(x, y, width, height)`: Capture a screenshot of the designated area of the screen, returns a `Result<Image>`.
 
-- `Image::new(width, height, buffer)`: Get image from width、height and rgba buffer, return `Image`.
-- `Image::from_bgra(width, height, buffer)`: Get image from width、height and bgra buffer, return `Result<Image, EncodingError>`.
-- `image.width()`: Get image width, return `u32`.
-- `image.height()`: Get image height, return `u32`.
-- `image.buffer()`: Get image buffer, return `Vec<u8>`.
+### `Image`
 
-## Linux requirements
+The `Image` struct represents a screen screenshot image and provides the following methods:
 
-On Linux, you need to install `libxcb`、`libxrandr`、`dbus`
+- `Image::new(width, height, buffer)`: Get an image from the width, height, and RGBA buffer, returns an `Image`.
+- `Image::from_bgra(width, height, buffer)`: Get an image from the width, height, and BGRA buffer, returns `Result<Image, EncodingError>`.
+- `image.width()`: Get the image width, returns `u32`.
+- `image.height()`: Get the image height, returns `u32`.
+- `image.buffer()`: Get the image buffer, returns `Vec<u8>`.
+
+## Linux Requirements
+
+On Linux, you need to install `libxcb`, `libxrandr`, and `dbus`.
 
 Debian/Ubuntu:
 
@@ -67,3 +73,7 @@ Alpine:
 ```sh
 apk add libxcb libxrandr dbus
 ```
+
+## License
+
+This project is licensed under the Apache License. See the [LICENSE](LICENSE) file for details.
