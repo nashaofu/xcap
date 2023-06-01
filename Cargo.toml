@@ -12,8 +12,8 @@ keywords = ["screenshots", "screenshot", "screen", "capture"]
 
 [dependencies]
 png = "0.17.8"
-display-info = "0.4.1"
-anyhow = "1.0.70"
+display-info = "0.4.2"
+anyhow = "1.0.71"
 
 [target.'cfg(target_os="macos")'.dependencies]
 core-graphics = "0.22.3"
@@ -28,4 +28,4 @@ features = ["Win32_Foundation", "Win32_Graphics_Gdi"]
 
 [target.'cfg(target_os="linux")'.dependencies]
 dbus = { version = "0.9.7", features = ["vendored"] }
-xcb = "1.2.0"
+xcb = "1.2.1"
