@@ -20,7 +20,7 @@ pub fn capture_screen(display_info: &DisplayInfo) -> Result<Image> {
     cg_image.width() as u32,
     cg_image.height() as u32,
     cg_image.bytes_per_row(),
-  )?;
+  );
 
   Ok(image)
 }
@@ -57,7 +57,7 @@ pub fn capture_screen_area(
     cg_image.width() as u32,
     cg_image.height() as u32,
     cg_image.bytes_per_row(),
-  )?;
+  );
 
   Ok(image)
 }

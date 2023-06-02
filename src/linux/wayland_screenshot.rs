@@ -4,7 +4,7 @@ use dbus::{
   blocking::Connection,
   message::{MatchRule, SignalArgs},
 };
-use png::{BitDepth, ColorType, Decoder, Encoder};
+use png::Decoder;
 use std::{
   collections::HashMap,
   env::temp_dir,
@@ -180,17 +180,7 @@ fn org_freedesktop_portal_screenshot(
     }
   }
 
-  let mut buffer = Vec::new();
-
-  let mut encoder = Encoder::new(&mut buffer, width as u32, height as u32);
-  encoder.set_color(ColorType::Rgba);
-  encoder.set_depth(BitDepth::Eight);
-
-  let mut writer = encoder.write_header()?;
-  writer.write_image_data(&rgba)?;
-  writer.finish()?;
-
-  Ok(buffer)
+  Ok(rgba)
 }
 
 // TODO: 失败后尝试删除文件
