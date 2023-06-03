@@ -17,11 +17,11 @@ fn main() {
   for screen in screens {
     println!("capturer {screen:?}");
     let mut image = screen.capture().unwrap();
-    let mut buffer = image.buffer();
+    let mut buffer = image.to_png().unwrap();
     fs::write(format!("target/{}.png", screen.display_info.id), buffer).unwrap();
 
     image = screen.capture_area(300, 300, 300, 300).unwrap();
-    buffer = image.buffer();
+    buffer = image.to_png().unwrap();
     fs::write(format!("target/{}-2.png", screen.display_info.id), buffer).unwrap();
   }
 
@@ -29,10 +29,10 @@ fn main() {
   println!("capturer {screen:?}");
 
   let image = screen.capture_area(300, 300, 300, 300).unwrap();
-  let buffer = image.buffer();
+  let buffer = image.to_png().unwrap();
   fs::write("target/capture_display_with_point.png", buffer).unwrap();
 
-  println!("Elapsed time: {:?}", start.elapsed());
+  println!("运行耗时: {:?}", start.elapsed());
 }
 ```
 
@@ -52,11 +52,12 @@ The `Screen` struct represents a screen capturer and provides the following meth
 
 The `Image` struct represents a screen screenshot image and provides the following methods:
 
-- `Image::new(width, height, buffer)`: Get an image from the width, height, and RGBA buffer, returns an `Image`.
-- `Image::from_bgra(width, height, buffer)`: Get an image from the width, height, and BGRA buffer, returns `Result<Image, EncodingError>`.
+- `Image::new(width, height, rgba)`: Get an image from the width, height, and RGBA buffer, returns an `Image`.
+- `Image::from_bgra(bgra, width, height, bytes_per_row)`: Get an image from BGRA buffer, returns `Image`.
 - `image.width()`: Get the image width, returns `u32`.
 - `image.height()`: Get the image height, returns `u32`.
-- `image.buffer()`: Get the image buffer, returns `Vec<u8>`.
+- `image.rgba()`: Get the image rgba buffer, returns `Vec<u8>`.
+- `image.to_png()`: Convert to png format buffer, returns `Result<Vec<u8>, EncodingError>`.
 
 ## Linux Requirements
 
