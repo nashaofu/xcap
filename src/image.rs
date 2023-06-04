@@ -3,27 +3,21 @@ use png::{BitDepth, ColorType, Encoder, EncodingError};
 pub struct Image {
   width: u32,
   height: u32,
-  buffer: Vec<u8>,
+  rgba: Vec<u8>,
 }
 
 impl Image {
-  pub fn new(width: u32, height: u32, buffer: Vec<u8>) -> Self {
+  pub fn new(width: u32, height: u32, rgba: Vec<u8>) -> Self {
     Image {
       width,
       height,
-      buffer,
+      rgba,
     }
   }
 
-  pub fn from_bgra(
-    bgra: Vec<u8>,
-    width: u32,
-    height: u32,
-    bytes_per_row: usize,
-  ) -> Result<Self, EncodingError> {
-    let mut buffer = Vec::new();
+  pub fn from_bgra(bgra: Vec<u8>, width: u32, height: u32, bytes_per_row: usize) -> Self {
     let size = (width * height * 4) as usize;
-    let mut bytes = vec![0u8; size];
+    let mut rgba = vec![0u8; size];
 
     let u_width = width as usize;
     let u_height = height as usize;
@@ -40,23 +34,14 @@ impl Image {
         let b = bgra[i];
         let r = bgra[i + 2];
 
-        bytes[index] = r;
-        bytes[index + 1] = bgra[i + 1];
-        bytes[index + 2] = b;
-        bytes[index + 3] = 255;
+        rgba[index] = r;
+        rgba[index + 1] = bgra[i + 1];
+        rgba[index + 2] = b;
+        rgba[index + 3] = 255;
       }
     }
 
-    let mut encoder = Encoder::new(&mut buffer, width, height);
-
-    encoder.set_color(ColorType::Rgba);
-    encoder.set_depth(BitDepth::Eight);
-
-    let mut writer = encoder.write_header()?;
-    writer.write_image_data(&bytes)?;
-    writer.finish()?;
-
-    Ok(Image::new(width, height, buffer))
+    Image::new(width, height, rgba)
   }
 
   pub fn width(&self) -> u32 {
@@ -67,13 +52,27 @@ impl Image {
     self.height
   }
 
-  pub fn buffer(&self) -> &Vec<u8> {
-    &self.buffer
+  pub fn rgba(&self) -> &Vec<u8> {
+    &self.rgba
+  }
+
+  pub fn to_png(&self) -> Result<Vec<u8>, EncodingError> {
+    let mut buffer = Vec::new();
+    let mut encoder = Encoder::new(&mut buffer, self.width, self.height);
+
+    encoder.set_color(ColorType::Rgba);
+    encoder.set_depth(BitDepth::Eight);
+
+    let mut writer = encoder.write_header()?;
+    writer.write_image_data(&self.rgba)?;
+    writer.finish()?;
+
+    Ok(buffer)
   }
 }
 
 impl Into<Vec<u8>> for Image {
   fn into(self) -> Vec<u8> {
-    self.buffer
+    self.rgba
   }
 }
