@@ -186,7 +186,15 @@ fn org_freedesktop_portal_screenshot(
 // TODO: 失败后尝试删除文件
 pub fn wayland_screenshot(x: i32, y: i32, width: i32, height: i32) -> Result<Vec<u8>> {
   let conn = Connection::new_session()?;
-
-  org_gnome_shell_screenshot(&conn, x, y, width, height)
-    .or_else(|_| org_freedesktop_portal_screenshot(&conn, x, y, width, height))
+  let de = match std::env::var("XDG_CURRENT_DESKTOP") {
+    Ok(de) => de,
+    Err(_) => "Unknown".to_string(),
+  };
+  match de.to_uppercase().as_str() {
+    "GNOME" => org_gnome_shell_screenshot(&conn, x, y, width, height)
+      .or_else(|_| org_freedesktop_portal_screenshot(&conn, x, y, width, height)),
+    "UBUNTU:GNOME" => org_gnome_shell_screenshot(&conn, x, y, width, height)
+      .or_else(|_| org_freedesktop_portal_screenshot(&conn, x, y, width, height)),
+    _ => org_freedesktop_portal_screenshot(&conn, x, y, width, height),
+  }
 }
