@@ -153,8 +153,9 @@ fn org_freedesktop_portal_screenshot(
     }
     return Err(anyhow!("Screenshot failed or canceled",));
   }
-
-  let decoder = Decoder::new(File::open(path)?);
+  let iter = percent_encoding::percent_decode(path.as_bytes());
+  let decoded_path = iter.decode_utf8()?;
+  let decoder = Decoder::new(File::open(decoded_path.to_string())?);
 
   let mut reader = decoder.read_info()?;
   // Allocate the output buffer.
@@ -164,7 +165,7 @@ fn org_freedesktop_portal_screenshot(
   // Grab the bytes of the image.
   let bytes = &buf[..info.buffer_size()];
 
-  fs::remove_file(path)?;
+  fs::remove_file(decoded_path.to_string())?;
 
   let mut rgba = vec![0u8; (width * height * 4) as usize];
   // 图片裁剪
