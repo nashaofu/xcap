@@ -84,12 +84,10 @@ fn org_freedesktop_portal_screenshot(
   width: i32,
   height: i32,
 ) -> Result<Vec<u8>> {
-  println!("Other");
   let status: Arc<Mutex<Option<u32>>> = Arc::new(Mutex::new(None));
   let status_res = status.clone();
   let path: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
   let path_res = path.clone();
-  println!("Other1");
   let match_rule = MatchRule::new_signal("org.freedesktop.portal.Request", "Response");
   conn.add_match(
     match_rule,
@@ -106,13 +104,11 @@ fn org_freedesktop_portal_screenshot(
       true
     },
   )?;
-  println!("Other2");
   let proxy = conn.with_proxy(
     "org.freedesktop.portal.Desktop",
     "/org/freedesktop/portal/desktop",
     Duration::from_millis(10000),
   );
-  println!("Other3");
   let mut options: PropMap = HashMap::new();
   options.insert(
     String::from("handle_token"),
@@ -120,13 +116,11 @@ fn org_freedesktop_portal_screenshot(
   );
   options.insert(String::from("modal"), Variant(Box::new(true)));
   options.insert(String::from("interactive"), Variant(Box::new(false)));
-  println!("Other4");
   proxy.method_call(
     "org.freedesktop.portal.Screenshot",
     "Screenshot",
     ("", options),
   )?;
-  println!("Other5");
   // wait 60 seconds for user interaction
   for _ in 0..60 {
     let result = conn.process(Duration::from_millis(1000))?;
@@ -138,30 +132,23 @@ fn org_freedesktop_portal_screenshot(
       break;
     }
   }
-  println!("Other6");
   let status = status_res
     .lock()
     .map_err(|_| anyhow!("Get status lock failed"))?;
   let status = *status;
-  println!("Other7");
   let path = path_res
     .lock()
     .map_err(|_| anyhow!("Get path lock failed"))?;
   let path = &*path;
-  println!("Other8");
   if status.ne(&Some(0)) || path.is_empty() {
     if !path.is_empty() {
       fs::remove_file(path)?;
     }
     return Err(anyhow!("Screenshot failed or canceled",));
   }
-  println!("{path:?}");
-  println!("Other9");
   let iter = percent_encoding::percent_decode(path.as_bytes());
   let decoded_path = iter.decode_utf8()?;
-  println!("{decoded_path:?}");
   let decoder = Decoder::new(File::open(decoded_path.to_string())?);
-  println!("Other10");
   let mut reader = decoder.read_info()?;
   // Allocate the output buffer.
   let mut buf = vec![0u8; reader.output_buffer_size()];
@@ -169,9 +156,7 @@ fn org_freedesktop_portal_screenshot(
   let info = reader.next_frame(&mut buf)?;
   // Grab the bytes of the image.
   let bytes = &buf[..info.buffer_size()];
-  println!("Other11");
   fs::remove_file(decoded_path.to_string())?;
-  println!("Other12");
   let mut rgba = vec![0u8; (width * height * 4) as usize];
   // 图片裁剪
   for r in y..(y + height) {
@@ -185,7 +170,6 @@ fn org_freedesktop_portal_screenshot(
       rgba[index + 3] = bytes.get(i + 3).copied().unwrap_or(0);
     }
   }
-  println!("Other13");
   Ok(rgba)
 }
 
