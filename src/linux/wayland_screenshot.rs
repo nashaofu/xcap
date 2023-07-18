@@ -47,7 +47,6 @@ fn org_gnome_shell_screenshot(
   width: i32,
   height: i32,
 ) -> Result<Vec<u8>> {
-  println!("Gnome");
   let proxy = conn.with_proxy(
     "org.gnome.Shell.Screenshot",
     "/org/gnome/Shell/Screenshot",
