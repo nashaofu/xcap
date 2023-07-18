@@ -159,6 +159,7 @@ fn org_freedesktop_portal_screenshot(
   println!("Other9");
   let iter = percent_encoding::percent_decode(path.as_bytes());
   let decoded_path = iter.decode_utf8()?;
+  println!("{decoded_path:?}");
   let decoder = Decoder::new(File::open(decoded_path.to_string())?);
   println!("Other10");
   let mut reader = decoder.read_info()?;
@@ -169,7 +170,7 @@ fn org_freedesktop_portal_screenshot(
   // Grab the bytes of the image.
   let bytes = &buf[..info.buffer_size()];
   println!("Other11");
-  fs::remove_file(path)?;
+  fs::remove_file(decoded_path.to_string())?;
   println!("Other12");
   let mut rgba = vec![0u8; (width * height * 4) as usize];
   // 图片裁剪
