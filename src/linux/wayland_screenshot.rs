@@ -157,7 +157,9 @@ fn org_freedesktop_portal_screenshot(
   }
   println!("{path:?}");
   println!("Other9");
-  let decoder = Decoder::new(File::open(path)?);
+  let iter = percent_encoding::percent_decode(path.as_bytes());
+  let decoded_path = iter.decode_utf8()?;
+  let decoder = Decoder::new(File::open(decoded_path.to_string())?);
   println!("Other10");
   let mut reader = decoder.read_info()?;
   // Allocate the output buffer.

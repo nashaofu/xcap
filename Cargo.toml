@@ -14,6 +14,7 @@ keywords = ["screenshots", "screenshot", "screen", "capture"]
 png = "0.17.8"
 display-info = "0.4.2"
 anyhow = "1.0.71"
+percent-encoding = "2.3.0"
 
 [target.'cfg(target_os="macos")'.dependencies]
 core-graphics = "0.22.3"
