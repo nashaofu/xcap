@@ -47,6 +47,7 @@ fn org_gnome_shell_screenshot(
   width: i32,
   height: i32,
 ) -> Result<Vec<u8>> {
+  println!("Gnome");
   let proxy = conn.with_proxy(
     "org.gnome.Shell.Screenshot",
     "/org/gnome/Shell/Screenshot",
@@ -83,6 +84,7 @@ fn org_freedesktop_portal_screenshot(
   width: i32,
   height: i32,
 ) -> Result<Vec<u8>> {
+  println!("Other");
   let status: Arc<Mutex<Option<u32>>> = Arc::new(Mutex::new(None));
   let status_res = status.clone();
   let path: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
