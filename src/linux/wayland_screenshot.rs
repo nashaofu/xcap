@@ -155,6 +155,7 @@ fn org_freedesktop_portal_screenshot(
     }
     return Err(anyhow!("Screenshot failed or canceled",));
   }
+  println!("{path:?}");
   println!("Other9");
   let decoder = Decoder::new(File::open(path)?);
   println!("Other10");
