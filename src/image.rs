@@ -1,5 +1,4 @@
-pub use png::Compression;
-use png::{BitDepth, ColorType, Encoder, EncodingError};
+use png::{BitDepth, ColorType, Compression, Encoder, EncodingError};
 
 pub struct Image {
   width: u32,
