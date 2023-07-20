@@ -1,4 +1,8 @@
-use png::{BitDepth, ColorType, Encoder, EncodingError};
+use crate::image;
+use png::{BitDepth, ColorType, Compression, Encoder, EncodingError};
+// use image::error::EncodingError;
+// use image_crate::{ColorType, ImageEncoder, ImageError};
+// use image_crate::error::EncodingError;
 
 pub struct Image {
   width: u32,
@@ -56,9 +60,13 @@ impl Image {
     &self.rgba
   }
 
-  pub fn to_png(&self) -> Result<Vec<u8>, EncodingError> {
+  pub fn to_png(&self, compression: Option<Compression>) -> Result<Vec<u8>, EncodingError> {
     let mut buffer = Vec::new();
     let mut encoder = Encoder::new(&mut buffer, self.width, self.height);
+  
+    if let Some(compression) = compression{
+      encoder.set_compression(compression);
+    }
 
     encoder.set_color(ColorType::Rgba);
     encoder.set_depth(BitDepth::Eight);
