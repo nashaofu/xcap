@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 pub use display_info::DisplayInfo;
 
 mod image;
+pub use image::Compression;
 pub use image::Image;
 
 #[cfg(target_os = "macos")]

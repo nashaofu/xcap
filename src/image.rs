@@ -1,3 +1,4 @@
+pub use png::Compression;
 use png::{BitDepth, ColorType, Encoder, EncodingError};
 
 pub struct Image {
@@ -56,9 +57,13 @@ impl Image {
     &self.rgba
   }
 
-  pub fn to_png(&self) -> Result<Vec<u8>, EncodingError> {
+  pub fn to_png(&self, compression: Option<Compression>) -> Result<Vec<u8>, EncodingError> {
     let mut buffer = Vec::new();
     let mut encoder = Encoder::new(&mut buffer, self.width, self.height);
+
+    if let Some(compression) = compression {
+      encoder.set_compression(compression);
+    }
 
     encoder.set_color(ColorType::Rgba);
     encoder.set_depth(BitDepth::Eight);
