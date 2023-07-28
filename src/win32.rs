@@ -1,7 +1,9 @@
-use crate::{DisplayInfo, Image};
-use anyhow::{anyhow, Result};
-use fxhash::hash32;
 use std::{mem, ops::Deref, ptr};
+
+use anyhow::{anyhow, Result};
+use display_info::DisplayInfo;
+use fxhash::hash32;
+use image::RgbaImage;
 use widestring::U16CString;
 use windows::{
     core::PCWSTR,
@@ -16,6 +18,8 @@ use windows::{
         },
     },
 };
+
+use crate::image_utils::create_bgra;
 
 // 自动释放资源
 macro_rules! drop_box {
@@ -97,7 +101,7 @@ extern "system" fn monitor_enum_proc(
     }
 }
 
-fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Result<Image> {
+fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Result<RgbaImage> {
     let monitor_info_exw = get_monitor_info_exw_from_id(display_id)?;
 
     let sz_device = monitor_info_exw.szDevice;
@@ -206,17 +210,14 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Result<I
 
     chunks.reverse();
 
-    let image = Image::from_bgra(
-        chunks.concat(),
+    create_bgra(
         bitmap.bmWidth as u32,
         bitmap.bmHeight as u32,
-        bitmap.bmWidthBytes as usize,
-    );
-
-    Ok(image)
+        chunks.concat(),
+    )
 }
 
-pub fn capture_screen(display_info: &DisplayInfo) -> Result<Image> {
+pub fn capture_screen(display_info: &DisplayInfo) -> Result<RgbaImage> {
     let width = ((display_info.width as f32) * display_info.scale_factor) as i32;
     let height = ((display_info.height as f32) * display_info.scale_factor) as i32;
 
@@ -229,7 +230,7 @@ pub fn capture_screen_area(
     y: i32,
     width: u32,
     height: u32,
-) -> Result<Image> {
+) -> Result<RgbaImage> {
     let area_x = ((x as f32) * display_info.scale_factor) as i32;
     let area_y = ((y as f32) * display_info.scale_factor) as i32;
     let area_width = ((width as f32) * display_info.scale_factor) as i32;

@@ -1,6 +1,9 @@
-use crate::{DisplayInfo, Image};
 use anyhow::{anyhow, Result};
+use display_info::DisplayInfo;
+use image::RgbaImage;
 use xcb::x::{Drawable, GetImage, ImageFormat, ImageOrder};
+
+use crate::image_utils::create_rgba;
 
 fn get_pixel8_rgba(
     bytes: &Vec<u8>,
@@ -65,7 +68,7 @@ fn get_pixel24_32_rgba(
     }
 }
 
-fn capture(x: i32, y: i32, width: u32, height: u32) -> Result<Image> {
+fn capture(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage> {
     let (conn, index) = xcb::Connection::connect(None)?;
 
     let setup = conn.get_setup();
@@ -118,11 +121,10 @@ fn capture(x: i32, y: i32, width: u32, height: u32) -> Result<Image> {
         }
     }
 
-    let image = Image::new(width, height, rgba);
-    Ok(image)
+    create_rgba(width, height, rgba)
 }
 
-pub fn xorg_capture_screen(display_info: &DisplayInfo) -> Result<Image> {
+pub fn xorg_capture_screen(display_info: &DisplayInfo) -> Result<RgbaImage> {
     let x = ((display_info.x as f32) * display_info.scale_factor) as i32;
     let y = ((display_info.y as f32) * display_info.scale_factor) as i32;
     let width = ((display_info.width as f32) * display_info.scale_factor) as u32;
@@ -137,7 +139,7 @@ pub fn xorg_capture_screen_area(
     y: i32,
     width: u32,
     height: u32,
-) -> Result<Image> {
+) -> Result<RgbaImage> {
     let area_x = (((x + display_info.x) as f32) * display_info.scale_factor) as i32;
     let area_y = (((y + display_info.y) as f32) * display_info.scale_factor) as i32;
     let area_width = ((width as f32) * display_info.scale_factor) as u32;
