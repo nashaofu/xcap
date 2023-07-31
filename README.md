@@ -7,7 +7,7 @@ Screenshots is a cross-platform screenshots library for MacOS, Windows, Linux (X
 The following example shows how to capture screenshots of all screens and a specific area of a screen.
 
 ```rust
-use screenshots::Screen;
+use screenshots::{Screen, Compression};
 use std::{fs, time::Instant};
 
 fn main() {
@@ -17,11 +17,11 @@ fn main() {
   for screen in screens {
     println!("capturer {screen:?}");
     let mut image = screen.capture().unwrap();
-    let mut buffer = image.to_png().unwrap();
+    let mut buffer = image.to_png(Compression::Best).unwrap();
     fs::write(format!("target/{}.png", screen.display_info.id), buffer).unwrap();
 
     image = screen.capture_area(300, 300, 300, 300).unwrap();
-    buffer = image.to_png().unwrap();
+    buffer = image.to_png(None).unwrap();
     fs::write(format!("target/{}-2.png", screen.display_info.id), buffer).unwrap();
   }
 
@@ -29,7 +29,7 @@ fn main() {
   println!("capturer {screen:?}");
 
   let image = screen.capture_area(300, 300, 300, 300).unwrap();
-  let buffer = image.to_png().unwrap();
+  let buffer = image.to_png(Compression::Fast).unwrap();
   fs::write("target/capture_display_with_point.png", buffer).unwrap();
 
   println!("运行耗时: {:?}", start.elapsed());
