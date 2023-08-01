@@ -1,4 +1,4 @@
-use screenshots::{Screen, Compression};
+use screenshots::{Compression, Screen};
 use std::{fs, time::Instant};
 
 fn main() {

@@ -1,0 +1,10 @@
+{
+    "recommendations": [
+        "streetsidesoftware.code-spell-checker",
+        "wengerk.highlight-bad-chars",
+        "serayuzgur.crates",
+        "editorconfig.editorconfig",
+        "tamasfe.even-better-toml",
+        "rust-lang.rust-analyzer"
+    ]
+}

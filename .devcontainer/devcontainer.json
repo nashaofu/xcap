@@ -19,7 +19,21 @@
   // ]
 
   // Use 'forwardPorts' to make a list of ports inside the container available locally.
-  "forwardPorts": [6080]
+"forwardPorts": [
+	6080
+],
+"customizations": {
+	"vscode": {
+		"extensions": [
+			"wengerk.highlight-bad-chars",
+			"streetsidesoftware.code-spell-checker",
+			"serayuzgur.crates",
+			"EditorConfig.EditorConfig",
+			"tamasfe.even-better-toml",
+			"rust-lang.rust-analyzer"
+		]
+	}
+}
 
   // Use 'postCreateCommand' to run commands after the container is created.
   // "postCreateCommand": "rustc --version",

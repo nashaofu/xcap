@@ -57,7 +57,10 @@ impl Image {
         &self.rgba
     }
 
-    pub fn to_png<T: Into<Option<Compression>>>(&self, compression: T) -> Result<Vec<u8>, EncodingError> {
+    pub fn to_png<T: Into<Option<Compression>>>(
+        &self,
+        compression: T,
+    ) -> Result<Vec<u8>, EncodingError> {
         let mut buffer = Vec::new();
         let mut encoder = Encoder::new(&mut buffer, self.width, self.height);
         if let Some(compression) = compression.into() {
