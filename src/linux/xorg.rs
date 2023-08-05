@@ -6,10 +6,11 @@ fn get_pixel8_rgba(
     bytes: &Vec<u8>,
     x: u32,
     y: u32,
-    bytes_per_row: usize,
+    width: u32,
+    bits_per_pixel: u32,
     bit_order: ImageOrder,
 ) -> (u8, u8, u8, u8) {
-    let index = y as usize * bytes_per_row + x as usize;
+    let index = ((y * width + x) * bits_per_pixel / 8) as usize;
 
     let pixel = if bit_order == ImageOrder::LsbFirst {
         bytes[index]
@@ -28,15 +29,16 @@ fn get_pixel16_rgba(
     bytes: &Vec<u8>,
     x: u32,
     y: u32,
-    bytes_per_row: usize,
+    width: u32,
+    bits_per_pixel: u32,
     bit_order: ImageOrder,
 ) -> (u8, u8, u8, u8) {
-    let index = y as usize * bytes_per_row + x as usize;
+    let index = ((y * width + x) * bits_per_pixel / 8) as usize;
 
     let pixel = if bit_order == ImageOrder::LsbFirst {
-        bytes[index << 1] as u16 | (bytes[(index << 1) + 1] as u16) << 8
+        bytes[index] as u16 | (bytes[index + 1] as u16) << 8
     } else {
-        (bytes[index << 1] as u16) << 8 | bytes[(index << 1) + 1] as u16
+        (bytes[index] as u16) << 8 | bytes[index + 1] as u16
     };
 
     let r = (pixel >> 11) as f32 / 31.0 * 255.0;
@@ -50,10 +52,28 @@ fn get_pixel24_rgba(
     bytes: &Vec<u8>,
     x: u32,
     y: u32,
-    bytes_per_row: usize,
+    width: u32,
+    bits_per_pixel: u32,
     bit_order: ImageOrder,
 ) -> (u8, u8, u8, u8) {
-    let index = y as usize * bytes_per_row + x as usize;
+    let index = ((y * width + x) * bits_per_pixel / 8) as usize;
+
+    if bit_order == ImageOrder::LsbFirst {
+        (bytes[index + 2], bytes[index + 1], bytes[index], 255)
+    } else {
+        (bytes[index], bytes[index + 1], bytes[index + 2], 255)
+    }
+}
+
+fn get_pixel32_rgba(
+    bytes: &Vec<u8>,
+    x: u32,
+    y: u32,
+    width: u32,
+    bits_per_pixel: u32,
+    bit_order: ImageOrder,
+) -> (u8, u8, u8, u8) {
+    let index = ((y * width + x) * bits_per_pixel / 8) as usize;
 
     if bit_order == ImageOrder::LsbFirst {
         (bytes[index + 2], bytes[index + 1], bytes[index], 255)
@@ -85,34 +105,39 @@ fn capture(x: i32, y: i32, width: u32, height: u32) -> Result<Image> {
     let bytes = Vec::from(get_image_reply.data());
     let depth = get_image_reply.depth();
 
-    if depth == 32 {
-        let image = Image::from_bgra(bytes, width, height, (width as usize) * 4);
-        Ok(image)
-    } else {
-        let size = (width * height * 4) as usize;
-        let mut rgba = vec![0u8; size];
-        let bit_order = setup.bitmap_format_bit_order();
-        for y in 0..height {
-            for x in 0..width {
-                let index = ((y * width + x) * 4) as usize;
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
+    let pixmap_format = setup
+        .pixmap_formats()
+        .iter()
+        .find(|item| item.depth() == depth)
+        .ok_or(anyhow!("Not found pixmap format"))?;
 
-                let (r, g, b, a) = match depth {
-                    8 => get_pixel8_rgba(&bytes, x, y, width as usize / 2, bit_order),
-                    16 => get_pixel16_rgba(&bytes, x, y, width as usize, bit_order),
-                    24 => get_pixel24_rgba(&bytes, x, y, width as usize * 3, bit_order),
-                    _ => return Err(anyhow!("Unsupported {} depth", depth)),
-                };
+    let bits_per_pixel = pixmap_format.bits_per_pixel() as u32;
+    let bit_order = setup.bitmap_format_bit_order();
 
-                rgba[index] = r;
-                rgba[index + 1] = g;
-                rgba[index + 2] = b;
-                rgba[index + 3] = a;
-            }
+    println!("pixmap_format {:?}", pixmap_format);
+
+    for y in 0..height {
+        for x in 0..width {
+            let index = ((y * width + x) * 4) as usize;
+
+            let (r, g, b, a) = match depth {
+                8 => get_pixel8_rgba(&bytes, x, y, width, bits_per_pixel, bit_order),
+                16 => get_pixel16_rgba(&bytes, x, y, width, bits_per_pixel, bit_order),
+                24 => get_pixel24_rgba(&bytes, x, y, width, bits_per_pixel, bit_order),
+                32 => get_pixel32_rgba(&bytes, x, y, width, bits_per_pixel, bit_order),
+                _ => return Err(anyhow!("Unsupported {} depth", depth)),
+            };
+
+            rgba[index] = r;
+            rgba[index + 1] = g;
+            rgba[index + 2] = b;
+            rgba[index + 3] = a;
         }
-
-        let image = Image::new(width, height, rgba);
-        Ok(image)
     }
+
+    let image = Image::new(width, height, rgba);
+    Ok(image)
 }
 
 pub fn xorg_capture_screen(display_info: &DisplayInfo) -> Result<Image> {
