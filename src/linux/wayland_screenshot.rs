@@ -4,6 +4,7 @@ use dbus::{
     blocking::Connection,
     message::{MatchRule, SignalArgs},
 };
+use percent_encoding::percent_decode;
 use png::Decoder;
 use std::{
     collections::HashMap,
@@ -40,6 +41,34 @@ impl SignalArgs for OrgFreedesktopPortalRequestResponse {
     const INTERFACE: &'static str = "org.freedesktop.portal.Request";
 }
 
+fn png_to_rgba(filename: &String, x: i32, y: i32, width: i32, height: i32) -> Result<Vec<u8>> {
+    let decoder = Decoder::new(File::open(filename)?);
+
+    let mut reader = decoder.read_info()?;
+    // Allocate the output buffer.
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    // Read the next frame. An APNG might contain multiple frames.
+    let info = reader.next_frame(&mut buf)?;
+    // Grab the bytes of the image.
+    let bytes = &buf[..info.buffer_size()];
+
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
+    // 图片裁剪
+    for r in y..(y + height) {
+        for c in x..(x + width) {
+            let index = (((r - y) * width + (c - x)) * 4) as usize;
+            let i = ((r * info.width as i32 + c) * 4) as usize;
+            // 防止获取到的图片尺寸小于指定大小而 panic
+            rgba[index] = bytes.get(i).copied().unwrap_or(0);
+            rgba[index + 1] = bytes.get(i + 1).copied().unwrap_or(0);
+            rgba[index + 2] = bytes.get(i + 2).copied().unwrap_or(0);
+            rgba[index + 3] = bytes.get(i + 3).copied().unwrap_or(0);
+        }
+    }
+
+    Ok(rgba)
+}
+
 fn org_gnome_shell_screenshot(
     conn: &Connection,
     x: i32,
@@ -70,10 +99,11 @@ fn org_gnome_shell_screenshot(
         (x, y, width, height, false, &filename),
     )?;
 
-    let buffer = fs::read(&filename)?;
+    let rgba = png_to_rgba(&filename, x, y, width, height)?;
+
     fs::remove_file(&filename)?;
 
-    Ok(buffer)
+    Ok(rgba)
 }
 
 fn org_freedesktop_portal_screenshot(
@@ -153,33 +183,11 @@ fn org_freedesktop_portal_screenshot(
         }
         return Err(anyhow!("Screenshot failed or canceled",));
     }
-    let iter = percent_encoding::percent_decode(path.as_bytes());
-    let decoded_path = iter.decode_utf8()?;
-    let decoder = Decoder::new(File::open(decoded_path.to_string())?);
 
-    let mut reader = decoder.read_info()?;
-    // Allocate the output buffer.
-    let mut buf = vec![0u8; reader.output_buffer_size()];
-    // Read the next frame. An APNG might contain multiple frames.
-    let info = reader.next_frame(&mut buf)?;
-    // Grab the bytes of the image.
-    let bytes = &buf[..info.buffer_size()];
+    let filename = percent_decode(path.as_bytes()).decode_utf8()?.to_string();
+    let rgba = png_to_rgba(&filename, x, y, width, height)?;
 
-    fs::remove_file(decoded_path.to_string())?;
-
-    let mut rgba = vec![0u8; (width * height * 4) as usize];
-    // 图片裁剪
-    for r in y..(y + height) {
-        for c in x..(x + width) {
-            let index = (((r - y) * width + (c - x)) * 4) as usize;
-            let i = ((r * info.width as i32 + c) * 4) as usize;
-            // 防止获取到的图片尺寸小于指定大小而 panic
-            rgba[index] = bytes.get(i).copied().unwrap_or(0);
-            rgba[index + 1] = bytes.get(i + 1).copied().unwrap_or(0);
-            rgba[index + 2] = bytes.get(i + 2).copied().unwrap_or(0);
-            rgba[index + 3] = bytes.get(i + 3).copied().unwrap_or(0);
-        }
-    }
+    fs::remove_file(&filename)?;
 
     Ok(rgba)
 }
