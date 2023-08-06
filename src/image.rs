@@ -78,8 +78,8 @@ impl Image {
     }
 }
 
-impl Into<Vec<u8>> for Image {
-    fn into(self) -> Vec<u8> {
-        self.rgba
+impl From<Image> for Vec<u8> {
+    fn from(image: Image) -> Self {
+        image.rgba
     }
 }
