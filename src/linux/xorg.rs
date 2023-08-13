@@ -98,8 +98,6 @@ fn capture(x: i32, y: i32, width: u32, height: u32) -> Result<Image> {
     let bits_per_pixel = pixmap_format.bits_per_pixel() as u32;
     let bit_order = setup.bitmap_format_bit_order();
 
-    println!("pixmap_format {:?}", pixmap_format);
-
     let get_pixel_rgba = match depth {
         8 => get_pixel8_rgba,
         16 => get_pixel16_rgba,
