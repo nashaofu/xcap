@@ -10,24 +10,24 @@ repository = "https://github.com/nashaofu/screenshots-rs.git"
 keywords = ["screenshots", "screenshot", "screen", "capture"]
 
 [dependencies]
-anyhow = "1.0.71"
-display-info = "0.4.2"
+anyhow = "1.0"
+display-info = "0.4"
 image = "0.24"
-percent-encoding = "2.3.0"
+percent-encoding = "2.3"
 
-[target.'cfg(target_os="macos")'.dependencies]
-core-graphics = "0.22.3"
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.22"
 
-[target.'cfg(target_os="windows")'.dependencies]
-fxhash = "0.2.1"
-widestring = "1.0.2"
-
-[target.'cfg(target_os="windows")'.dependencies.windows]
-version = "0.48.0"
-features = ["Win32_Foundation", "Win32_Graphics_Gdi"]
+[target.'cfg(target_os = "windows")'.dependencies]
+fxhash = "0.2"
+widestring = "1.0"
+windows = { version = "0.48", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+] }
 
 [target.'cfg(target_os="linux")'.dependencies]
-dbus = { version = "0.9.7", features = ["vendored"] }
+dbus = { version = "0.9", features = ["vendored"] }
 libwayshot = "0.2"
-png = "0.17.8"
-xcb = "1.2.1"
+png = "0.17"
+xcb = "1.2"
