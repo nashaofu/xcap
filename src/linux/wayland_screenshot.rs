@@ -1,11 +1,3 @@
-use anyhow::{anyhow, Result};
-use dbus::{
-    arg::{AppendAll, Iter, IterAppend, PropMap, ReadAll, RefArg, TypeMismatchError, Variant},
-    blocking::Connection,
-    message::{MatchRule, SignalArgs},
-};
-use percent_encoding::percent_decode;
-use png::Decoder;
 use std::{
     collections::HashMap,
     env::temp_dir,
@@ -13,6 +5,16 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+use anyhow::{anyhow, Result};
+use dbus::{
+    arg::{AppendAll, Iter, IterAppend, PropMap, ReadAll, RefArg, TypeMismatchError, Variant},
+    blocking::Connection,
+    message::{MatchRule, SignalArgs},
+};
+use libwayshot::{CaptureRegion, WayshotConnection};
+use percent_encoding::percent_decode;
+use png::Decoder;
 
 #[derive(Debug)]
 pub struct OrgFreedesktopPortalRequestResponse {
@@ -192,10 +194,32 @@ fn org_freedesktop_portal_screenshot(
     Ok(rgba)
 }
 
+fn wlr_screenshot(
+    x_coordinate: i32,
+    y_coordinate: i32,
+    width: i32,
+    height: i32,
+) -> Result<Vec<u8>> {
+    let wayshot_connection = WayshotConnection::new()?;
+    Ok(wayshot_connection
+        .screenshot(
+            CaptureRegion {
+                x_coordinate,
+                y_coordinate,
+                width,
+                height,
+            },
+            false,
+        )?
+        .into_raw())
+}
+
 // TODO: 失败后尝试删除文件
 pub fn wayland_screenshot(x: i32, y: i32, width: i32, height: i32) -> Result<Vec<u8>> {
     let conn = Connection::new_session()?;
 
+    // TODO: work out if compositor is wlroots before attempting anything else
     org_gnome_shell_screenshot(&conn, x, y, width, height)
         .or_else(|_| org_freedesktop_portal_screenshot(&conn, x, y, width, height))
+        .or_else(|_| wlr_screenshot(x, y, width, height))
 }
