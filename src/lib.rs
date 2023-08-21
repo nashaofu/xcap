@@ -1,9 +1,8 @@
 use anyhow::{anyhow, Result};
 pub use display_info::DisplayInfo;
+use image::RgbaImage;
 
-mod image;
-pub use image::Compression;
-pub use image::Image;
+mod image_utils;
 
 #[cfg(target_os = "macos")]
 mod darwin;
@@ -42,7 +41,7 @@ impl Screen {
         Ok(Screen::new(&display_info))
     }
 
-    pub fn capture(&self) -> Result<Image> {
+    pub fn capture(&self) -> Result<RgbaImage> {
         capture_screen(&self.display_info)
     }
 
@@ -50,7 +49,7 @@ impl Screen {
      * 截取指定区域
      * 区域x,y为相对于当前屏幕的x,y坐标
      */
-    pub fn capture_area(&self, x: i32, y: i32, width: u32, height: u32) -> Result<Image> {
+    pub fn capture_area(&self, x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage> {
         let display_info = self.display_info;
         let screen_x2 = display_info.x + display_info.width as i32;
         let screen_y2 = display_info.y + display_info.height as i32;
