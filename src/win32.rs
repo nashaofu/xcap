@@ -19,7 +19,7 @@ use windows::{
     },
 };
 
-use crate::image_utils::create_bgra;
+use crate::image_utils::bgra_to_rgba_image;
 
 // 自动释放资源
 macro_rules! drop_box {
@@ -210,7 +210,7 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Result<R
 
     chunks.reverse();
 
-    create_bgra(
+    bgra_to_rgba_image(
         bitmap.bmWidth as u32,
         bitmap.bmHeight as u32,
         chunks.concat(),

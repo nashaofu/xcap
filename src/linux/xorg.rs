@@ -3,7 +3,7 @@ use display_info::DisplayInfo;
 use image::RgbaImage;
 use xcb::x::{Drawable, GetImage, ImageFormat, ImageOrder};
 
-use crate::image_utils::create_rgba;
+use crate::image_utils::vec_to_rgba_image;
 
 fn get_pixel8_rgba(
     bytes: &Vec<u8>,
@@ -121,7 +121,7 @@ fn capture(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage> {
         }
     }
 
-    create_rgba(width, height, rgba)
+    vec_to_rgba_image(width, height, rgba)
 }
 
 pub fn xorg_capture_screen(display_info: &DisplayInfo) -> Result<RgbaImage> {

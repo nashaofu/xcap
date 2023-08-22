@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     env::temp_dir,
-    fs::{self, File},
+    fs::{self},
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -12,9 +12,9 @@ use dbus::{
     blocking::Connection,
     message::{MatchRule, SignalArgs},
 };
+use image::{self, RgbaImage};
 use libwayshot::{CaptureRegion, WayshotConnection};
 use percent_encoding::percent_decode;
-use png::Decoder;
 
 #[derive(Debug)]
 pub struct OrgFreedesktopPortalRequestResponse {
@@ -43,32 +43,16 @@ impl SignalArgs for OrgFreedesktopPortalRequestResponse {
     const INTERFACE: &'static str = "org.freedesktop.portal.Request";
 }
 
-fn png_to_rgba(filename: &String, x: i32, y: i32, width: i32, height: i32) -> Result<Vec<u8>> {
-    let decoder = Decoder::new(File::open(filename)?);
-
-    let mut reader = decoder.read_info()?;
-    // Allocate the output buffer.
-    let mut buf = vec![0u8; reader.output_buffer_size()];
-    // Read the next frame. An APNG might contain multiple frames.
-    let info = reader.next_frame(&mut buf)?;
-    // Grab the bytes of the image.
-    let bytes = &buf[..info.buffer_size()];
-
-    let mut rgba = vec![0u8; (width * height * 4) as usize];
-    // 图片裁剪
-    for r in y..(y + height) {
-        for c in x..(x + width) {
-            let index = (((r - y) * width + (c - x)) * 4) as usize;
-            let i = ((r * info.width as i32 + c) * 4) as usize;
-            // 防止获取到的图片尺寸小于指定大小而 panic
-            rgba[index] = bytes.get(i).copied().unwrap_or(0);
-            rgba[index + 1] = bytes.get(i + 1).copied().unwrap_or(0);
-            rgba[index + 2] = bytes.get(i + 2).copied().unwrap_or(0);
-            rgba[index + 3] = bytes.get(i + 3).copied().unwrap_or(0);
-        }
-    }
-
-    Ok(rgba)
+fn png_to_rgba_image(
+    filename: &String,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> Result<RgbaImage> {
+    let mut dynamic_image = image::open(filename)?;
+    dynamic_image = dynamic_image.crop(x as u32, y as u32, width as u32, height as u32);
+    Ok(dynamic_image.to_rgba8())
 }
 
 fn org_gnome_shell_screenshot(
@@ -77,7 +61,7 @@ fn org_gnome_shell_screenshot(
     y: i32,
     width: i32,
     height: i32,
-) -> Result<Vec<u8>> {
+) -> Result<RgbaImage> {
     let proxy = conn.with_proxy(
         "org.gnome.Shell.Screenshot",
         "/org/gnome/Shell/Screenshot",
@@ -101,11 +85,11 @@ fn org_gnome_shell_screenshot(
         (x, y, width, height, false, &filename),
     )?;
 
-    let rgba = png_to_rgba(&filename, x, y, width, height)?;
+    let rgba_image = png_to_rgba_image(&filename, x, y, width, height)?;
 
     fs::remove_file(&filename)?;
 
-    Ok(rgba)
+    Ok(rgba_image)
 }
 
 fn org_freedesktop_portal_screenshot(
@@ -114,7 +98,7 @@ fn org_freedesktop_portal_screenshot(
     y: i32,
     width: i32,
     height: i32,
-) -> Result<Vec<u8>> {
+) -> Result<RgbaImage> {
     let status: Arc<Mutex<Option<u32>>> = Arc::new(Mutex::new(None));
     let status_res = status.clone();
     let path: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
@@ -187,11 +171,11 @@ fn org_freedesktop_portal_screenshot(
     }
 
     let filename = percent_decode(path.as_bytes()).decode_utf8()?.to_string();
-    let rgba = png_to_rgba(&filename, x, y, width, height)?;
+    let rgba_image = png_to_rgba_image(&filename, x, y, width, height)?;
 
     fs::remove_file(&filename)?;
 
-    Ok(rgba)
+    Ok(rgba_image)
 }
 
 fn wlr_screenshot(
@@ -199,23 +183,21 @@ fn wlr_screenshot(
     y_coordinate: i32,
     width: i32,
     height: i32,
-) -> Result<Vec<u8>> {
+) -> Result<RgbaImage> {
     let wayshot_connection = WayshotConnection::new()?;
-    Ok(wayshot_connection
-        .screenshot(
-            CaptureRegion {
-                x_coordinate,
-                y_coordinate,
-                width,
-                height,
-            },
-            false,
-        )?
-        .into_raw())
+    let capture_region = CaptureRegion {
+        x_coordinate,
+        y_coordinate,
+        width,
+        height,
+    };
+    let rgba_image = wayshot_connection.screenshot(capture_region, false)?;
+
+    Ok(rgba_image)
 }
 
 // TODO: 失败后尝试删除文件
-pub fn wayland_screenshot(x: i32, y: i32, width: i32, height: i32) -> Result<Vec<u8>> {
+pub fn wayland_screenshot(x: i32, y: i32, width: i32, height: i32) -> Result<RgbaImage> {
     let conn = Connection::new_session()?;
 
     // TODO: work out if compositor is wlroots before attempting anything else

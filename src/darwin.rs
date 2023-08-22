@@ -6,7 +6,7 @@ use core_graphics::{
 use display_info::DisplayInfo;
 use image::RgbaImage;
 
-use crate::image_utils::{create_bgra, remove_extra_data};
+use crate::image_utils::{bgra_to_rgba_image, remove_extra_data};
 
 fn capture(display_info: &DisplayInfo, cg_rect: CGRect) -> Result<RgbaImage> {
     let cg_image = CGDisplay::screenshot(
@@ -25,7 +25,7 @@ fn capture(display_info: &DisplayInfo, cg_rect: CGRect) -> Result<RgbaImage> {
         Vec::from(cg_image.data().bytes()),
     );
 
-    create_bgra(width as u32, height as u32, clean_buf)
+    bgra_to_rgba_image(width as u32, height as u32, clean_buf)
 }
 
 pub fn capture_screen(display_info: &DisplayInfo) -> Result<RgbaImage> {

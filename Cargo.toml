@@ -29,5 +29,4 @@ windows = { version = "0.48", features = [
 [target.'cfg(target_os="linux")'.dependencies]
 dbus = { version = "0.9", features = ["vendored"] }
 libwayshot = "0.2"
-png = "0.17"
 xcb = "1.2"
