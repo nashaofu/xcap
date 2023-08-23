@@ -1,32 +1,35 @@
 name: Lint
 
 on:
-  push:
-    branches:
-      - master
-    tags-ignore:
-      - '**'
-  pull_request: null
+    push:
+        branches:
+            - master
+        tags-ignore:
+            - "**"
+    pull_request: null
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
 
 jobs:
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
+    lint:
+        name: Lint
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v3
 
-      - name: Install rust toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          components: rustfmt, clippy
+            - name: Install rust toolchain
+              uses: actions-rs/toolchain@v1
+              with:
+                  toolchain: stable
+                  components: rustfmt, clippy
 
-      - name: Cargo fmt
-        run: cargo fmt -- --check
+            - name: Cargo fmt
+              run: cargo fmt -- --check
 
-      - name: Clippy
-        run: cargo clippy
+            - name: Clippy
+              run: cargo clippy
+
+            - name: Test
+              run: cargo test

@@ -1,8 +1,7 @@
-use anyhow::{anyhow, Result};
+use crate::linux::wayland_screenshot::wayland_screenshot;
+use anyhow::Result;
 use display_info::DisplayInfo;
 use image::RgbaImage;
-
-use crate::linux::wayland_screenshot::wayland_screenshot;
 
 pub fn wayland_capture_screen(display_info: &DisplayInfo) -> Result<RgbaImage> {
     let x = ((display_info.x as f32) * display_info.scale_factor) as i32;
@@ -10,9 +9,7 @@ pub fn wayland_capture_screen(display_info: &DisplayInfo) -> Result<RgbaImage> {
     let width = (display_info.width as f32) * display_info.scale_factor;
     let height = (display_info.height as f32) * display_info.scale_factor;
 
-    let rgba = wayland_screenshot(x, y, width as i32, height as i32)?;
-
-    RgbaImage::from_vec(width as u32, height as u32, rgba).ok_or(anyhow!("buffer not big enough"))
+    wayland_screenshot(x, y, width as i32, height as i32)
 }
 
 pub fn wayland_capture_screen_area(
@@ -27,7 +24,5 @@ pub fn wayland_capture_screen_area(
     let area_width = (width as f32) * display_info.scale_factor;
     let area_height = (height as f32) * display_info.scale_factor;
 
-    let rgba = wayland_screenshot(area_x, area_y, area_width as i32, area_height as i32)?;
-
-    RgbaImage::from_vec(width as u32, height as u32, rgba).ok_or(anyhow!("buffer not big enough"))
+    wayland_screenshot(area_x, area_y, area_width as i32, area_height as i32)
 }
