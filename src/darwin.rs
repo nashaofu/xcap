@@ -1,3 +1,4 @@
+use crate::image_utils::{bgra_to_rgba_image, remove_extra_data};
 use anyhow::{anyhow, Result};
 use core_graphics::{
     display::{kCGNullWindowID, kCGWindowImageDefault, kCGWindowListOptionOnScreenOnly, CGDisplay},
@@ -5,8 +6,6 @@ use core_graphics::{
 };
 use display_info::DisplayInfo;
 use image::RgbaImage;
-
-use crate::image_utils::{bgra_to_rgba_image, remove_extra_data};
 
 fn capture(display_info: &DisplayInfo, cg_rect: CGRect) -> Result<RgbaImage> {
     let cg_image = CGDisplay::screenshot(

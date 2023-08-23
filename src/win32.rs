@@ -1,9 +1,9 @@
-use std::{mem, ops::Deref, ptr};
-
+use crate::image_utils::bgra_to_rgba_image;
 use anyhow::{anyhow, Result};
 use display_info::DisplayInfo;
 use fxhash::hash32;
 use image::RgbaImage;
+use std::{mem, ops::Deref, ptr};
 use widestring::U16CString;
 use windows::{
     core::PCWSTR,
@@ -18,8 +18,6 @@ use windows::{
         },
     },
 };
-
-use crate::image_utils::bgra_to_rgba_image;
 
 // 自动释放资源
 macro_rules! drop_box {

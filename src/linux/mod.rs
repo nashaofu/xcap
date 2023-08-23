@@ -2,12 +2,10 @@ mod wayland;
 mod wayland_screenshot;
 mod xorg;
 
-use std::env::var_os;
-
 use anyhow::Result;
 use display_info::DisplayInfo;
 use image::RgbaImage;
-
+use std::env::var_os;
 use wayland::{wayland_capture_screen, wayland_capture_screen_area};
 use xorg::{xorg_capture_screen, xorg_capture_screen_area};
 

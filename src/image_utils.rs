@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use image::RgbaImage;
+use image::{open, RgbaImage};
 
 pub fn vec_to_rgba_image(width: u32, height: u32, buf: Vec<u8>) -> Result<RgbaImage> {
     RgbaImage::from_vec(width, height, buf).ok_or(anyhow!("buffer not big enough"))
@@ -29,6 +29,19 @@ pub fn remove_extra_data(width: usize, bytes_per_row: usize, buf: Vec<u8>) -> Ve
         .map(|row| row.split_at(width * 4).0.to_owned())
         .flatten()
         .collect()
+}
+
+#[cfg(any(target_os = "linux", test))]
+pub fn png_to_rgba_image(
+    filename: &String,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> Result<RgbaImage> {
+    let mut dynamic_image = open(filename)?;
+    dynamic_image = dynamic_image.crop(x as u32, y as u32, width as u32, height as u32);
+    Ok(dynamic_image.to_rgba8())
 }
 
 #[cfg(test)]

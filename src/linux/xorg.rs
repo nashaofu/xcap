@@ -1,9 +1,8 @@
+use crate::image_utils::vec_to_rgba_image;
 use anyhow::{anyhow, Result};
 use display_info::DisplayInfo;
 use image::RgbaImage;
 use xcb::x::{Drawable, GetImage, ImageFormat, ImageOrder};
-
-use crate::image_utils::vec_to_rgba_image;
 
 fn get_pixel8_rgba(
     bytes: &Vec<u8>,

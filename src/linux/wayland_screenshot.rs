@@ -1,3 +1,13 @@
+use crate::image_utils::png_to_rgba_image;
+use anyhow::{anyhow, Result};
+use dbus::{
+    arg::{AppendAll, Iter, IterAppend, PropMap, ReadAll, RefArg, TypeMismatchError, Variant},
+    blocking::Connection,
+    message::{MatchRule, SignalArgs},
+};
+use image::RgbaImage;
+use libwayshot::{CaptureRegion, WayshotConnection};
+use percent_encoding::percent_decode;
 use std::{
     collections::HashMap,
     env::temp_dir,
@@ -5,16 +15,6 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-
-use anyhow::{anyhow, Result};
-use dbus::{
-    arg::{AppendAll, Iter, IterAppend, PropMap, ReadAll, RefArg, TypeMismatchError, Variant},
-    blocking::Connection,
-    message::{MatchRule, SignalArgs},
-};
-use image::{self, RgbaImage};
-use libwayshot::{CaptureRegion, WayshotConnection};
-use percent_encoding::percent_decode;
 
 #[derive(Debug)]
 pub struct OrgFreedesktopPortalRequestResponse {
@@ -41,18 +41,6 @@ impl ReadAll for OrgFreedesktopPortalRequestResponse {
 impl SignalArgs for OrgFreedesktopPortalRequestResponse {
     const NAME: &'static str = "Response";
     const INTERFACE: &'static str = "org.freedesktop.portal.Request";
-}
-
-fn png_to_rgba_image(
-    filename: &String,
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-) -> Result<RgbaImage> {
-    let mut dynamic_image = image::open(filename)?;
-    dynamic_image = dynamic_image.crop(x as u32, y as u32, width as u32, height as u32);
-    Ok(dynamic_image.to_rgba8())
 }
 
 fn org_gnome_shell_screenshot(

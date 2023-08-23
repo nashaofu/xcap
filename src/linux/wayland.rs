@@ -1,8 +1,7 @@
+use crate::linux::wayland_screenshot::wayland_screenshot;
 use anyhow::Result;
 use display_info::DisplayInfo;
 use image::RgbaImage;
-
-use crate::linux::wayland_screenshot::wayland_screenshot;
 
 pub fn wayland_capture_screen(display_info: &DisplayInfo) -> Result<RgbaImage> {
     let x = ((display_info.x as f32) * display_info.scale_factor) as i32;
