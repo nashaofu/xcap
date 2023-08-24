@@ -5,7 +5,7 @@ use image::RgbaImage;
 use xcb::x::{Drawable, GetImage, ImageFormat, ImageOrder};
 
 fn get_pixel8_rgba(
-    bytes: &Vec<u8>,
+    bytes: &[u8],
     x: u32,
     y: u32,
     width: u32,
@@ -28,7 +28,7 @@ fn get_pixel8_rgba(
 }
 
 fn get_pixel16_rgba(
-    bytes: &Vec<u8>,
+    bytes: &[u8],
     x: u32,
     y: u32,
     width: u32,
@@ -51,7 +51,7 @@ fn get_pixel16_rgba(
 }
 
 fn get_pixel24_32_rgba(
-    bytes: &Vec<u8>,
+    bytes: &[u8],
     x: u32,
     y: u32,
     width: u32,
@@ -87,7 +87,7 @@ fn capture(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage> {
     });
 
     let get_image_reply = conn.wait_for_reply(get_image_cookie)?;
-    let bytes = Vec::from(get_image_reply.data());
+    let bytes = get_image_reply.data();
     let depth = get_image_reply.depth();
 
     let mut rgba = vec![0u8; (width * height * 4) as usize];
@@ -111,7 +111,7 @@ fn capture(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage> {
     for y in 0..height {
         for x in 0..width {
             let index = ((y * width + x) * 4) as usize;
-            let (r, g, b, a) = get_pixel_rgba(&bytes, x, y, width, bits_per_pixel, bit_order);
+            let (r, g, b, a) = get_pixel_rgba(bytes, x, y, width, bits_per_pixel, bit_order);
 
             rgba[index] = r;
             rgba[index + 1] = g;
