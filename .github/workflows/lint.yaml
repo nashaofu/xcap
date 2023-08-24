@@ -14,8 +14,15 @@ concurrency:
 
 jobs:
     lint:
-        name: Lint
-        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                host:
+                    - macos-latest
+                    - windows-latest
+                    - ubuntu-latest
+        name: Lint on ${{ matrix.host }}
+        runs-on: ${{ matrix.host }}
         steps:
             - uses: actions/checkout@v3
 
