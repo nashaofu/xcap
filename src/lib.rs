@@ -94,6 +94,8 @@ impl Screen {
     }
 }
 
+#[cfg(target_os = "macos")]
+#[cfg(feature = "mac-window")]
 pub mod window {
 
     use anyhow::Result;

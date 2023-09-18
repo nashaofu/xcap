@@ -1,15 +1,17 @@
 use crate::image_utils::{bgra_to_rgba_image, remove_extra_data};
 use anyhow::{anyhow, Result};
 use core_graphics::{
-    display::{
-        kCGNullWindowID, kCGWindowImageDefault, kCGWindowListOptionIncludingWindow,
-        kCGWindowListOptionOnScreenOnly, CGDisplay,
-    },
+    display::{kCGNullWindowID, kCGWindowImageDefault, kCGWindowListOptionOnScreenOnly, CGDisplay},
     geometry::{CGPoint, CGRect, CGSize},
 };
 use display_info::DisplayInfo;
 use image::RgbaImage;
 
+#[cfg(target_os = "macos")]
+#[cfg(feature = "mac-window")]
+use core_graphics::display::kCGWindowListOptionIncludingWindow;
+#[cfg(target_os = "macos")]
+#[cfg(feature = "mac-window")]
 use screencapturekit::sc_window::SCWindow;
 
 fn capture(display_info: &DisplayInfo, cg_rect: CGRect) -> Result<RgbaImage> {
@@ -32,6 +34,8 @@ fn capture(display_info: &DisplayInfo, cg_rect: CGRect) -> Result<RgbaImage> {
     bgra_to_rgba_image(width as u32, height as u32, clean_buf)
 }
 
+#[cfg(target_os = "macos")]
+#[cfg(feature = "mac-window")]
 fn convert_to_sc_cg_rect_to_core_cg_react(
     value: screencapturekit::sc_sys::geometry::CGRect,
 ) -> CGRect {
@@ -47,6 +51,8 @@ fn convert_to_sc_cg_rect_to_core_cg_react(
     }
 }
 
+#[cfg(target_os = "macos")]
+#[cfg(feature = "mac-window")]
 pub fn do_capture_window(window: &SCWindow) -> Result<RgbaImage> {
     let sc_react = window.rect;
     let cg_image = CGDisplay::screenshot(

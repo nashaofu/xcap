@@ -17,10 +17,7 @@ percent-encoding = "2.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-graphics = "0.23"
-# screencapturekit = { version = "0.1", git = "https://github.com/bigduu/screencapturekit-rs.git", optional = true }
-
-screencapturekit = { version = "0.1", git = "https://github.com/bigduu/screencapturekit-rs.git" }
-
+screencapturekit = { version = "0.1", git = "https://github.com/bigduu/screencapturekit-rs.git", optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 fxhash = "0.2"
@@ -37,4 +34,4 @@ xcb = "1.2"
 
 [features]
 default = []
-# mac-window = ["dep:screencapturekit"]
+mac-window = ["dep:screencapturekit"]
