@@ -93,3 +93,33 @@ impl Screen {
         )
     }
 }
+
+pub mod window {
+
+    use anyhow::Result;
+    use image::RgbaImage;
+    use screencapturekit::{sc_shareable_content::SCShareableContent, sc_window::SCWindow};
+
+    #[derive(Debug, Clone)]
+    pub struct Window {
+        pub window_vec: Vec<SCWindow>,
+    }
+
+    impl Window {
+        pub fn new() -> Self {
+            Window {
+                window_vec: SCShareableContent::current().windows,
+            }
+        }
+    }
+
+    impl Default for Window {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    pub fn capture_window(sc_window: &SCWindow) -> Result<RgbaImage> {
+        crate::darwin::do_capture_window(sc_window)
+    }
+}
