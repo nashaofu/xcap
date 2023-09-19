@@ -1,6 +1,6 @@
 [package]
 name = "screenshots"
-version = "0.8.2"
+version = "0.8.3"
 edition = "2021"
 description = "A cross-platform screen capturer library"
 license = "Apache-2.0"
@@ -21,7 +21,7 @@ core-graphics = "0.22"
 [target.'cfg(target_os = "windows")'.dependencies]
 fxhash = "0.2"
 widestring = "1.0"
-windows = { version = "0.51.1", features = [
+windows = { version = "0.51", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
 ] }

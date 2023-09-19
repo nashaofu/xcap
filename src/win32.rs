@@ -10,11 +10,10 @@ use windows::{
     Win32::{
         Foundation::{BOOL, LPARAM, RECT},
         Graphics::Gdi::{
-            CreateCompatibleBitmap, CreateCompatibleDC, CreateDCW, DeleteDC,
-            DeleteObject, EnumDisplayMonitors, GetDIBits, GetMonitorInfoW, GetObjectW,
-            SelectObject, SetStretchBltMode, StretchBlt, BITMAP, BITMAPINFO, BITMAPINFOHEADER,
-            DIB_RGB_COLORS, HBITMAP, HDC, HMONITOR, MONITORINFOEXW, RGBQUAD, SRCCOPY,
-            STRETCH_HALFTONE,
+            CreateCompatibleBitmap, CreateCompatibleDC, CreateDCW, DeleteDC, DeleteObject,
+            EnumDisplayMonitors, GetDIBits, GetMonitorInfoW, GetObjectW, SelectObject,
+            SetStretchBltMode, StretchBlt, BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS,
+            HBITMAP, HDC, HMONITOR, MONITORINFOEXW, RGBQUAD, SRCCOPY, STRETCH_HALFTONE,
         },
     },
 };
