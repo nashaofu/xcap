@@ -10,7 +10,7 @@ use windows::{
     Win32::{
         Foundation::{BOOL, LPARAM, RECT},
         Graphics::Gdi::{
-            CreateCompatibleBitmap, CreateCompatibleDC, CreateDCW, CreatedHDC, DeleteDC,
+            CreateCompatibleBitmap, CreateCompatibleDC, CreateDCW, DeleteDC,
             DeleteObject, EnumDisplayMonitors, GetDIBits, GetMonitorInfoW, GetObjectW,
             SelectObject, SetStretchBltMode, StretchBlt, BITMAP, BITMAPINFO, BITMAPINFOHEADER,
             DIB_RGB_COLORS, HBITMAP, HDC, HMONITOR, MONITORINFOEXW, RGBQUAD, SRCCOPY,
@@ -106,7 +106,7 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Result<R
     let sz_device_ptr = sz_device.as_ptr();
 
     let dcw_drop_box = drop_box!(
-        CreatedHDC,
+        HDC,
         unsafe {
             CreateDCW(
                 PCWSTR(sz_device_ptr),
@@ -119,7 +119,7 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Result<R
     );
 
     let compatible_dc_drop_box = drop_box!(
-        CreatedHDC,
+        HDC,
         unsafe { CreateCompatibleDC(*dcw_drop_box) },
         |compatible_dc| unsafe { DeleteDC(compatible_dc) }
     );
