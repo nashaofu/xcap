@@ -1,8 +1,11 @@
 mod image_utils;
 
 use anyhow::{anyhow, Result};
-pub use display_info::DisplayInfo;
+use display_info::DisplayInfo;
 use image::RgbaImage;
+
+pub use display_info;
+pub use image;
 
 #[cfg(target_os = "macos")]
 mod darwin;
