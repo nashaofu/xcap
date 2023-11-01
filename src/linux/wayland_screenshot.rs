@@ -73,7 +73,7 @@ fn org_gnome_shell_screenshot(
         (x, y, width, height, false, &filename),
     )?;
 
-    let rgba_image = png_to_rgba_image(&filename, x, y, width, height)?;
+    let rgba_image = png_to_rgba_image(&filename, 0, 0, width, height)?;
 
     fs::remove_file(&filename)?;
 
