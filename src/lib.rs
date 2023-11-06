@@ -1,6 +1,6 @@
 mod image_utils;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhsow, Result};
 use display_info::DisplayInfo;
 use image::RgbaImage;
 
@@ -22,36 +22,40 @@ mod linux;
 #[cfg(target_os = "linux")]
 use linux::*;
 
+/// This struct represents a screen capturer.
 #[derive(Debug, Clone, Copy)]
 pub struct Screen {
     pub display_info: DisplayInfo,
 }
 
 impl Screen {
+    /// Get a screen from the [display_info].
+    ///
+    /// [display_info]:  https://docs.rs/display-info/latest/display_info/struct.DisplayInfo.html
     pub fn new(display_info: &DisplayInfo) -> Self {
         Screen {
             display_info: *display_info,
         }
     }
 
+    /// Return all available screens.
     pub fn all() -> Result<Vec<Screen>> {
         let screens = DisplayInfo::all()?.iter().map(Screen::new).collect();
         Ok(screens)
     }
 
+    /// Get a screen which includes the point with the given coordinates.
     pub fn from_point(x: i32, y: i32) -> Result<Screen> {
         let display_info = DisplayInfo::from_point(x, y)?;
         Ok(Screen::new(&display_info))
     }
 
+    /// Capture a screenshot of the screen.
     pub fn capture(&self) -> Result<RgbaImage> {
         capture_screen(&self.display_info)
     }
 
-    /**
-     * 截取指定区域
-     * 区域x,y为相对于当前屏幕的x,y坐标
-     */
+    /// Captures a screenshot of the designated area of the screen.
     pub fn capture_area(&self, x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage> {
         let display_info = self.display_info;
         let screen_x2 = display_info.x + display_info.width as i32;
