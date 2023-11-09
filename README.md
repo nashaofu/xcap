@@ -36,18 +36,6 @@ fn main() {
 }
 ```
 
-## API
-
-### `Screen`
-
-The `Screen` struct represents a screen capturer and provides the following methods:
-
--   `Screen::new(display_info)`: Get a screen from the [display info](https://docs.rs/display-info/latest/display_info/struct.DisplayInfo.html), returns a `Screen`.
--   `Screen::all()`: Get all screens, returns `Result<Vec<Screen>>`.
--   `Screen::from_point(x, y)`: Get a screen from a point, returns `Result<Screen>`.
--   `screen.capture()`: Capture a screenshot of the screen, returns a [image](https://docs.rs/image/latest/image/type.RgbaImage.html) as `Result<RgbaImage>`.
--   `screen.capture_area(x, y, width, height)`: Capture a screenshot of the designated area of the screen, returns the same as `capture()`.
-
 ## Linux Requirements
 
 On Linux, you need to install `libxcb`, `libxrandr`, and `dbus`.
