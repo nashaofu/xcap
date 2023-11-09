@@ -1,6 +1,6 @@
 mod image_utils;
 
-use anyhow::{anyhsow, Result};
+use anyhow::{anyhow, Result};
 use display_info::DisplayInfo;
 use image::RgbaImage;
 
