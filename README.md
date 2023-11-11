@@ -52,6 +52,12 @@ Alpine:
 apk add libxcb libxrandr dbus
 ```
 
+ArchLinux:
+
+```sh
+pacman -S libxcb libxrandr dbus
+```
+
 ## License
 
 This project is licensed under the Apache License. See the [LICENSE](LICENSE) file for details.
