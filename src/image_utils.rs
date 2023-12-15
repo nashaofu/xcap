@@ -7,13 +7,14 @@ pub fn vec_to_rgba_image(width: u32, height: u32, buf: Vec<u8>) -> Result<RgbaIm
 
 #[cfg(any(target_os = "windows", target_os = "macos", test))]
 pub fn bgra_to_rgba_image(width: u32, height: u32, buf: Vec<u8>) -> Result<RgbaImage> {
-    // convert to rgba
-    let rgba_buf = buf
-        .chunks_exact(4)
-        .take((width * height) as usize)
-        .flat_map(|bgra| [bgra[2], bgra[1], bgra[0], bgra[3]])
-        .collect();
+    let mut rgba_buf = buf.clone();
 
+    for (src, dst) in buf.chunks_exact(4).zip(rgba_buf.chunks_exact_mut(4)) {
+        dst[0] = src[2];
+        dst[1] = src[1];
+        dst[2] = src[0];
+        dst[3] = src[3];
+    }
     vec_to_rgba_image(width, height, rgba_buf)
 }
 
