@@ -20,6 +20,7 @@ fn capture(display_info: &DisplayInfo, cg_rect: CGRect) -> Result<RgbaImage> {
     let height = cg_image.height();
     let clean_buf = remove_extra_data(
         width,
+        height,
         cg_image.bytes_per_row(),
         Vec::from(cg_image.data().bytes()),
     );
