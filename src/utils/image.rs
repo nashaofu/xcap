@@ -1,12 +1,13 @@
-use anyhow::{anyhow, Result};
 use image::RgbaImage;
 
-pub fn vec_to_rgba_image(width: u32, height: u32, buf: Vec<u8>) -> Result<RgbaImage> {
-    RgbaImage::from_vec(width, height, buf).ok_or(anyhow!("buffer not big enough"))
+use crate::error::{XCapError, XCapResult};
+
+pub fn vec_to_rgba_image(width: u32, height: u32, buf: Vec<u8>) -> XCapResult<RgbaImage> {
+    RgbaImage::from_vec(width, height, buf).ok_or_else(|| XCapError::new("buffer not big enough"))
 }
 
 #[cfg(any(target_os = "windows", target_os = "macos", test))]
-pub fn bgra_to_rgba_image(width: u32, height: u32, buf: Vec<u8>) -> Result<RgbaImage> {
+pub fn bgra_to_rgba_image(width: u32, height: u32, buf: Vec<u8>) -> XCapResult<RgbaImage> {
     let mut rgba_buf = buf.clone();
 
     for (src, dst) in buf.chunks_exact(4).zip(rgba_buf.chunks_exact_mut(4)) {
@@ -21,8 +22,8 @@ pub fn bgra_to_rgba_image(width: u32, height: u32, buf: Vec<u8>) -> Result<RgbaI
 /// Some platforms e.g. MacOS can have extra bytes at the end of each row.
 ///
 /// See
-/// https://github.com/nashaofu/screenshots-rs/issues/29
-/// https://github.com/nashaofu/screenshots-rs/issues/38
+/// https://github.com/nashaofu/xcap/issues/29
+/// https://github.com/nashaofu/xcap/issues/38
 #[cfg(any(target_os = "macos", test))]
 pub fn remove_extra_data(
     width: usize,
@@ -37,21 +38,6 @@ pub fn remove_extra_data(
     }
 
     result
-}
-
-#[cfg(any(target_os = "linux", test))]
-pub fn png_to_rgba_image(
-    filename: &String,
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-) -> Result<RgbaImage> {
-    use image::open;
-
-    let mut dynamic_image = open(filename)?;
-    dynamic_image = dynamic_image.crop(x as u32, y as u32, width as u32, height as u32);
-    Ok(dynamic_image.to_rgba8())
 }
 
 #[cfg(test)]

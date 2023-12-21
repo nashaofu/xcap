@@ -1,8 +1,13 @@
-use crate::image_utils::vec_to_rgba_image;
-use anyhow::{anyhow, Result};
-use display_info::DisplayInfo;
 use image::RgbaImage;
-use xcb::x::{Drawable, GetImage, ImageFormat, ImageOrder};
+use xcb::{
+    x::{Drawable, GetImage, ImageFormat, ImageOrder, Window},
+    Connection,
+};
+
+use crate::{
+    error::{XCapError, XCapResult},
+    utils::image::vec_to_rgba_image,
+};
 
 fn get_pixel8_rgba(
     bytes: &[u8],
@@ -67,18 +72,20 @@ fn get_pixel24_32_rgba(
     }
 }
 
-fn capture(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage> {
-    let (conn, index) = xcb::Connection::connect(None)?;
+pub fn xorg_capture(
+    window: Window,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> XCapResult<RgbaImage> {
+    let (conn, _) = Connection::connect(None)?;
 
     let setup = conn.get_setup();
-    let screen = setup
-        .roots()
-        .nth(index as usize)
-        .ok_or_else(|| anyhow!("Not found screen"))?;
 
     let get_image_cookie = conn.send_request(&GetImage {
         format: ImageFormat::ZPixmap,
-        drawable: Drawable::Window(screen.root()),
+        drawable: Drawable::Window(window),
         x: x as i16,
         y: y as i16,
         width: width as u16,
@@ -95,7 +102,7 @@ fn capture(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage> {
         .pixmap_formats()
         .iter()
         .find(|item| item.depth() == depth)
-        .ok_or(anyhow!("Not found pixmap format"))?;
+        .ok_or(XCapError::new("Not found pixmap format"))?;
 
     let bits_per_pixel = pixmap_format.bits_per_pixel() as u32;
     let bit_order = setup.bitmap_format_bit_order();
@@ -105,7 +112,7 @@ fn capture(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage> {
         16 => get_pixel16_rgba,
         24 => get_pixel24_32_rgba,
         32 => get_pixel24_32_rgba,
-        _ => return Err(anyhow!("Unsupported {} depth", depth)),
+        _ => return Err(XCapError::new(format!("Unsupported {} depth", depth))),
     };
 
     for y in 0..height {
@@ -121,28 +128,4 @@ fn capture(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage> {
     }
 
     vec_to_rgba_image(width, height, rgba)
-}
-
-pub fn xorg_capture_screen(display_info: &DisplayInfo) -> Result<RgbaImage> {
-    let x = ((display_info.x as f32) * display_info.scale_factor) as i32;
-    let y = ((display_info.y as f32) * display_info.scale_factor) as i32;
-    let width = ((display_info.width as f32) * display_info.scale_factor) as u32;
-    let height = ((display_info.height as f32) * display_info.scale_factor) as u32;
-
-    capture(x, y, width, height)
-}
-
-pub fn xorg_capture_screen_area(
-    display_info: &DisplayInfo,
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
-) -> Result<RgbaImage> {
-    let area_x = (((x + display_info.x) as f32) * display_info.scale_factor) as i32;
-    let area_y = (((y + display_info.y) as f32) * display_info.scale_factor) as i32;
-    let area_width = ((width as f32) * display_info.scale_factor) as u32;
-    let area_height = ((height as f32) * display_info.scale_factor) as u32;
-
-    capture(area_x, area_y, area_width, area_height)
 }
