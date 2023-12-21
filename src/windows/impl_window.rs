@@ -3,6 +3,7 @@ use image::RgbaImage;
 use std::{cmp::Ordering, ffi::c_void, mem, ptr};
 use windows::{
     core::{HSTRING, PCWSTR},
+    Graphics::Capture::GraphicsCaptureItem,
     Win32::{
         Foundation::{BOOL, HWND, LPARAM, MAX_PATH, RECT, TRUE},
         Graphics::{
@@ -28,6 +29,11 @@ use crate::{
 };
 
 use super::{capture::capture_window, impl_monitor::ImplMonitor, utils::wide_string_to_string};
+use super::{
+    d3d_capture::d3d_capture,
+    impl_monitor::ImplMonitor,
+    utils::{get_window_rect, wide_string_to_string},
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImplWindow {
@@ -257,7 +263,7 @@ fn get_app_name(hwnd: HWND) -> XCapResult<String> {
             slice::from_raw_parts(lang_code_pages_ptr.cast(), lang_code_pages_length as usize);
 
         // 按照 keys 的顺序读取文件的属性值
-        // 优先读取 FileDescription
+        // 优先读取 ProductName
         let keys = [
             "FileDescription",
             "ProductName",
@@ -382,11 +388,8 @@ impl ImplWindow {
     }
 
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
-        // TODO: 在win10之后，不同窗口有不同的dpi，所以可能存在截图不全或者截图有较大空白，实际窗口没有填充满图片
-        capture_window(
-            self.hwnd,
-            self.current_monitor.scale_factor,
-            &self.window_info,
-        )
+        // capture_window(self.hwnd)
+        let item = GraphicsCaptureItem::try_from(self)?;
+        d3d_capture(item)
     }
 }
