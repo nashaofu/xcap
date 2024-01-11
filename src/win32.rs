@@ -243,5 +243,5 @@ pub fn capture_screen_area_ignore_sf(
     width: u32,
     height: u32,
 ) -> Result<RgbaImage> {
-    capture(display_info.id, x, y, width, height)
+    capture(display_info.id, x, y, width as i32, height as i32)
 }
