@@ -243,10 +243,5 @@ pub fn capture_screen_area_ignore_sf(
     width: u32,
     height: u32,
 ) -> Result<RgbaImage> {
-    let area_x = ((x as f32)) as i32;
-    let area_y = ((y as f32)) as i32;
-    let area_width = ((width as f32)) as i32;
-    let area_height = ((height as f32)) as i32;
-
-    capture(display_info.id, area_x, area_y, area_width, area_height)
+    capture(display_info.id, x, y, width, height)
 }
