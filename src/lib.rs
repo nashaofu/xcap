@@ -86,7 +86,17 @@ impl Screen {
     
     #[cfg(target_os = "windows")]
     /// No capture area check, caller is responsible for calculating
-    /// the correct parameters according to Screen::display_info
+    /// the correct parameters according to Screen::display_info.
+    /// Example:
+    /// ```
+    /// for screen in screens {
+    ///    println!("Capturing screen info: {screen:?}");
+    ///    let scale = screen.display_info.scale_factor;
+    ///    let real_resoltion = ((screen.display_info.width as f64 / scale as f64) as u32, (screen.display_info.height as f64 / scale as f64) as u32);
+    ///    let image = screen.capture_area_ignore_area_check(0, 0, real_resoltion.0, real_resoltion.1).unwrap();
+    ///    image.save(&format!("screenshot_screen_{}.png", screen.display_info.id)).unwrap();
+    /// }
+    /// ```
     pub fn capture_area_ignore_area_check(&self, x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage> {
         let display_info = self.display_info;
         capture_screen_area_ignore_sf(
