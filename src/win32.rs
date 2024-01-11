@@ -215,8 +215,8 @@ fn capture(display_id: u32, x: i32, y: i32, width: i32, height: i32) -> Result<R
 }
 
 pub fn capture_screen(display_info: &DisplayInfo) -> Result<RgbaImage> {
-    let width = ((display_info.width as f32) * display_info.scale_factor) as i32;
-    let height = ((display_info.height as f32) * display_info.scale_factor) as i32;
+    let width = ((display_info.width as f32) / display_info.scale_factor) as i32;
+    let height = ((display_info.height as f32) / display_info.scale_factor) as i32;
 
     capture(display_info.id, 0, 0, width, height)
 }
@@ -228,10 +228,25 @@ pub fn capture_screen_area(
     width: u32,
     height: u32,
 ) -> Result<RgbaImage> {
-    let area_x = ((x as f32) * display_info.scale_factor) as i32;
-    let area_y = ((y as f32) * display_info.scale_factor) as i32;
-    let area_width = ((width as f32) * display_info.scale_factor) as i32;
-    let area_height = ((height as f32) * display_info.scale_factor) as i32;
+    let area_x = ((x as f32) / display_info.scale_factor) as i32;
+    let area_y = ((y as f32) / display_info.scale_factor) as i32;
+    let area_width = ((width as f32) / display_info.scale_factor) as i32;
+    let area_height = ((height as f32) / display_info.scale_factor) as i32;
+
+    capture(display_info.id, area_x, area_y, area_width, area_height)
+}
+
+pub fn capture_screen_area_ignore_sf(
+    display_info: &DisplayInfo,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Result<RgbaImage> {
+    let area_x = ((x as f32)) as i32;
+    let area_y = ((y as f32)) as i32;
+    let area_width = ((width as f32)) as i32;
+    let area_height = ((height as f32)) as i32;
 
     capture(display_info.id, area_x, area_y, area_width, area_height)
 }
