@@ -66,8 +66,8 @@ impl Screen {
         let y1 = (y + display_info.y).clamp(display_info.y, screen_y2);
     
         // Calculate x2 and y2 and use min to ensure they do not exceed the screen bounds
-        let x2 = min(x1 + width as i32, screen_x2);
-        let y2 = min(y1 + height as i32, screen_y2);
+        let x2 = std::cmp::min(x1 + width as i32, screen_x2);
+        let y2 = std::cmp::min(y1 + height as i32, screen_y2);
     
         // Check if the area size is valid
         if x1 >= x2 || y1 >= y2 {
