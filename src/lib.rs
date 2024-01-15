@@ -60,20 +60,20 @@ impl Screen {
         let display_info = self.display_info;
         let screen_x2 = display_info.x + display_info.width as i32;
         let screen_y2 = display_info.y + display_info.height as i32;
-    
+
         // Use clamp to ensure x1 and y1 are within the screen bounds
         let x1 = (x + display_info.x).clamp(display_info.x, screen_x2);
         let y1 = (y + display_info.y).clamp(display_info.y, screen_y2);
-    
+
         // Calculate x2 and y2 and use min to ensure they do not exceed the screen bounds
         let x2 = std::cmp::min(x1 + width as i32, screen_x2);
         let y2 = std::cmp::min(y1 + height as i32, screen_y2);
-    
+
         // Check if the area size is valid
         if x1 >= x2 || y1 >= y2 {
             return Err(anyhow!("Area size is invalid"));
         }
-    
+
         // Capture the screen area
         capture_screen_area(
             &display_info,
@@ -83,7 +83,7 @@ impl Screen {
             (y2 - y1) as u32,
         )
     }
-    
+
     #[cfg(target_os = "windows")]
     /// No capture area check, caller is responsible for calculating
     /// the correct parameters according to Screen::display_info.
@@ -97,14 +97,14 @@ impl Screen {
     ///    image.save(&format!("screenshot_screen_{}.png", screen.display_info.id)).unwrap();
     /// }
     /// ```
-    pub fn capture_area_ignore_area_check(&self, x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage> {
+    pub fn capture_area_ignore_area_check(
+        &self,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    ) -> Result<RgbaImage> {
         let display_info = self.display_info;
-        capture_screen_area_ignore_sf(
-            &display_info,
-            x,
-            y,
-            width,
-            height,
-        )
+        capture_screen_area_ignore_sf(&display_info, x, y, width, height)
     }
 }
