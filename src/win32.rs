@@ -235,3 +235,13 @@ pub fn capture_screen_area(
 
     capture(display_info.id, area_x, area_y, area_width, area_height)
 }
+
+pub fn capture_screen_area_ignore_sf(
+    display_info: &DisplayInfo,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Result<RgbaImage> {
+    capture(display_info.id, x, y, width as i32, height as i32)
+}
