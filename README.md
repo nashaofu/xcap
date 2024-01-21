@@ -1,37 +1,90 @@
-# 📷 Screenshots
+# 📷 XCap
 
-Screenshots is a cross-platform screenshots library for MacOS, Windows, Linux (X11, Wayland) written in Rust. It provides a simple API for capturing screenshots of a screen or a specific area of a screen.
+XCap is a cross-platform screen capture library for MacOS, Windows, Linux (X11, Wayland) written in Rust. It provides a simple API for capturing screen capture of a screen or a specific area of a screen.
+
+## Features
+
+-   Cross-platform support: Windows Mac and Linux.
+-   Multiple capture modes: screen window.
+-   Video capture、audio capture soon.
 
 ## Example
 
-The following example shows how to capture screenshots of all screens and a specific area of a screen.
+-   Monitor capture
 
 ```rust
-use screenshots::Screen;
+use xcap::Monitor;
 use std::time::Instant;
+
+fn normalized(filename: &str) -> String {
+    filename
+        .replace("|", "")
+        .replace("\\", "")
+        .replace(":", "")
+        .replace("/", "")
+}
 
 fn main() {
     let start = Instant::now();
-    let screens = Screen::all().unwrap();
+    let monitors = Monitor::all().unwrap();
 
-    for screen in screens {
-        println!("capturer {screen:?}");
-        let mut image = screen.capture().unwrap();
-        image
-            .save(format!("target/{}.png", screen.display_info.id))
-            .unwrap();
+    for monitor in monitors {
+        let image = monitor.capture_image().unwrap();
 
-        image = screen.capture_area(300, 300, 300, 300).unwrap();
         image
-            .save(format!("target/{}-2.png", screen.display_info.id))
+            .save(format!("target/monitor-{}.png", normalized(monitor.name())))
             .unwrap();
     }
 
-    let screen = Screen::from_point(100, 100).unwrap();
-    println!("capturer {screen:?}");
+    println!("运行耗时: {:?}", start.elapsed());
+}
+```
 
-    let image = screen.capture_area(300, 300, 300, 300).unwrap();
-    image.save("target/capture_display_with_point.png").unwrap();
+-   Window capture
+
+```rust
+use xcap::Window;
+use std::time::Instant;
+
+fn normalized(filename: &str) -> String {
+    filename
+        .replace("|", "")
+        .replace("\\", "")
+        .replace(":", "")
+        .replace("/", "")
+}
+
+fn main() {
+    let start = Instant::now();
+    let windows = Window::all().unwrap();
+
+    let mut i = 0;
+
+    for window in windows {
+        // 最小化的窗口不能截屏
+        if window.is_minimized() {
+            continue;
+        }
+
+        println!(
+            "Window: {:?} {:?} {:?}",
+            window.title(),
+            (window.x(), window.y(), window.width(), window.height()),
+            (window.is_minimized(), window.is_maximized())
+        );
+
+        let image = window.capture_image().unwrap();
+        image
+            .save(format!(
+                "target/window-{}-{}.png",
+                i,
+                normalized(window.title())
+            ))
+            .unwrap();
+
+        i += 1;
+    }
+
     println!("运行耗时: {:?}", start.elapsed());
 }
 ```
@@ -60,4 +113,4 @@ pacman -S libxcb libxrandr dbus
 
 ## License
 
-This project is licensed under the Apache License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License. See the [LICENSE](../LICENSE) file for details.

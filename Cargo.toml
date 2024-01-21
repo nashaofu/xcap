@@ -1,32 +1,34 @@
 [package]
-name = "screenshots"
-version = "0.8.7"
+name = "xcap"
+version = "0.0.1"
 edition = "2021"
-description = "A cross-platform screen capturer library"
+description = "A cross-platform screen capture library"
 license = "Apache-2.0"
-documentation = "https://docs.rs/screenshots"
-homepage = "https://github.com/nashaofu/screenshots-rs"
-repository = "https://github.com/nashaofu/screenshots-rs.git"
-keywords = ["screenshots", "screenshot", "screen", "capture"]
+documentation = "https://docs.rs/xcap"
+homepage = "https://github.com/nashaofu/xcap"
+repository = "https://github.com/nashaofu/xcap.git"
+keywords = ["screen", "monitor", "window", "capture", "image"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0"
-display-info = "0.4"
 image = "0.24"
-percent-encoding = "2.3"
+thiserror = "1.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-core-graphics = "0.22"
+core-foundation = "0.9"
+core-graphics = "0.23"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-fxhash = "0.2"
-widestring = "1.0"
-windows = { version = "0.51", features = [
+windows = { version = "0.52", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Storage_Xps",
 ] }
 
 [target.'cfg(target_os="linux")'.dependencies]
+percent-encoding = "2.3"
+xcb = { version = "1.3", features = ["randr"] }
 dbus = { version = "0.9", features = ["vendored"] }
-libwayshot = "0.2"
-xcb = "1.2"

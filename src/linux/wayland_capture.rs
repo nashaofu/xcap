@@ -1,12 +1,9 @@
-use crate::image_utils::png_to_rgba_image;
-use anyhow::{anyhow, Result};
 use dbus::{
     arg::{AppendAll, Iter, IterAppend, PropMap, ReadAll, RefArg, TypeMismatchError, Variant},
     blocking::Connection,
     message::{MatchRule, SignalArgs},
 };
 use image::RgbaImage;
-use libwayshot::{CaptureRegion, WayshotConnection};
 use percent_encoding::percent_decode;
 use std::{
     collections::HashMap,
@@ -16,10 +13,14 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+use crate::error::{XCapError, XCapResult};
+
+use super::{impl_monitor::ImplMonitor, utils::png_to_rgba_image};
+
 #[derive(Debug)]
-pub struct OrgFreedesktopPortalRequestResponse {
-    pub status: u32,
-    pub results: PropMap,
+struct OrgFreedesktopPortalRequestResponse {
+    status: u32,
+    results: PropMap,
 }
 
 impl AppendAll for OrgFreedesktopPortalRequestResponse {
@@ -49,7 +50,7 @@ fn org_gnome_shell_screenshot(
     y: i32,
     width: i32,
     height: i32,
-) -> Result<RgbaImage> {
+) -> XCapResult<RgbaImage> {
     let proxy = conn.with_proxy(
         "org.gnome.Shell.Screenshot",
         "/org/gnome/Shell/Screenshot",
@@ -86,7 +87,7 @@ fn org_freedesktop_portal_screenshot(
     y: i32,
     width: i32,
     height: i32,
-) -> Result<RgbaImage> {
+) -> XCapResult<RgbaImage> {
     let status: Arc<Mutex<Option<u32>>> = Arc::new(Mutex::new(None));
     let status_res = status.clone();
     let path: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
@@ -134,7 +135,7 @@ fn org_freedesktop_portal_screenshot(
         let result = conn.process(Duration::from_millis(1000))?;
         let status = status_res
             .lock()
-            .map_err(|_| anyhow!("Get status lock failed"))?;
+            .map_err(|_| XCapError::new("Get status lock failed"))?;
 
         if result && status.is_some() {
             break;
@@ -143,19 +144,19 @@ fn org_freedesktop_portal_screenshot(
 
     let status = status_res
         .lock()
-        .map_err(|_| anyhow!("Get status lock failed"))?;
+        .map_err(|_| XCapError::new("Get status lock failed"))?;
     let status = *status;
 
     let path = path_res
         .lock()
-        .map_err(|_| anyhow!("Get path lock failed"))?;
+        .map_err(|_| XCapError::new("Get path lock failed"))?;
     let path = &*path;
 
     if status.ne(&Some(0)) || path.is_empty() {
         if !path.is_empty() {
             fs::remove_file(path)?;
         }
-        return Err(anyhow!("Screenshot failed or canceled",));
+        return Err(XCapError::new("Screenshot failed or canceled"));
     }
 
     let filename = percent_decode(path.as_bytes()).decode_utf8()?.to_string();
@@ -166,30 +167,14 @@ fn org_freedesktop_portal_screenshot(
     Ok(rgba_image)
 }
 
-fn wlr_screenshot(
-    x_coordinate: i32,
-    y_coordinate: i32,
-    width: i32,
-    height: i32,
-) -> Result<RgbaImage> {
-    let wayshot_connection = WayshotConnection::new()?;
-    let capture_region = CaptureRegion {
-        x_coordinate,
-        y_coordinate,
-        width,
-        height,
-    };
-    let rgba_image = wayshot_connection.screenshot(capture_region, false)?;
+pub fn wayland_capture(impl_monitor: &ImplMonitor) -> XCapResult<RgbaImage> {
+    let x = ((impl_monitor.x as f32) * impl_monitor.scale_factor) as i32;
+    let y = ((impl_monitor.y as f32) * impl_monitor.scale_factor) as i32;
+    let width = ((impl_monitor.width as f32) * impl_monitor.scale_factor) as i32;
+    let height = ((impl_monitor.height as f32) * impl_monitor.scale_factor) as i32;
 
-    Ok(rgba_image)
-}
-
-// TODO: 失败后尝试删除文件
-pub fn wayland_screenshot(x: i32, y: i32, width: i32, height: i32) -> Result<RgbaImage> {
     let conn = Connection::new_session()?;
 
-    // TODO: work out if compositor is wlroots before attempting anything else
     org_gnome_shell_screenshot(&conn, x, y, width, height)
         .or_else(|_| org_freedesktop_portal_screenshot(&conn, x, y, width, height))
-        .or_else(|_| wlr_screenshot(x, y, width, height))
 }
