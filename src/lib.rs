@@ -90,7 +90,7 @@ impl Screen {
     /// Example:
     /// ```
     /// use screenshots::Screen;
-    /// 
+    ///
     /// for screen in Screen::all().unwrap() {
     ///    println!("Capturing screen info: {screen:?}");
     ///    let scale = screen.display_info.scale_factor;
