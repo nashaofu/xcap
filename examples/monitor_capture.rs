@@ -17,7 +17,7 @@ fn main() {
         let image = monitor.capture_image().unwrap();
 
         image
-            .save(format!("target/monitor-{}.png", normalized(monitor.name())))
+            .save(format!("monitor-{}.png", normalized(monitor.name())))
             .unwrap();
     }
 

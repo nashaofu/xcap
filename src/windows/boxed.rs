@@ -3,6 +3,10 @@ use windows::{
     core::PCWSTR,
     Win32::Graphics::Gdi::{CreateDCW, DeleteDC, DeleteObject, GetWindowDC, HBITMAP, HDC},
 };
+use windows::Win32::Foundation::HWND;
+use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC};
+use windows::Win32::UI::WindowsAndMessaging::GetDesktopWindow;
+use crate::{XCapError, XCapResult};
 
 use super::{impl_monitor::ImplMonitor, impl_window::ImplWindow};
 
@@ -80,5 +84,38 @@ impl Drop for BoxHBITMAP {
 impl BoxHBITMAP {
     pub fn new(h_bitmap: HBITMAP) -> Self {
         BoxHBITMAP(h_bitmap)
+    }
+}
+
+pub(crate) struct BoxMonitorHDC {
+    hwnd: HWND,
+    hdc: HDC,
+}
+impl Deref for BoxMonitorHDC {
+    type Target = HDC;
+    fn deref(&self) -> &Self::Target {
+        &self.hdc
+    }
+}
+
+impl Drop for BoxMonitorHDC {
+    fn drop(&mut self) {
+        unsafe {
+            ReleaseDC(self.hwnd, self.hdc);
+        };
+    }
+}
+
+impl BoxMonitorHDC {
+    pub unsafe  fn new() -> XCapResult<BoxMonitorHDC> {
+        let hwnd = GetDesktopWindow();
+        let hdc = GetDC(hwnd);
+        if hdc.is_invalid() {
+            return Err(XCapError::new("GetDC is failed"))
+        }
+        Ok(BoxMonitorHDC{
+            hwnd,
+            hdc,
+        })
     }
 }

@@ -13,6 +13,7 @@ use crate::{
     error::{XCapError, XCapResult},
     utils::image::bgra_to_rgba_image,
 };
+use crate::platform::boxed::BoxMonitorHDC;
 
 use super::{
     boxed::{BoxHBITMAP, BoxHDC},
@@ -75,7 +76,8 @@ pub fn capture_monitor(
     height: i32,
 ) -> XCapResult<RgbaImage> {
     unsafe {
-        let box_hdc_monitor = BoxHDC::from(impl_monitor);
+        let box_hdc_monitor = BoxMonitorHDC::new()?;
+
         // 内存中的HDC
         let box_hdc_mem = BoxHDC::new(CreateCompatibleDC(*box_hdc_monitor));
         let box_h_bitmap = BoxHBITMAP::new(CreateCompatibleBitmap(*box_hdc_monitor, width, height));

@@ -5,14 +5,15 @@ use windows::{
     Win32::{
         Foundation::{BOOL, LPARAM, POINT, RECT, TRUE},
         Graphics::Gdi::{
-            EnumDisplayMonitors, EnumDisplaySettingsExW, GetDeviceCaps, GetMonitorInfoW,
-            MonitorFromPoint, DESKTOPHORZRES, DEVMODEW, DEVMODE_DISPLAY_ORIENTATION, EDS_RAWMODE,
+            EnumDisplayMonitors, GetDeviceCaps, GetMonitorInfoW,
+            MonitorFromPoint, DESKTOPHORZRES, DEVMODEW, DEVMODE_DISPLAY_ORIENTATION,
             ENUM_CURRENT_SETTINGS, HDC, HMONITOR, HORZRES, MONITORINFO, MONITORINFOEXW,
             MONITOR_DEFAULTTONULL,
         },
         UI::WindowsAndMessaging::MONITORINFOF_PRIMARY,
     },
 };
+use windows::Win32::Graphics::Gdi::EnumDisplaySettingsW;
 
 use crate::error::{XCapError, XCapResult};
 
@@ -58,11 +59,11 @@ fn get_dev_mode_w(monitor_info_exw: &MONITORINFOEXW) -> XCapResult<DEVMODEW> {
     dev_mode_w.dmSize = mem::size_of::<DEVMODEW>() as u16;
 
     unsafe {
-        EnumDisplaySettingsExW(
+        EnumDisplaySettingsW(
             PCWSTR(sz_device),
             ENUM_CURRENT_SETTINGS,
             &mut dev_mode_w,
-            EDS_RAWMODE,
+            // EDS_RAWMODE,
         )
         .ok()?;
     };
@@ -79,7 +80,7 @@ impl ImplMonitor {
 
         // https://learn.microsoft.com/zh-cn/windows/win32/api/winuser/nf-winuser-getmonitorinfoa
         unsafe { GetMonitorInfoW(hmonitor, monitor_info_ex_w_ptr).ok()? };
-        let rc_monitor = monitor_info_ex_w.monitorInfo.rcMonitor;
+        let mut rc_monitor = monitor_info_ex_w.monitorInfo.rcMonitor;
 
         let dev_mode_w = get_dev_mode_w(&monitor_info_ex_w)?;
 
@@ -104,6 +105,14 @@ impl ImplMonitor {
 
             physical_width as f32 / logical_width as f32
         };
+
+        unsafe {
+            rc_monitor.left = dev_mode_w.Anonymous1.Anonymous2.dmPosition.x;
+            rc_monitor.right = dev_mode_w.Anonymous1.Anonymous2.dmPosition.x + dev_mode_w.dmPelsWidth as i32;
+            rc_monitor.top  = dev_mode_w.Anonymous1.Anonymous2.dmPosition.y;
+            rc_monitor.bottom  = dev_mode_w.Anonymous1.Anonymous2.dmPosition.y + dev_mode_w.dmPelsHeight as i32;
+
+        }
 
         Ok(ImplMonitor {
             hmonitor,
@@ -158,9 +167,10 @@ impl ImplMonitor {
 
 impl ImplMonitor {
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
-        let width = ((self.width as f32) * self.scale_factor) as i32;
-        let height = ((self.height as f32) * self.scale_factor) as i32;
-
-        capture_monitor(self, 0, 0, width, height)
+        // let width = ((self.width as f32) * self.scale_factor) as i32;
+        // let height = ((self.height as f32) * self.scale_factor) as i32;
+        // let x = ((self.x as f32) * self.scale_factor) as i32;
+        // let y = ((self.y as f32) * self.scale_factor) as i32;
+        capture_monitor(self,self.x,self.y, self.width as i32, self.height as i32)
     }
 }

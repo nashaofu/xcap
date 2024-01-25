@@ -14,7 +14,7 @@ pub fn bgra_to_rgba_image(width: u32, height: u32, buf: Vec<u8>) -> XCapResult<R
         dst[0] = src[2];
         dst[1] = src[1];
         dst[2] = src[0];
-        dst[3] = src[3];
+        dst[3] = 255;
     }
     vec_to_rgba_image(width, height, rgba_buf)
 }
