@@ -1,6 +1,6 @@
 [package]
 name = "xcap"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 description = "A cross-platform screen capture library"
 license = "Apache-2.0"
