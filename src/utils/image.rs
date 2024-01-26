@@ -46,10 +46,10 @@ mod tests {
 
     #[test]
     fn bgra() {
-        let image = bgra_to_rgba_image(2, 1, vec![1, 2, 3, 4, 255, 254, 253, 252]).unwrap();
+        let image = bgra_to_rgba_image(2, 1, vec![1, 2, 3, 255, 255, 254, 253, 255]).unwrap();
         assert_eq!(
             image,
-            RgbaImage::from_vec(2, 1, vec![3, 2, 1, 4, 253, 254, 255, 252]).unwrap()
+            RgbaImage::from_vec(2, 1, vec![3, 2, 1, 255, 253, 254, 255, 255]).unwrap()
         );
     }
 

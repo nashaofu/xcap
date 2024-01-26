@@ -163,6 +163,6 @@ impl ImplWindow {
         let width = ((self.width as f32) * self.current_monitor.scale_factor) as i32;
         let height = ((self.height as f32) * self.current_monitor.scale_factor) as i32;
 
-        capture_window(self, width, height)
+        capture_window(self.hwnd, width, height)
     }
 }

@@ -1,25 +1,21 @@
 use image::RgbaImage;
 use std::mem;
 use windows::Win32::{
+    Foundation::HWND,
     Graphics::Gdi::{
         BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, GetDIBits, SelectObject, BITMAPINFO,
         BITMAPINFOHEADER, DIB_RGB_COLORS, RGBQUAD, SRCCOPY,
     },
     Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS, PW_CLIENTONLY},
-    UI::WindowsAndMessaging::PW_RENDERFULLCONTENT,
+    UI::WindowsAndMessaging::{GetDesktopWindow, PW_RENDERFULLCONTENT},
 };
 
 use crate::{
     error::{XCapError, XCapResult},
     utils::image::bgra_to_rgba_image,
 };
-use crate::platform::boxed::BoxMonitorHDC;
 
-use super::{
-    boxed::{BoxHBITMAP, BoxHDC},
-    impl_monitor::ImplMonitor,
-    impl_window::ImplWindow,
-};
+use super::boxed::{BoxHBITMAP, BoxHDC};
 
 fn to_rgba_image(
     box_hdc_mem: BoxHDC,
@@ -68,25 +64,25 @@ fn to_rgba_image(
 }
 
 #[allow(unused)]
-pub fn capture_monitor(
-    impl_monitor: &ImplMonitor,
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-) -> XCapResult<RgbaImage> {
+pub fn capture_monitor(x: i32, y: i32, width: i32, height: i32) -> XCapResult<RgbaImage> {
     unsafe {
-        let box_hdc_monitor = BoxMonitorHDC::new()?;
+        let hwnd = GetDesktopWindow();
+        let box_hdc_desktop_window = BoxHDC::from(hwnd);
 
-        // 内存中的HDC
-        let box_hdc_mem = BoxHDC::new(CreateCompatibleDC(*box_hdc_monitor));
-        let box_h_bitmap = BoxHBITMAP::new(CreateCompatibleBitmap(*box_hdc_monitor, width, height));
+        // 内存中的HDC，使用 DeleteDC 函数释放
+        // https://learn.microsoft.com/zh-cn/windows/win32/api/wingdi/nf-wingdi-createcompatibledc
+        let box_hdc_mem = BoxHDC::new(CreateCompatibleDC(*box_hdc_desktop_window), None);
+        let box_h_bitmap = BoxHBITMAP::new(CreateCompatibleBitmap(
+            *box_hdc_desktop_window,
+            width,
+            height,
+        ));
 
         // 使用SelectObject函数将这个位图选择到DC中
         SelectObject(*box_hdc_mem, *box_h_bitmap);
 
         // 拷贝原始图像到内存
-        // 咋合理不需要i缩放图片，所以直接使用BitBlt
+        // 这里不需要缩放图片，所以直接使用BitBlt
         // 如需要缩放，则使用 StretchBlt
         BitBlt(
             *box_hdc_mem,
@@ -94,7 +90,7 @@ pub fn capture_monitor(
             0,
             width,
             height,
-            *box_hdc_monitor,
+            *box_hdc_desktop_window,
             x,
             y,
             SRCCOPY,
@@ -105,11 +101,12 @@ pub fn capture_monitor(
 }
 
 #[allow(unused)]
-pub fn capture_window(impl_window: &ImplWindow, width: i32, height: i32) -> XCapResult<RgbaImage> {
+pub fn capture_window(hwnd: HWND, width: i32, height: i32) -> XCapResult<RgbaImage> {
     unsafe {
-        let box_hdc_window: BoxHDC = BoxHDC::from(impl_window);
-        // 内存中的HDC
-        let box_hdc_mem = BoxHDC::new(CreateCompatibleDC(*box_hdc_window));
+        let box_hdc_window: BoxHDC = BoxHDC::from(hwnd);
+        // 内存中的HDC，使用 DeleteDC 函数释放
+        // https://learn.microsoft.com/zh-cn/windows/win32/api/wingdi/nf-wingdi-createcompatibledc
+        let box_hdc_mem = BoxHDC::new(CreateCompatibleDC(*box_hdc_window), None);
         let box_h_bitmap = BoxHBITMAP::new(CreateCompatibleBitmap(*box_hdc_window, width, height));
 
         // 使用SelectObject函数将这个位图选择到DC中
@@ -121,7 +118,7 @@ pub fn capture_window(impl_window: &ImplWindow, width: i32, height: i32) -> XCap
         // the window that are drawn using DirectComposition.
         // https://github.com/chromium/chromium/blob/main/ui/snapshot/snapshot_win.cc#L39-L45
         let flags = PW_CLIENTONLY.0 | PW_RENDERFULLCONTENT;
-        PrintWindow(impl_window.hwnd, *box_hdc_mem, PRINT_WINDOW_FLAGS(flags));
+        PrintWindow(hwnd, *box_hdc_mem, PRINT_WINDOW_FLAGS(flags));
 
         to_rgba_image(box_hdc_mem, box_h_bitmap, width, height)
     }

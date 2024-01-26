@@ -1,35 +1,41 @@
 use std::{ops::Deref, ptr};
 use windows::{
     core::PCWSTR,
-    Win32::Graphics::Gdi::{CreateDCW, DeleteDC, DeleteObject, GetWindowDC, HBITMAP, HDC},
+    Win32::{
+        Foundation::HWND,
+        Graphics::Gdi::{CreateDCW, DeleteDC, DeleteObject, GetWindowDC, ReleaseDC, HBITMAP, HDC},
+    },
 };
-use windows::Win32::Foundation::HWND;
-use windows::Win32::Graphics::Gdi::{GetDC, ReleaseDC};
-use windows::Win32::UI::WindowsAndMessaging::GetDesktopWindow;
-use crate::{XCapError, XCapResult};
 
-use super::{impl_monitor::ImplMonitor, impl_window::ImplWindow};
-
-pub(crate) struct BoxHDC(HDC);
+pub(super) struct BoxHDC {
+    hdc: HDC,
+    hwnd: Option<HWND>,
+}
 
 impl Deref for BoxHDC {
     type Target = HDC;
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.hdc
     }
 }
 
 impl Drop for BoxHDC {
     fn drop(&mut self) {
+        // ReleaseDC 与 DeleteDC 的区别
+        // https://learn.microsoft.com/zh-cn/windows/win32/api/winuser/nf-winuser-releasedc
         unsafe {
-            DeleteDC(self.0);
+            if let Some(hwnd) = self.hwnd {
+                ReleaseDC(hwnd, self.hdc);
+            } else {
+                DeleteDC(self.hdc);
+            }
         };
     }
 }
 
 impl BoxHDC {
-    pub fn new(hdc: HDC) -> Self {
-        BoxHDC(hdc)
+    pub fn new(hdc: HDC, hwnd: Option<HWND>) -> Self {
+        BoxHDC { hdc, hwnd }
     }
 }
 
@@ -46,25 +52,21 @@ impl From<&[u16; 32]> for BoxHDC {
             )
         };
 
-        BoxHDC::new(hdc)
+        BoxHDC::new(hdc, None)
     }
 }
 
-impl From<&ImplMonitor> for BoxHDC {
-    fn from(impl_monitor: &ImplMonitor) -> Self {
-        BoxHDC::from(&impl_monitor.monitor_info_ex_w.szDevice)
+impl From<HWND> for BoxHDC {
+    fn from(hwnd: HWND) -> Self {
+        // GetWindowDC vs GetDC, GetDC 不会绘制窗口边框
+        // https://learn.microsoft.com/zh-cn/windows/win32/api/winuser/nf-winuser-getwindowdc
+        let hdc = unsafe { GetWindowDC(hwnd) };
+
+        BoxHDC::new(hdc, Some(hwnd))
     }
 }
 
-impl From<&ImplWindow> for BoxHDC {
-    fn from(impl_window: &ImplWindow) -> Self {
-        let hdc = unsafe { GetWindowDC(impl_window.hwnd) };
-
-        BoxHDC::new(hdc)
-    }
-}
-
-pub(crate) struct BoxHBITMAP(HBITMAP);
+pub(super) struct BoxHBITMAP(HBITMAP);
 
 impl Deref for BoxHBITMAP {
     type Target = HBITMAP;
@@ -75,6 +77,7 @@ impl Deref for BoxHBITMAP {
 
 impl Drop for BoxHBITMAP {
     fn drop(&mut self) {
+        // https://learn.microsoft.com/zh-cn/windows/win32/api/wingdi/nf-wingdi-createcompatiblebitmap
         unsafe {
             DeleteObject(self.0);
         };
@@ -84,38 +87,5 @@ impl Drop for BoxHBITMAP {
 impl BoxHBITMAP {
     pub fn new(h_bitmap: HBITMAP) -> Self {
         BoxHBITMAP(h_bitmap)
-    }
-}
-
-pub(crate) struct BoxMonitorHDC {
-    hwnd: HWND,
-    hdc: HDC,
-}
-impl Deref for BoxMonitorHDC {
-    type Target = HDC;
-    fn deref(&self) -> &Self::Target {
-        &self.hdc
-    }
-}
-
-impl Drop for BoxMonitorHDC {
-    fn drop(&mut self) {
-        unsafe {
-            ReleaseDC(self.hwnd, self.hdc);
-        };
-    }
-}
-
-impl BoxMonitorHDC {
-    pub unsafe  fn new() -> XCapResult<BoxMonitorHDC> {
-        let hwnd = GetDesktopWindow();
-        let hdc = GetDC(hwnd);
-        if hdc.is_invalid() {
-            return Err(XCapError::new("GetDC is failed"))
-        }
-        Ok(BoxMonitorHDC{
-            hwnd,
-            hdc,
-        })
     }
 }

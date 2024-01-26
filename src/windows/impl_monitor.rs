@@ -5,27 +5,27 @@ use windows::{
     Win32::{
         Foundation::{BOOL, LPARAM, POINT, RECT, TRUE},
         Graphics::Gdi::{
-            EnumDisplayMonitors, GetDeviceCaps, GetMonitorInfoW,
-            MonitorFromPoint, DESKTOPHORZRES, DEVMODEW, DEVMODE_DISPLAY_ORIENTATION,
+            EnumDisplayMonitors, EnumDisplaySettingsW, GetDeviceCaps, GetMonitorInfoW,
+            MonitorFromPoint, DESKTOPHORZRES, DEVMODEW, DMDO_180, DMDO_270, DMDO_90, DMDO_DEFAULT,
             ENUM_CURRENT_SETTINGS, HDC, HMONITOR, HORZRES, MONITORINFO, MONITORINFOEXW,
             MONITOR_DEFAULTTONULL,
         },
         UI::WindowsAndMessaging::MONITORINFOF_PRIMARY,
     },
 };
-use windows::Win32::Graphics::Gdi::EnumDisplaySettingsW;
 
 use crate::error::{XCapError, XCapResult};
 
 use super::{boxed::BoxHDC, capture::capture_monitor, utils::wide_string_to_string};
 
-// A函数与W函数区别
+// A 函数与 W 函数区别
 // https://learn.microsoft.com/zh-cn/windows/win32/learnwin32/working-with-strings
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImplMonitor {
     #[allow(unused)]
     pub hmonitor: HMONITOR,
+    #[allow(unused)]
     pub monitor_info_ex_w: MONITORINFOEXW,
     pub id: u32,
     pub name: String,
@@ -59,13 +59,7 @@ fn get_dev_mode_w(monitor_info_exw: &MONITORINFOEXW) -> XCapResult<DEVMODEW> {
     dev_mode_w.dmSize = mem::size_of::<DEVMODEW>() as u16;
 
     unsafe {
-        EnumDisplaySettingsW(
-            PCWSTR(sz_device),
-            ENUM_CURRENT_SETTINGS,
-            &mut dev_mode_w,
-            // EDS_RAWMODE,
-        )
-        .ok()?;
+        EnumDisplaySettingsW(PCWSTR(sz_device), ENUM_CURRENT_SETTINGS, &mut dev_mode_w).ok()?;
     };
 
     Ok(dev_mode_w)
@@ -80,22 +74,22 @@ impl ImplMonitor {
 
         // https://learn.microsoft.com/zh-cn/windows/win32/api/winuser/nf-winuser-getmonitorinfoa
         unsafe { GetMonitorInfoW(hmonitor, monitor_info_ex_w_ptr).ok()? };
-        let mut rc_monitor = monitor_info_ex_w.monitorInfo.rcMonitor;
 
         let dev_mode_w = get_dev_mode_w(&monitor_info_ex_w)?;
+
+        let dm_position = unsafe { dev_mode_w.Anonymous1.Anonymous2.dmPosition };
+        let dm_pels_width = dev_mode_w.dmPelsWidth;
+        let dm_pels_height = dev_mode_w.dmPelsHeight;
 
         let dm_display_orientation =
             unsafe { dev_mode_w.Anonymous1.Anonymous2.dmDisplayOrientation };
-
         let rotation = match dm_display_orientation {
-            DEVMODE_DISPLAY_ORIENTATION(0) => 0.0,
-            DEVMODE_DISPLAY_ORIENTATION(1) => 90.0,
-            DEVMODE_DISPLAY_ORIENTATION(2) => 180.0,
-            DEVMODE_DISPLAY_ORIENTATION(3) => 270.0,
-            _ => dm_display_orientation.0 as f32,
+            DMDO_90 => 90.0,
+            DMDO_180 => 180.0,
+            DMDO_270 => 270.0,
+            DMDO_DEFAULT => 0.0,
+            _ => 0.0,
         };
-
-        let dev_mode_w = get_dev_mode_w(&monitor_info_ex_w)?;
 
         let box_hdc_monitor = BoxHDC::from(&monitor_info_ex_w.szDevice);
 
@@ -106,23 +100,15 @@ impl ImplMonitor {
             physical_width as f32 / logical_width as f32
         };
 
-        unsafe {
-            rc_monitor.left = dev_mode_w.Anonymous1.Anonymous2.dmPosition.x;
-            rc_monitor.right = dev_mode_w.Anonymous1.Anonymous2.dmPosition.x + dev_mode_w.dmPelsWidth as i32;
-            rc_monitor.top  = dev_mode_w.Anonymous1.Anonymous2.dmPosition.y;
-            rc_monitor.bottom  = dev_mode_w.Anonymous1.Anonymous2.dmPosition.y + dev_mode_w.dmPelsHeight as i32;
-
-        }
-
         Ok(ImplMonitor {
             hmonitor,
             monitor_info_ex_w,
             id: hmonitor.0 as u32,
             name: wide_string_to_string(&monitor_info_ex_w.szDevice)?,
-            x: rc_monitor.left,
-            y: rc_monitor.top,
-            width: (rc_monitor.right - rc_monitor.left) as u32,
-            height: (rc_monitor.bottom - rc_monitor.top) as u32,
+            x: dm_position.x,
+            y: dm_position.y,
+            width: dm_pels_width,
+            height: dm_pels_height,
             rotation,
             scale_factor,
             frequency: dev_mode_w.dmDisplayFrequency as f32,
@@ -167,10 +153,6 @@ impl ImplMonitor {
 
 impl ImplMonitor {
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
-        // let width = ((self.width as f32) * self.scale_factor) as i32;
-        // let height = ((self.height as f32) * self.scale_factor) as i32;
-        // let x = ((self.x as f32) * self.scale_factor) as i32;
-        // let y = ((self.y as f32) * self.scale_factor) as i32;
-        capture_monitor(self,self.x,self.y, self.width as i32, self.height as i32)
+        capture_monitor(self.x, self.y, self.width as i32, self.height as i32)
     }
 }
