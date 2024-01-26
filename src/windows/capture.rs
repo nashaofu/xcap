@@ -69,8 +69,9 @@ pub fn capture_monitor(x: i32, y: i32, width: i32, height: i32) -> XCapResult<Rg
         let hwnd = GetDesktopWindow();
         let box_hdc_desktop_window = BoxHDC::from(hwnd);
 
-        // 内存中的HDC
-        let box_hdc_mem = BoxHDC::new(CreateCompatibleDC(*box_hdc_desktop_window));
+        // 内存中的HDC，使用 DeleteDC 函数释放
+        // https://learn.microsoft.com/zh-cn/windows/win32/api/wingdi/nf-wingdi-createcompatibledc
+        let box_hdc_mem = BoxHDC::new(CreateCompatibleDC(*box_hdc_desktop_window), None);
         let box_h_bitmap = BoxHBITMAP::new(CreateCompatibleBitmap(
             *box_hdc_desktop_window,
             width,
@@ -103,8 +104,9 @@ pub fn capture_monitor(x: i32, y: i32, width: i32, height: i32) -> XCapResult<Rg
 pub fn capture_window(hwnd: HWND, width: i32, height: i32) -> XCapResult<RgbaImage> {
     unsafe {
         let box_hdc_window: BoxHDC = BoxHDC::from(hwnd);
-        // 内存中的HDC
-        let box_hdc_mem = BoxHDC::new(CreateCompatibleDC(*box_hdc_window));
+        // 内存中的HDC，使用 DeleteDC 函数释放
+        // https://learn.microsoft.com/zh-cn/windows/win32/api/wingdi/nf-wingdi-createcompatibledc
+        let box_hdc_mem = BoxHDC::new(CreateCompatibleDC(*box_hdc_window), None);
         let box_h_bitmap = BoxHBITMAP::new(CreateCompatibleBitmap(*box_hdc_window, width, height));
 
         // 使用SelectObject函数将这个位图选择到DC中
