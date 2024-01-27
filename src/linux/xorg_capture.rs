@@ -4,10 +4,7 @@ use xcb::{
     Connection,
 };
 
-use crate::{
-    error::{XCapError, XCapResult},
-    utils::image::vec_to_rgba_image,
-};
+use crate::error::{XCapError, XCapResult};
 
 fn get_pixel8_rgba(
     bytes: &[u8],
@@ -97,7 +94,6 @@ pub fn xorg_capture(
     let bytes = get_image_reply.data();
     let depth = get_image_reply.depth();
 
-    let mut rgba = vec![0u8; (width * height * 4) as usize];
     let pixmap_format = setup
         .pixmap_formats()
         .iter()
@@ -115,6 +111,7 @@ pub fn xorg_capture(
         _ => return Err(XCapError::new(format!("Unsupported {} depth", depth))),
     };
 
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
     for y in 0..height {
         for x in 0..width {
             let index = ((y * width + x) * 4) as usize;
@@ -127,5 +124,6 @@ pub fn xorg_capture(
         }
     }
 
-    vec_to_rgba_image(width, height, rgba)
+    RgbaImage::from_raw(width, height, rgba)
+        .ok_or_else(|| XCapError::new("RgbaImage::from_raw failed"))
 }

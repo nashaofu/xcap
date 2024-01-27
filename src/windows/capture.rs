@@ -10,10 +10,7 @@ use windows::Win32::{
     UI::WindowsAndMessaging::{GetDesktopWindow, PW_RENDERFULLCONTENT},
 };
 
-use crate::{
-    error::{XCapError, XCapResult},
-    utils::image::bgra_to_rgba_image,
-};
+use crate::error::{XCapError, XCapResult};
 
 use super::boxed::{BoxHBITMAP, BoxHDC};
 
@@ -40,8 +37,7 @@ fn to_rgba_image(
         bmiColors: [RGBQUAD::default(); 1],
     };
 
-    let data = vec![0u8; (width * height) as usize * 4];
-    let buf_prt = data.as_ptr() as *mut _;
+    let mut buffer = vec![0u8; (width * height) as usize * 4];
 
     unsafe {
         // 读取数据到 buffer 中
@@ -50,7 +46,7 @@ fn to_rgba_image(
             *box_h_bitmap,
             0,
             height as u32,
-            Some(buf_prt),
+            Some(buffer.as_mut_ptr().cast()),
             &mut bitmap_info,
             DIB_RGB_COLORS,
         ) == 0;
@@ -60,7 +56,16 @@ fn to_rgba_image(
         }
     };
 
-    bgra_to_rgba_image(width as u32, height as u32, data)
+    for src in buffer.chunks_exact_mut(4) {
+        src.swap(0, 2);
+        // fix https://github.com/nashaofu/xcap/issues/92#issuecomment-1910014951
+        if src[3] == 0 {
+            src[3] = 255;
+        }
+    }
+
+    RgbaImage::from_raw(width as u32, height as u32, buffer)
+        .ok_or_else(|| XCapError::new("RgbaImage::from_raw failed"))
 }
 
 #[allow(unused)]

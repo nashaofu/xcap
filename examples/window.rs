@@ -8,12 +8,13 @@ fn main() {
 
     for window in windows {
         println!(
-            "Window: {} {} {} {:?} {:?} {:?}",
+            "Window:\n id: {}\n title: {}\n app_name: {}\n monitor: {:?}\n position: {:?}\n size {:?}\n state {:?}\n",
             window.id(),
             window.title(),
             window.app_name(),
             window.current_monitor().name(),
-            (window.x(), window.y(), window.width(), window.height()),
+            (window.x(), window.y()),
+            (window.width(), window.height()),
             (window.is_minimized(), window.is_maximized())
         );
     }

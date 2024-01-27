@@ -8,10 +8,11 @@ fn main() {
 
     for monitor in monitors {
         println!(
-            "Monitor: {} {} {:?} {:?}",
+            "Monitor:\n id: {}\n name: {}\n position: {:?}\n size: {:?}\n state:{:?}\n",
             monitor.id(),
             monitor.name(),
-            (monitor.x(), monitor.y(), monitor.width(), monitor.height()),
+            (monitor.x(), monitor.y()),
+            (monitor.width(), monitor.height()),
             (
                 monitor.rotation(),
                 monitor.scale_factor(),
