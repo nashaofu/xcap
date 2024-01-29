@@ -1,31 +1,31 @@
 # XCap
 
-English | [简体中文](README-zh_CN.md)
+[English](README.md) | 简体中文
 
-XCap is a cross-platform screen capture library written in Rust. It supports Linux (X11, Wayland), MacOS, and Windows. XCap supports screenshot and video recording (to be implemented).
+XCap 是一个使用 Rust 编写的跨平台的屏幕捕获库，它支持 Linux(X11,Wayland)、MacOS 与 Windows。XCap 支持截图与视频录制（待实现）。
 
-## Features
+## 功能
 
--   Cross-platform: Supports Linux (X11, Wayland), MacOS, and Windows.
--   Supports multiple screenshot modes: Can take screenshots of the screen and windows.
--   Supports video recording: Supports recording of the screen or window (to be implemented).
+-   跨平台: 支持 Linux(X11,Wayland)、MacOS 与 Windows。
+-   支持多种截图模式: 可以对屏幕与窗口进行截图。
+-   支持视频录制：支持对屏幕或窗口进行录制（待实现）。
 
-### Implementation Status
+### 实现状态
 
-| Feature          | Linux(X11) | Linux(Wayland) | MacOS | Windows |
-| ---------------- | ---------- | -------------- | ----- | ------- |
-| Screen Capture   | ✅         | ⛔             | ✅    | ✅      |
-| Window Capture   | ✅         | ⛔             | ✅    | ✅      |
-| Screen Recording | 🛠️         | 🛠️             | 🛠️    | 🛠️      |
-| Window Recording | 🛠️         | 🛠️             | 🛠️    | 🛠️      |
+| 功能     | Linux(X11) | Linux(Wayland) | MacOS | Windows |
+| -------- | ---------- | -------------- | ----- | ------- |
+| 屏幕截图 | ✅         | ⛔             | ✅    | ✅      |
+| 窗口截图 | ✅         | ⛔             | ✅    | ✅      |
+| 屏幕录制 | 🛠️         | 🛠️             | 🛠️    | 🛠️      |
+| 窗口录制 | 🛠️         | 🛠️             | 🛠️    | 🛠️      |
 
--   ✅: Feature available
--   ⛔: Feature available, but not fully supported in some special scenarios
--   🛠️: To be developed
+-   ✅: 功能可用
+-   ⛔: 功能可用，但在一些特殊场景下未完全支持
+-   🛠️: 待开发
 
-## Examples
+## 例子
 
--   Screen Capture
+-   屏幕截图
 
 ```rust
 use std::time::Instant;
@@ -55,7 +55,7 @@ fn main() {
 }
 ```
 
--   Window Capture
+-   窗口截图
 
 ```rust
 use std::time::Instant;
@@ -104,9 +104,9 @@ fn main() {
 }
 ```
 
-## Linux System Requirements
+## Linux 系统要求
 
-On Linux, you need to install `libxcb`, `libxrandr`, and `dbus`.
+在 Linux 上，需要安装 `libxcb`, `libxrandr`与 `dbus`.
 
 Debian/Ubuntu:
 
@@ -128,4 +128,4 @@ pacman -S libxcb libxrandr dbus
 
 ## License
 
-This project is licensed under the Apache License. See the [LICENSE](./LICENSE) file for details.
+本项目采用 Apache 许可证。详情请查看 [LICENSE](./LICENSE) 文件。
