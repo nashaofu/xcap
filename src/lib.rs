@@ -1,6 +1,5 @@
 mod error;
 mod monitor;
-mod utils;
 mod window;
 
 #[cfg(target_os = "macos")]

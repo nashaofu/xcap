@@ -5,10 +5,7 @@ use core_graphics::{
 };
 use image::RgbaImage;
 
-use crate::{
-    error::{XCapError, XCapResult},
-    utils::image::{bgra_to_rgba_image, remove_extra_data},
-};
+use crate::error::{XCapError, XCapResult};
 
 pub fn capture(
     cg_rect: CGRect,
@@ -20,12 +17,21 @@ pub fn capture(
 
     let width = cg_image.width();
     let height = cg_image.height();
-    let clean_buf = remove_extra_data(
-        width,
-        height,
-        cg_image.bytes_per_row(),
-        Vec::from(cg_image.data().bytes()),
-    );
+    let bytes = Vec::from(cg_image.data().bytes());
 
-    bgra_to_rgba_image(width as u32, height as u32, clean_buf)
+    // Some platforms e.g. MacOS can have extra bytes at the end of each row.
+    // See
+    // https://github.com/nashaofu/xcap/issues/29
+    // https://github.com/nashaofu/xcap/issues/38
+    let mut buffer = Vec::with_capacity(width * height * 4);
+    for row in bytes.chunks_exact(cg_image.bytes_per_row()) {
+        buffer.extend_from_slice(&row[..width * 4]);
+    }
+
+    for bgra in buffer.chunks_exact_mut(4) {
+        bgra.swap(0, 2);
+    }
+
+    RgbaImage::from_raw(width as u32, height as u32, buffer)
+        .ok_or_else(|| XCapError::new("RgbaImage::from_raw failed"))
 }
