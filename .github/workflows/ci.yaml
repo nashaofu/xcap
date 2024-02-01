@@ -1,12 +1,15 @@
-name: Lint
+name: CI
 
 on:
     push:
         branches:
             - master
-        tags-ignore:
-            - "**"
-    pull_request: null
+        tags:
+            - v*.*.*
+
+    pull_request:
+        branches:
+            - master
 
 concurrency:
     group: ${{ github.workflow }}-${{ github.ref }}
@@ -44,6 +47,7 @@ jobs:
     publish:
         name: Publish
         runs-on: ubuntu-latest
+        if: ${{ github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v') }}
         needs:
             - lint
         steps:
@@ -56,8 +60,16 @@ jobs:
                   override: true
                   components: rustfmt, clippy
 
-            - name: Publish
-              if: github.event_name != 'pull_request'
+            - name: Release drafter
+              uses: release-drafter/release-drafter@v5
               env:
-                  CARGO_TOKEN: ${{ secrets.CARGO_TOKEN }}
-              run: cargo publish --registry crates-io --token $NPM_TOKEN
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  publish: true
+                  name: ${{ github.ref_name }}
+                  tag: ${{ github.ref_name }}
+
+            - name: Publish
+              env:
+                  CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+              run: cargo publish --registry crates-io
