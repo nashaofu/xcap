@@ -60,12 +60,14 @@ jobs:
                   override: true
                   components: rustfmt, clippy
 
-            # - name: Release draft
-            #   uses: release-drafter/release-drafter@v5
-            #   env:
-            #       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-            #   with:
-            #       publish: true
+            - name: Release drafter
+              uses: release-drafter/release-drafter@v5
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  publish: true
+                  name: ${{ github.ref_name }}
+                  tag: ${{ github.ref_name }}
 
             - name: Publish
               env:
