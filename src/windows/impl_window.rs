@@ -1,24 +1,22 @@
 use core::slice;
 use image::RgbaImage;
-use std::{ffi::c_void, mem, ptr};
+use std::{mem, ptr};
 use windows::{
     core::{HSTRING, PCWSTR},
     Win32::{
-        Foundation::{BOOL, HMODULE, HWND, LPARAM, MAX_PATH, TRUE},
-        Graphics::{
-            Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWM_CLOAKED_SHELL},
-            Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONEAREST},
-        },
+        Foundation::{BOOL, HMODULE, HWND, LPARAM, MAX_PATH, RECT, TRUE},
+        Graphics::Gdi::{IsRectEmpty, MonitorFromWindow, MONITOR_DEFAULTTONEAREST},
         Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW},
         System::{
             ProcessStatus::{GetModuleBaseNameW, GetModuleFileNameExW},
             Threading::PROCESS_QUERY_LIMITED_INFORMATION,
         },
         UI::WindowsAndMessaging::{
-            EnumWindows, GetAncestor, GetLastActivePopup, GetWindowInfo, GetWindowLongW,
-            GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic,
-            IsWindowVisible, IsZoomed, GA_ROOTOWNER, GWL_EXSTYLE, WINDOWINFO, WINDOW_EX_STYLE,
-            WS_EX_TOOLWINDOW,
+            EnumWindows, GetAncestor, GetClassNameW, GetLastActivePopup, GetWindowInfo,
+            GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
+            GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, IsZoomed, GA_ROOTOWNER,
+            GWL_EXSTYLE, WINDOWINFO, WINDOW_EX_STYLE, WS_EX_NOREDIRECTIONBITMAP, WS_EX_TOOLWINDOW,
+            WS_EX_TRANSPARENT,
         },
     },
 };
@@ -47,27 +45,7 @@ pub(crate) struct ImplWindow {
 fn is_valid_window(hwnd: HWND) -> bool {
     unsafe {
         // ignore invisible windows
-        if !IsWindowVisible(hwnd).as_bool() {
-            return false;
-        }
-
-        // ignore windows in other virtual desktops
-        let mut cloaked = 0u32;
-
-        let is_dwm_get_window_attribute_fail = DwmGetWindowAttribute(
-            hwnd,
-            DWMWA_CLOAKED,
-            &mut cloaked as *mut u32 as *mut c_void,
-            mem::size_of::<u32>() as u32,
-        )
-        .is_err();
-
-        if is_dwm_get_window_attribute_fail {
-            return false;
-        }
-
-        // windows in other virtual desktops have the DWM_CLOAKED_SHELL bit set
-        if cloaked & DWM_CLOAKED_SHELL != 0 {
+        if !IsWindow(hwnd).as_bool() || !IsWindowVisible(hwnd).as_bool() {
             return false;
         }
 
@@ -91,10 +69,33 @@ fn is_valid_window(hwnd: HWND) -> bool {
             return false;
         }
 
-        // Tool windows should not be displayed either, these do not appear in the task bar.
-        let window_ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+        let window_ex_style = WINDOW_EX_STYLE(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32);
 
-        if WINDOW_EX_STYLE(window_ex_style).contains(WS_EX_TOOLWINDOW) {
+        if window_ex_style.contains(WS_EX_TRANSPARENT) {
+            return false;
+        }
+
+        if window_ex_style.contains(WS_EX_TOOLWINDOW) {
+            let mut lpclassname = [0u16; MAX_PATH as usize];
+            let lpclassname_length = GetClassNameW(hwnd, &mut lpclassname) as usize;
+            let is_shell_tray_wnd = wide_string_to_string(&lpclassname[0..lpclassname_length])
+                .is_ok_and(|class_name| class_name == "Shell_TrayWnd");
+
+            if !is_shell_tray_wnd {
+                return false;
+            }
+        }
+
+        if window_ex_style.contains(WS_EX_NOREDIRECTIONBITMAP) {
+            return false;
+        }
+
+        let mut rect = RECT::default();
+        if GetWindowRect(hwnd, &mut rect).is_err() {
+            return false;
+        }
+
+        if IsRectEmpty(&rect).as_bool() {
             return false;
         }
     }
