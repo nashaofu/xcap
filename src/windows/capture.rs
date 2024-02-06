@@ -1,18 +1,28 @@
 use image::RgbaImage;
-use std::mem;
+use std::{ffi::c_void, mem};
 use windows::Win32::{
     Foundation::HWND,
-    Graphics::Gdi::{
-        BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, GetDIBits, SelectObject, BITMAPINFO,
-        BITMAPINFOHEADER, DIB_RGB_COLORS, RGBQUAD, SRCCOPY,
+    Graphics::{
+        Dwm::DwmIsCompositionEnabled,
+        Gdi::{
+            BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, GetCurrentObject, GetDIBits,
+            GetObjectW, SelectObject, BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS,
+            OBJ_BITMAP, SRCCOPY,
+        },
     },
-    Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS, PW_CLIENTONLY},
-    UI::WindowsAndMessaging::{GetDesktopWindow, PW_RENDERFULLCONTENT},
+    Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS},
+    UI::WindowsAndMessaging::GetDesktopWindow,
 };
 
-use crate::error::{XCapError, XCapResult};
+use crate::{
+    error::{XCapError, XCapResult},
+    platform::utils::get_window_rect,
+};
 
-use super::boxed::{BoxHBITMAP, BoxHDC};
+use super::{
+    boxed::{BoxHBITMAP, BoxHDC},
+    utils::get_os_major_version,
+};
 
 fn to_rgba_image(
     box_hdc_mem: BoxHDC,
@@ -20,6 +30,7 @@ fn to_rgba_image(
     width: i32,
     height: i32,
 ) -> XCapResult<RgbaImage> {
+    let buffer_size = width * height * 4;
     let mut bitmap_info = BITMAPINFO {
         bmiHeader: BITMAPINFOHEADER {
             biSize: mem::size_of::<BITMAPINFOHEADER>() as u32,
@@ -27,17 +38,14 @@ fn to_rgba_image(
             biHeight: -height,
             biPlanes: 1,
             biBitCount: 32,
+            biSizeImage: buffer_size as u32,
             biCompression: 0,
-            biSizeImage: 0,
-            biXPelsPerMeter: 0,
-            biYPelsPerMeter: 0,
-            biClrUsed: 0,
-            biClrImportant: 0,
+            ..Default::default()
         },
-        bmiColors: [RGBQUAD::default(); 1],
+        ..Default::default()
     };
 
-    let mut buffer = vec![0u8; (width * height) as usize * 4];
+    let mut buffer = vec![0u8; buffer_size as usize];
 
     unsafe {
         // 读取数据到 buffer 中
@@ -59,7 +67,7 @@ fn to_rgba_image(
     for src in buffer.chunks_exact_mut(4) {
         src.swap(0, 2);
         // fix https://github.com/nashaofu/xcap/issues/92#issuecomment-1910014951
-        if src[3] == 0 {
+        if src[3] == 0 && get_os_major_version() < 8 {
             src[3] = 255;
         }
     }
@@ -106,25 +114,69 @@ pub fn capture_monitor(x: i32, y: i32, width: i32, height: i32) -> XCapResult<Rg
 }
 
 #[allow(unused)]
-pub fn capture_window(hwnd: HWND, width: i32, height: i32) -> XCapResult<RgbaImage> {
+pub fn capture_window(hwnd: HWND) -> XCapResult<RgbaImage> {
     unsafe {
         let box_hdc_window: BoxHDC = BoxHDC::from(hwnd);
+        let rect = get_window_rect(hwnd)?;
+        let mut dc_width = rect.right - rect.left;
+        let mut dc_height = rect.bottom - rect.top;
+
+        let hgdi_obj = GetCurrentObject(*box_hdc_window, OBJ_BITMAP);
+        let mut bitmap = BITMAP::default();
+
+        let mut horizontal_scale = 1.0;
+        let mut vertical_scale = 1.0;
+
+        if GetObjectW(
+            hgdi_obj,
+            mem::size_of::<BITMAP>() as i32,
+            Some(&mut bitmap as *mut BITMAP as *mut c_void),
+        ) != 0
+        {
+            dc_width = bitmap.bmWidth;
+            dc_height = bitmap.bmHeight;
+        }
+
         // 内存中的HDC，使用 DeleteDC 函数释放
         // https://learn.microsoft.com/zh-cn/windows/win32/api/wingdi/nf-wingdi-createcompatibledc
         let box_hdc_mem = BoxHDC::new(CreateCompatibleDC(*box_hdc_window), None);
-        let box_h_bitmap = BoxHBITMAP::new(CreateCompatibleBitmap(*box_hdc_window, width, height));
+        let box_h_bitmap =
+            BoxHBITMAP::new(CreateCompatibleBitmap(*box_hdc_window, dc_width, dc_height));
 
-        // 使用SelectObject函数将这个位图选择到DC中
-        SelectObject(*box_hdc_mem, *box_h_bitmap);
+        let previous_object = SelectObject(*box_hdc_mem, *box_h_bitmap);
 
-        // Grab a copy of the window. Use PrintWindow because it works even when the
-        // window's partially occluded. The PW_RENDERFULLCONTENT flag is undocumented,
-        // but works starting in Windows 8.1. It allows for capturing the contents of
-        // the window that are drawn using DirectComposition.
-        // https://github.com/chromium/chromium/blob/main/ui/snapshot/snapshot_win.cc#L39-L45
-        let flags = PW_CLIENTONLY.0 | PW_RENDERFULLCONTENT;
-        PrintWindow(hwnd, *box_hdc_mem, PRINT_WINDOW_FLAGS(flags));
+        let mut is_success = false;
 
-        to_rgba_image(box_hdc_mem, box_h_bitmap, width, height)
+        // https://webrtc.googlesource.com/src.git/+/refs/heads/main/modules/desktop_capture/win/window_capturer_win_gdi.cc#301
+        if get_os_major_version() >= 8 {
+            is_success = PrintWindow(hwnd, *box_hdc_mem, PRINT_WINDOW_FLAGS(2)).as_bool();
+        }
+
+        if !is_success && DwmIsCompositionEnabled()?.as_bool() {
+            is_success = PrintWindow(hwnd, *box_hdc_mem, PRINT_WINDOW_FLAGS(0)).as_bool();
+        }
+
+        if !is_success {
+            is_success = PrintWindow(hwnd, *box_hdc_mem, PRINT_WINDOW_FLAGS(3)).as_bool();
+        }
+
+        if !is_success {
+            is_success = BitBlt(
+                *box_hdc_mem,
+                0,
+                0,
+                dc_width,
+                dc_height,
+                *box_hdc_window,
+                0,
+                0,
+                SRCCOPY,
+            )
+            .is_ok();
+        }
+
+        SelectObject(*box_hdc_mem, previous_object);
+
+        to_rgba_image(box_hdc_mem, box_h_bitmap, dc_width, dc_height)
     }
 }

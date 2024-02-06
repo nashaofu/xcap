@@ -1,3 +1,4 @@
+use fs_extra::dir;
 use std::time::Instant;
 use xcap::Window;
 
@@ -13,8 +14,9 @@ fn main() {
     let start = Instant::now();
     let windows = Window::all().unwrap();
 
-    let mut i = 0;
+    dir::create_all("target/windows", true).unwrap();
 
+    let mut i = 0;
     for window in windows {
         // 最小化的窗口不能截屏
         if window.is_minimized() {
@@ -31,7 +33,7 @@ fn main() {
         let image = window.capture_image().unwrap();
         image
             .save(format!(
-                "target/window-{}-{}.png",
+                "target/windows/window-{}-{}.png",
                 i,
                 normalized(window.title())
             ))
