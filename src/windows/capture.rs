@@ -11,7 +11,7 @@ use windows::Win32::{
         },
     },
     Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS},
-    UI::WindowsAndMessaging::GetDesktopWindow,
+    UI::{HiDpi::GetDpiForWindow, WindowsAndMessaging::GetDesktopWindow},
 };
 
 use crate::{
@@ -136,6 +136,10 @@ pub fn capture_window(hwnd: HWND) -> XCapResult<RgbaImage> {
             dc_width = bitmap.bmWidth;
             dc_height = bitmap.bmHeight;
         }
+
+        let scale_factor = GetDpiForWindow(hwnd) as f32 / 96.0;
+        dc_width = (dc_width as f32 * scale_factor) as i32;
+        dc_height = (dc_height as f32 * scale_factor) as i32;
 
         // 内存中的HDC，使用 DeleteDC 函数释放
         // https://learn.microsoft.com/zh-cn/windows/win32/api/wingdi/nf-wingdi-createcompatibledc
