@@ -318,6 +318,7 @@ impl ImplWindow {
 
 impl ImplWindow {
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
-        capture_window(self.hwnd)
+        // TODO: 在win10之后，不同窗口有不同的dpi，所以可能存在截图不全或者截图有较大空白，实际窗口没有填充满图片
+        capture_window(self.hwnd, self.current_monitor.scale_factor)
     }
 }

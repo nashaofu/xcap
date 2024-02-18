@@ -11,7 +11,7 @@ use windows::Win32::{
         },
     },
     Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS},
-    UI::{HiDpi::GetDpiForWindow, WindowsAndMessaging::GetDesktopWindow},
+    UI::WindowsAndMessaging::GetDesktopWindow,
 };
 
 use crate::{
@@ -114,7 +114,7 @@ pub fn capture_monitor(x: i32, y: i32, width: i32, height: i32) -> XCapResult<Rg
 }
 
 #[allow(unused)]
-pub fn capture_window(hwnd: HWND) -> XCapResult<RgbaImage> {
+pub fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaImage> {
     unsafe {
         let box_hdc_window: BoxHDC = BoxHDC::from(hwnd);
         let rect = get_window_rect(hwnd)?;
@@ -137,7 +137,6 @@ pub fn capture_window(hwnd: HWND) -> XCapResult<RgbaImage> {
             dc_height = bitmap.bmHeight;
         }
 
-        let scale_factor = GetDpiForWindow(hwnd) as f32 / 96.0;
         dc_width = (dc_width as f32 * scale_factor) as i32;
         dc_height = (dc_height as f32 * scale_factor) as i32;
 
