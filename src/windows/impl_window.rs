@@ -212,7 +212,7 @@ fn get_app_name(hwnd: HWND) -> XCapResult<String> {
             slice::from_raw_parts(lang_code_pages_ptr.cast(), lang_code_pages_length as usize);
 
         // 按照 keys 的顺序读取文件的属性值
-        // 优先读取 ProductName
+        // 优先读取 FileDescription
         let keys = [
             "FileDescription",
             "ProductName",
