@@ -1,31 +1,34 @@
 use core::slice;
 use image::RgbaImage;
-use std::{ffi::c_void, mem, ptr};
+use std::{cmp::Ordering, ffi::c_void, mem, ptr};
 use windows::{
     core::{HSTRING, PCWSTR},
     Win32::{
         Foundation::{BOOL, HMODULE, HWND, LPARAM, MAX_PATH, TRUE},
         Graphics::{
-            Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWM_CLOAKED_SHELL},
-            Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONEAREST},
+            Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED},
+            Gdi::{IsRectEmpty, MonitorFromWindow, MONITOR_DEFAULTTONEAREST},
         },
         Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW},
         System::{
             ProcessStatus::{GetModuleBaseNameW, GetModuleFileNameExW},
-            Threading::PROCESS_QUERY_LIMITED_INFORMATION,
+            Threading::{GetCurrentProcessId, PROCESS_QUERY_LIMITED_INFORMATION},
         },
         UI::WindowsAndMessaging::{
-            EnumWindows, GetAncestor, GetLastActivePopup, GetWindowInfo, GetWindowLongW,
-            GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic,
-            IsWindowVisible, IsZoomed, GA_ROOTOWNER, GWL_EXSTYLE, WINDOWINFO, WINDOW_EX_STYLE,
-            WS_EX_TOOLWINDOW,
+            EnumWindows, GetClassNameW, GetWindowInfo, GetWindowLongPtrW, GetWindowTextLengthW,
+            GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible,
+            IsZoomed, GWL_EXSTYLE, WINDOWINFO, WINDOW_EX_STYLE, WS_EX_TOOLWINDOW,
         },
     },
 };
 
 use crate::{error::XCapResult, platform::boxed::BoxProcessHandle};
 
-use super::{capture::capture_window, impl_monitor::ImplMonitor, utils::wide_string_to_string};
+use super::{
+    capture::capture_window,
+    impl_monitor::ImplMonitor,
+    utils::{get_window_rect, wide_string_to_string},
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImplWindow {
@@ -44,14 +47,8 @@ pub(crate) struct ImplWindow {
     pub is_maximized: bool,
 }
 
-fn is_valid_window(hwnd: HWND) -> bool {
+fn is_window_cloaked(hwnd: HWND) -> bool {
     unsafe {
-        // ignore invisible windows
-        if !IsWindowVisible(hwnd).as_bool() {
-            return false;
-        }
-
-        // ignore windows in other virtual desktops
         let mut cloaked = 0u32;
 
         let is_dwm_get_window_attribute_fail = DwmGetWindowAttribute(
@@ -66,35 +63,83 @@ fn is_valid_window(hwnd: HWND) -> bool {
             return false;
         }
 
-        // windows in other virtual desktops have the DWM_CLOAKED_SHELL bit set
-        if cloaked & DWM_CLOAKED_SHELL != 0 {
+        cloaked != 0
+    }
+}
+
+// https://webrtc.googlesource.com/src.git/+/refs/heads/main/modules/desktop_capture/win/window_capture_utils.cc#52
+fn is_valid_window(hwnd: HWND) -> bool {
+    unsafe {
+        // ignore invisible windows
+        if !IsWindow(hwnd).as_bool() || !IsWindowVisible(hwnd).as_bool() {
             return false;
         }
 
-        // https://stackoverflow.com/questions/7277366
-        let mut hwnd_walk = None;
+        // 特别说明，与webrtc中源码有区别，子窗口也枚举进来，所以就不需要下面的代码了：
+        // HWND owner = GetWindow(hwnd, GW_OWNER);
+        // LONG exstyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+        // if (owner && !(exstyle & WS_EX_APPWINDOW)) {
+        //   return TRUE;
+        // }
 
-        // Start at the root owner
-        let mut hwnd_tray = GetAncestor(hwnd, GA_ROOTOWNER);
+        let mut lp_class_name = [0u16; MAX_PATH as usize];
+        let lp_class_name_length = GetClassNameW(hwnd, &mut lp_class_name) as usize;
+        if lp_class_name_length < 1 {
+            return false;
+        }
 
-        // See if we are the last active visible popup
-        while Some(hwnd_tray) != hwnd_walk {
-            hwnd_walk = Some(hwnd_tray);
-            hwnd_tray = GetLastActivePopup(hwnd_tray);
+        let class_name =
+            wide_string_to_string(&lp_class_name[0..lp_class_name_length]).unwrap_or_default();
+        if class_name.is_empty() {
+            return false;
+        }
 
-            if IsWindowVisible(hwnd_tray).as_bool() {
-                break;
+        let gwl_ex_style = WINDOW_EX_STYLE(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32);
+        let title = get_window_title(hwnd).unwrap_or_default();
+
+        // 过滤掉具有 WS_EX_TOOLWINDOW 样式的窗口
+        if gwl_ex_style.contains(WS_EX_TOOLWINDOW) {
+            // windows 任务栏可以捕获
+            if class_name.cmp(&String::from("Shell_TrayWnd")) != Ordering::Equal && title.is_empty()
+            {
+                return false;
             }
         }
 
-        if hwnd_walk != Some(hwnd) {
+        // GetWindowText* are potentially blocking operations if `hwnd` is
+        // owned by the current process. The APIs will send messages to the window's
+        // message loop, and if the message loop is waiting on this operation we will
+        // enter a deadlock.
+        // https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowtexta#remarks
+        //
+        // To help consumers avoid this, there is a DesktopCaptureOption to ignore
+        // windows owned by the current process. Consumers should either ensure that
+        // the thread running their message loop never waits on this operation, or use
+        // the option to exclude these windows from the source list.
+        let mut lp_dw_process_id = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut lp_dw_process_id));
+        if lp_dw_process_id == GetCurrentProcessId() {
             return false;
         }
 
-        // Tool windows should not be displayed either, these do not appear in the task bar.
-        let window_ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+        // Skip Program Manager window.
+        if class_name.cmp(&String::from("Progman")) == Ordering::Equal {
+            return false;
+        }
+        // Skip Start button window on Windows Vista, Windows 7.
+        // On Windows 8, Windows 8.1, Windows 10 Start button is not a top level
+        // window, so it will not be examined here.
+        if class_name.cmp(&String::from("Button")) == Ordering::Equal {
+            return false;
+        }
 
-        if WINDOW_EX_STYLE(window_ex_style).contains(WS_EX_TOOLWINDOW) {
+        if is_window_cloaked(hwnd) {
+            return false;
+        }
+
+        let is_rect_empty = get_window_rect(hwnd).is_ok_and(|rect| IsRectEmpty(&rect).as_bool());
+
+        if is_rect_empty {
             return false;
         }
     }
@@ -111,6 +156,15 @@ unsafe extern "system" fn enum_windows_proc(hwnd: HWND, state: LPARAM) -> BOOL {
     state.push(hwnd);
 
     TRUE
+}
+
+fn get_window_title(hwnd: HWND) -> XCapResult<String> {
+    unsafe {
+        let text_length = GetWindowTextLengthW(hwnd);
+        let mut wide_buffer = vec![0u16; (text_length + 1) as usize];
+        GetWindowTextW(hwnd, &mut wide_buffer);
+        wide_string_to_string(&wide_buffer)
+    }
 }
 
 #[derive(Debug, Default)]
@@ -158,10 +212,10 @@ fn get_app_name(hwnd: HWND) -> XCapResult<String> {
             slice::from_raw_parts(lang_code_pages_ptr.cast(), lang_code_pages_length as usize);
 
         // 按照 keys 的顺序读取文件的属性值
-        // 优先读取 ProductName
+        // 优先读取 FileDescription
         let keys = [
-            "ProductName",
             "FileDescription",
+            "ProductName",
             "ProductShortName",
             "InternalName",
             "OriginalFilename",
@@ -193,7 +247,7 @@ fn get_app_name(hwnd: HWND) -> XCapResult<String> {
                 let attr = wide_string_to_string(value)?;
                 let attr = attr.trim();
 
-                if !attr.trim().is_empty() {
+                if !attr.is_empty() {
                     return Ok(attr.to_string());
                 }
             }
@@ -219,17 +273,11 @@ impl ImplWindow {
 
             GetWindowInfo(hwnd, &mut window_info)?;
 
-            let title = {
-                let text_length = GetWindowTextLengthW(hwnd);
-                let mut wide_buffer = vec![0u16; (text_length + 1) as usize];
-                GetWindowTextW(hwnd, &mut wide_buffer);
-                wide_string_to_string(&wide_buffer)?
-            };
-
+            let title = get_window_title(hwnd)?;
             let app_name = get_app_name(hwnd)?;
 
             let hmonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-            let rc_client = window_info.rcClient;
+            let rc_window = window_info.rcWindow;
             let is_minimized = IsIconic(hwnd).as_bool();
             let is_maximized = IsZoomed(hwnd).as_bool();
 
@@ -240,10 +288,10 @@ impl ImplWindow {
                 title,
                 app_name,
                 current_monitor: ImplMonitor::new(hmonitor)?,
-                x: rc_client.left,
-                y: rc_client.top,
-                width: (rc_client.right - rc_client.left) as u32,
-                height: (rc_client.bottom - rc_client.top) as u32,
+                x: rc_window.left,
+                y: rc_window.top,
+                width: (rc_window.right - rc_window.left) as u32,
+                height: (rc_window.bottom - rc_window.top) as u32,
                 is_minimized,
                 is_maximized,
             })
@@ -270,9 +318,7 @@ impl ImplWindow {
 
 impl ImplWindow {
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
-        let width = ((self.width as f32) * self.current_monitor.scale_factor) as i32;
-        let height = ((self.height as f32) * self.current_monitor.scale_factor) as i32;
-
-        capture_window(self.hwnd, width, height)
+        // TODO: 在win10之后，不同窗口有不同的dpi，所以可能存在截图不全或者截图有较大空白，实际窗口没有填充满图片
+        capture_window(self.hwnd, self.current_monitor.scale_factor)
     }
 }

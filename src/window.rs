@@ -25,7 +25,7 @@ impl Window {
 }
 
 impl Window {
-    // The window id
+    /// The window id
     pub fn id(&self) -> u32 {
         self.impl_window.id
     }
