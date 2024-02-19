@@ -62,8 +62,8 @@ jobs:
 
             - name: Publish
               env:
-                  CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-              run: cargo publish --registry crates-io
+                  CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN  }}
+              run: cargo publish
 
             - name: Release drafter
               uses: release-drafter/release-drafter@v5
