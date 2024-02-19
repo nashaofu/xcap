@@ -118,8 +118,8 @@ pub fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaImage> {
     unsafe {
         let box_hdc_window: BoxHDC = BoxHDC::from(hwnd);
         let rect = get_window_rect(hwnd)?;
-        let mut dc_width = rect.right - rect.left;
-        let mut dc_height = rect.bottom - rect.top;
+        let mut width = rect.right - rect.left;
+        let mut height = rect.bottom - rect.top;
 
         let hgdi_obj = GetCurrentObject(*box_hdc_window, OBJ_BITMAP);
         let mut bitmap = BITMAP::default();
@@ -133,18 +133,17 @@ pub fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaImage> {
             Some(&mut bitmap as *mut BITMAP as *mut c_void),
         ) != 0
         {
-            dc_width = bitmap.bmWidth;
-            dc_height = bitmap.bmHeight;
+            width = bitmap.bmWidth;
+            height = bitmap.bmHeight;
         }
 
-        dc_width = (dc_width as f32 * scale_factor) as i32;
-        dc_height = (dc_height as f32 * scale_factor) as i32;
+        width = (width as f32 * scale_factor) as i32;
+        height = (height as f32 * scale_factor) as i32;
 
         // 内存中的HDC，使用 DeleteDC 函数释放
         // https://learn.microsoft.com/zh-cn/windows/win32/api/wingdi/nf-wingdi-createcompatibledc
         let box_hdc_mem = BoxHDC::new(CreateCompatibleDC(*box_hdc_window), None);
-        let box_h_bitmap =
-            BoxHBITMAP::new(CreateCompatibleBitmap(*box_hdc_window, dc_width, dc_height));
+        let box_h_bitmap = BoxHBITMAP::new(CreateCompatibleBitmap(*box_hdc_window, width, height));
 
         let previous_object = SelectObject(*box_hdc_mem, *box_h_bitmap);
 
@@ -168,8 +167,8 @@ pub fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaImage> {
                 *box_hdc_mem,
                 0,
                 0,
-                dc_width,
-                dc_height,
+                width,
+                height,
                 *box_hdc_window,
                 0,
                 0,
@@ -180,6 +179,6 @@ pub fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaImage> {
 
         SelectObject(*box_hdc_mem, previous_object);
 
-        to_rgba_image(box_hdc_mem, box_h_bitmap, dc_width, dc_height)
+        to_rgba_image(box_hdc_mem, box_h_bitmap, width, height)
     }
 }
