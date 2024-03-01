@@ -1,6 +1,6 @@
 [package]
 name = "screenshots"
-version = "0.8.9"
+version = "0.8.10"
 edition = "2021"
 description = "Move to [XCap](https://crates.io/crates/xcap)"
 license = "Apache-2.0"
