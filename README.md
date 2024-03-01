@@ -1,5 +1,7 @@
 # 📷 Screenshots
 
+**Important!!! Project Move to [XCap](https://crates.io/crates/xcap)**
+
 Screenshots is a cross-platform screenshots library for MacOS, Windows, Linux (X11, Wayland) written in Rust. It provides a simple API for capturing screenshots of a screen or a specific area of a screen.
 
 ## Example

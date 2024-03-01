@@ -1,8 +1,8 @@
 [package]
 name = "screenshots"
-version = "0.8.7"
+version = "0.8.9"
 edition = "2021"
-description = "A cross-platform screen capturer library"
+description = "Move to [XCap](https://crates.io/crates/xcap)"
 license = "Apache-2.0"
 documentation = "https://docs.rs/screenshots"
 homepage = "https://github.com/nashaofu/screenshots-rs"
