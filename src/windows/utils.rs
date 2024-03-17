@@ -1,6 +1,6 @@
 use sysinfo::System;
 use windows::Win32::{
-    Foundation::{HWND, RECT},
+    Foundation::{GetLastError, HWND, RECT},
     UI::WindowsAndMessaging::GetWindowRect,
 };
 
@@ -30,5 +30,12 @@ pub(super) fn get_window_rect(hwnd: HWND) -> XCapResult<RECT> {
         let mut rect = RECT::default();
         GetWindowRect(hwnd, &mut rect)?;
         Ok(rect)
+    }
+}
+
+pub(super) fn log_last_error<T: ToString>(label: T) {
+    unsafe {
+        let err = GetLastError();
+        log::error!("{} error: {:?}", label.to_string(), err);
     }
 }

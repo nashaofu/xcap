@@ -1,15 +1,14 @@
-use log::error;
 use std::{ops::Deref, ptr};
 use windows::{
     core::PCWSTR,
     Win32::{
-        Foundation::{CloseHandle, HANDLE, HWND},
+        Foundation::{CloseHandle, GetLastError, HANDLE, HWND},
         Graphics::Gdi::{CreateDCW, DeleteDC, DeleteObject, GetWindowDC, ReleaseDC, HBITMAP, HDC},
         System::Threading::{OpenProcess, PROCESS_ACCESS_RIGHTS},
     },
 };
 
-use crate::XCapResult;
+use crate::{XCapError, XCapResult};
 
 #[derive(Debug)]
 pub(super) struct BoxHDC {
@@ -31,11 +30,11 @@ impl Drop for BoxHDC {
         unsafe {
             if let Some(hwnd) = self.hwnd {
                 if ReleaseDC(hwnd, self.hdc) != 1 {
-                    error!("ReleaseDC {:?} failed", self)
+                    log::error!("ReleaseDC {:?} failed", self)
                 }
             } else {
                 if !DeleteDC(self.hdc).as_bool() {
-                    error!("DeleteDC {:?} failed", self)
+                    log::error!("DeleteDC {:?} failed", self)
                 }
             }
         };
@@ -90,7 +89,7 @@ impl Drop for BoxHBITMAP {
         // https://learn.microsoft.com/zh-cn/windows/win32/api/wingdi/nf-wingdi-createcompatiblebitmap
         unsafe {
             if !DeleteObject(self.0).as_bool() {
-                error!("DeleteObject {:?} failed", self)
+                log::error!("DeleteObject {:?} failed", self)
             }
         };
     }
@@ -115,7 +114,7 @@ impl Deref for BoxProcessHandle {
 impl Drop for BoxProcessHandle {
     fn drop(&mut self) {
         unsafe {
-            CloseHandle(self.0).unwrap_or_else(|_| error!("CloseHandle {:?} failed", self));
+            CloseHandle(self.0).unwrap_or_else(|_| log::error!("CloseHandle {:?} failed", self));
         };
     }
 }
@@ -126,8 +125,17 @@ impl BoxProcessHandle {
         b_inherit_handle: bool,
         dw_process_id: u32,
     ) -> XCapResult<Self> {
-        let h_process = unsafe { OpenProcess(dw_desired_access, b_inherit_handle, dw_process_id)? };
+        unsafe {
+            let h_process = OpenProcess(dw_desired_access, b_inherit_handle, dw_process_id)?;
 
-        Ok(BoxProcessHandle(h_process))
+            if h_process.is_invalid() {
+                return Err(XCapError::new(format!(
+                    "OpenProcess error {:?}",
+                    GetLastError()
+                )));
+            }
+
+            Ok(BoxProcessHandle(h_process))
+        }
     }
 }

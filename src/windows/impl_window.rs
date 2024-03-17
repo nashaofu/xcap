@@ -4,7 +4,7 @@ use std::{cmp::Ordering, ffi::c_void, mem, ptr};
 use windows::{
     core::{HSTRING, PCWSTR},
     Win32::{
-        Foundation::{BOOL, HMODULE, HWND, LPARAM, MAX_PATH, TRUE},
+        Foundation::{BOOL, HWND, LPARAM, MAX_PATH, TRUE},
         Graphics::{
             Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED},
             Gdi::{IsRectEmpty, MonitorFromWindow, MONITOR_DEFAULTTONEAREST},
@@ -12,7 +12,7 @@ use windows::{
         Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW},
         System::{
             ProcessStatus::{GetModuleBaseNameW, GetModuleFileNameExW},
-            Threading::{GetCurrentProcessId, PROCESS_QUERY_LIMITED_INFORMATION},
+            Threading::{GetCurrentProcessId, PROCESS_ALL_ACCESS},
         },
         UI::WindowsAndMessaging::{
             EnumWindows, GetClassNameW, GetWindowInfo, GetWindowLongPtrW, GetWindowTextLengthW,
@@ -22,7 +22,10 @@ use windows::{
     },
 };
 
-use crate::{error::XCapResult, platform::boxed::BoxProcessHandle};
+use crate::{
+    error::XCapResult,
+    platform::{boxed::BoxProcessHandle, utils::log_last_error},
+};
 
 use super::{
     capture::capture_window,
@@ -173,20 +176,47 @@ struct LangCodePage {
     pub w_code_page: u16,
 }
 
+fn get_module_basename(box_process_handle: BoxProcessHandle) -> XCapResult<String> {
+    unsafe {
+        // 默认使用 module_basename
+        let mut module_base_name_w = [0; MAX_PATH as usize];
+        let result = GetModuleBaseNameW(*box_process_handle, None, &mut module_base_name_w);
+
+        if result == 0 {
+            log_last_error("GetModuleBaseNameW");
+
+            GetModuleFileNameExW(*box_process_handle, None, &mut module_base_name_w);
+        }
+
+        wide_string_to_string(&module_base_name_w)
+    }
+}
+
 fn get_app_name(hwnd: HWND) -> XCapResult<String> {
     unsafe {
         let mut lp_dw_process_id = 0;
         GetWindowThreadProcessId(hwnd, Some(&mut lp_dw_process_id));
 
         let box_process_handle =
-            BoxProcessHandle::open(PROCESS_QUERY_LIMITED_INFORMATION, false, lp_dw_process_id)?;
+            match BoxProcessHandle::open(PROCESS_ALL_ACCESS, false, lp_dw_process_id) {
+                Ok(box_handle) => box_handle,
+                Err(err) => {
+                    log::error!("{}", err);
+                    return Ok(String::new());
+                }
+            };
 
         let mut filename = [0; MAX_PATH as usize];
-        GetModuleFileNameExW(*box_process_handle, HMODULE::default(), &mut filename);
+        GetModuleFileNameExW(*box_process_handle, None, &mut filename);
 
         let pcw_filename = PCWSTR::from_raw(filename.as_ptr());
 
         let file_version_info_size_w = GetFileVersionInfoSizeW(pcw_filename, None);
+        if file_version_info_size_w == 0 {
+            log_last_error("GetFileVersionInfoSizeW");
+
+            return get_module_basename(box_process_handle);
+        }
 
         let mut file_version_info = vec![0u16; file_version_info_size_w as usize];
 
@@ -253,15 +283,7 @@ fn get_app_name(hwnd: HWND) -> XCapResult<String> {
             }
         }
 
-        // 默认使用 module_basename
-        let mut module_base_name_w = [0; MAX_PATH as usize];
-        GetModuleBaseNameW(
-            *box_process_handle,
-            HMODULE::default(),
-            &mut module_base_name_w,
-        );
-
-        wide_string_to_string(&module_base_name_w)
+        get_module_basename(box_process_handle)
     }
 }
 
