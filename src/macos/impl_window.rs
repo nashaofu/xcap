@@ -66,7 +66,7 @@ fn get_window_cg_rect(window_cf_dictionary_ref: CFDictionaryRef) -> CGRect {
 impl ImplWindow {
     pub fn new(
         window_cf_dictionary_ref: CFDictionaryRef,
-        impl_monitors: &Vec<ImplMonitor>,
+        impl_monitors: &[ImplMonitor],
     ) -> XCapResult<ImplWindow> {
         unsafe {
             let id = {
