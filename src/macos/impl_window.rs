@@ -8,7 +8,7 @@ use core_foundation::{
 use core_graphics::{
     display::{
         kCGNullWindowID, kCGWindowListExcludeDesktopElements, kCGWindowListOptionIncludingWindow,
-        kCGWindowListOptionOnScreenOnly, CGWindowListCopyWindowInfo,
+        kCGWindowListOptionOnScreenOnly, CGPoint, CGWindowListCopyWindowInfo,
     },
     geometry::CGRect,
     window::kCGWindowSharingNone,
@@ -64,7 +64,10 @@ fn get_window_cg_rect(window_cf_dictionary_ref: CFDictionaryRef) -> CGRect {
 }
 
 impl ImplWindow {
-    pub fn new(window_cf_dictionary_ref: CFDictionaryRef) -> XCapResult<ImplWindow> {
+    pub fn new(
+        window_cf_dictionary_ref: CFDictionaryRef,
+        impl_monitors: &Vec<ImplMonitor>,
+    ) -> XCapResult<ImplWindow> {
         unsafe {
             let id = {
                 let cf_number_ref =
@@ -102,15 +105,24 @@ impl ImplWindow {
 
             let (is_maximized, current_monitor) = {
                 // 获取窗口中心点的坐标
-                let window_center_x = (cg_rect.origin.x + cg_rect.size.width) / 2.0;
-                let window_center_y = (cg_rect.origin.y + cg_rect.size.height) / 2.0;
+                let window_center_x = cg_rect.origin.x + cg_rect.size.width / 2.0;
+                let window_center_y = cg_rect.origin.y + cg_rect.size.height / 2.0;
+                let cg_point = CGPoint {
+                    x: window_center_x,
+                    y: window_center_y,
+                };
 
-                let impl_monitor =
-                    ImplMonitor::from_point(window_center_x as i32, window_center_y as i32)?;
+                let impl_monitor = impl_monitors
+                    .iter()
+                    .find(|impl_monitor| {
+                        let display_bounds = impl_monitor.cg_display.bounds();
+                        display_bounds.contains(&cg_point) || display_bounds.is_intersects(&cg_rect)
+                    })
+                    .unwrap_or(&impl_monitors[0]);
 
                 (
-                    cg_rect.size.width as u32 == impl_monitor.width
-                        && cg_rect.size.height as u32 == impl_monitor.height,
+                    cg_rect.size.width as u32 >= impl_monitor.width
+                        && cg_rect.size.height as u32 >= impl_monitor.height,
                     impl_monitor,
                 )
             };
@@ -120,7 +132,7 @@ impl ImplWindow {
                 id,
                 title,
                 app_name,
-                current_monitor,
+                current_monitor: current_monitor.clone(),
                 x: cg_rect.origin.x as i32,
                 y: cg_rect.origin.y as i32,
                 width: cg_rect.size.width as u32,
@@ -132,6 +144,7 @@ impl ImplWindow {
     }
 
     pub fn all() -> XCapResult<Vec<ImplWindow>> {
+        let impl_monitors = ImplMonitor::all()?;
         unsafe {
             let cg_window_list_copy_window_info = CGWindowListCopyWindowInfo(
                 kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
@@ -163,7 +176,7 @@ impl ImplWindow {
                     continue;
                 }
 
-                impl_windows.push(ImplWindow::new(window_cf_dictionary_ref)?);
+                impl_windows.push(ImplWindow::new(window_cf_dictionary_ref, &impl_monitors)?);
             }
 
             Ok(impl_windows)
