@@ -55,8 +55,10 @@ extern "system" fn monitor_enum_proc(
 
 fn get_dev_mode_w(monitor_info_exw: &MONITORINFOEXW) -> XCapResult<DEVMODEW> {
     let sz_device = monitor_info_exw.szDevice.as_ptr();
-    let mut dev_mode_w = DEVMODEW::default();
-    dev_mode_w.dmSize = mem::size_of::<DEVMODEW>() as u16;
+    let mut dev_mode_w = DEVMODEW {
+        dmSize: mem::size_of::<DEVMODEW>() as u16,
+        ..DEVMODEW::default()
+    };
 
     unsafe {
         EnumDisplaySettingsW(PCWSTR(sz_device), ENUM_CURRENT_SETTINGS, &mut dev_mode_w).ok()?;
@@ -133,7 +135,11 @@ impl ImplMonitor {
         let mut impl_monitors = Vec::with_capacity(hmonitors.len());
 
         for &hmonitor in hmonitors.iter() {
-            impl_monitors.push(ImplMonitor::new(hmonitor)?);
+            if let Ok(impl_monitor) = ImplMonitor::new(hmonitor) {
+                impl_monitors.push(impl_monitor);
+            } else {
+                log::error!("ImplMonitor::new({:?}) failed", hmonitor);
+            }
         }
 
         Ok(impl_monitors)

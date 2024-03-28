@@ -4,10 +4,10 @@ use xcap::Monitor;
 
 fn normalized(filename: &str) -> String {
     filename
-        .replace("|", "")
-        .replace("\\", "")
-        .replace(":", "")
-        .replace("/", "")
+        .replace('|', "")
+        .replace('\\', "")
+        .replace(':', "")
+        .replace('/', "")
 }
 
 fn main() {

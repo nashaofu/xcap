@@ -290,8 +290,10 @@ fn get_app_name(hwnd: HWND) -> XCapResult<String> {
 impl ImplWindow {
     fn new(hwnd: HWND) -> XCapResult<ImplWindow> {
         unsafe {
-            let mut window_info = WINDOWINFO::default();
-            window_info.cbSize = mem::size_of::<WINDOWINFO>() as u32;
+            let mut window_info = WINDOWINFO {
+                cbSize: mem::size_of::<WINDOWINFO>() as u32,
+                ..WINDOWINFO::default()
+            };
 
             GetWindowInfo(hwnd, &mut window_info)?;
 
@@ -331,7 +333,11 @@ impl ImplWindow {
         let mut impl_windows = Vec::new();
 
         for &hwnd in hwnds.iter() {
-            impl_windows.push(ImplWindow::new(hwnd)?);
+            if let Ok(impl_window) = ImplWindow::new(hwnd) {
+                impl_windows.push(impl_window);
+            } else {
+                log::error!("ImplWindow::new({:?}) failed", hwnd);
+            }
         }
 
         Ok(impl_windows)
