@@ -16,7 +16,7 @@ use core_graphics::{
 use image::RgbaImage;
 use std::ffi::c_void;
 
-use crate::error::XCapResult;
+use crate::{error::XCapResult, XCapError};
 
 use super::{capture::capture, impl_monitor::ImplMonitor};
 
@@ -43,23 +43,44 @@ extern "C" {
     ) -> CFBooleanRef;
 }
 
-fn get_cf_dictionary_get_value(cf_dictionary_ref: CFDictionaryRef, key: &str) -> *const c_void {
+fn get_cf_dictionary_get_value(
+    cf_dictionary_ref: CFDictionaryRef,
+    key: &str,
+) -> XCapResult<*const c_void> {
     unsafe {
         let cf_dictionary_key = CFString::new(key);
 
-        CFDictionaryGetValue(cf_dictionary_ref, cf_dictionary_key.as_CFTypeRef())
+        let value = CFDictionaryGetValue(cf_dictionary_ref, cf_dictionary_key.as_CFTypeRef());
+
+        if value.is_null() {
+            return Err(XCapError::new(format!(
+                "Get CFDictionary {} value failed",
+                key
+            )));
+        }
+
+        Ok(value)
     }
 }
 
-fn get_window_cg_rect(window_cf_dictionary_ref: CFDictionaryRef) -> CGRect {
+fn get_window_cg_rect(window_cf_dictionary_ref: CFDictionaryRef) -> XCapResult<CGRect> {
     unsafe {
         let window_bounds_ref =
-            get_cf_dictionary_get_value(window_cf_dictionary_ref, "kCGWindowBounds")
+            get_cf_dictionary_get_value(window_cf_dictionary_ref, "kCGWindowBounds")?
                 as CFDictionaryRef;
 
         let mut cg_rect = CGRect::default();
-        CGRectMakeWithDictionaryRepresentation(window_bounds_ref, &mut cg_rect);
-        cg_rect
+
+        let is_success_ref =
+            CGRectMakeWithDictionaryRepresentation(window_bounds_ref, &mut cg_rect);
+
+        if is_success_ref.is_null() {
+            return Err(XCapError::new(
+                "CGRectMakeWithDictionaryRepresentation failed",
+            ));
+        }
+
+        Ok(cg_rect)
     }
 }
 
@@ -71,35 +92,42 @@ impl ImplWindow {
         unsafe {
             let id = {
                 let cf_number_ref =
-                    get_cf_dictionary_get_value(window_cf_dictionary_ref, "kCGWindowNumber")
+                    get_cf_dictionary_get_value(window_cf_dictionary_ref, "kCGWindowNumber")?
                         as CFNumberRef;
 
                 let mut window_id: u32 = 0;
-                CFNumberGetValue(
+                let is_success = CFNumberGetValue(
                     cf_number_ref,
                     kCFNumberIntType,
                     &mut window_id as *mut _ as *mut c_void,
                 );
+
+                if !is_success {
+                    return Err(XCapError::new("CFNumberGetValue failed"));
+                }
+
                 window_id
             };
 
-            let title = {
-                let window_title_ref =
-                    get_cf_dictionary_get_value(window_cf_dictionary_ref, "kCGWindowName");
-                CFString::from_void(window_title_ref).to_string()
+            let title = match get_cf_dictionary_get_value(window_cf_dictionary_ref, "kCGWindowName")
+            {
+                Ok(window_title_ref) => CFString::from_void(window_title_ref).to_string(),
+                _ => String::default(),
             };
 
-            let app_name = {
-                let window_owner_name_ref =
-                    get_cf_dictionary_get_value(window_cf_dictionary_ref, "kCGWindowOwnerName");
-                CFString::from_void(window_owner_name_ref).to_string()
-            };
+            let app_name =
+                match get_cf_dictionary_get_value(window_cf_dictionary_ref, "kCGWindowOwnerName") {
+                    Ok(window_owner_name_ref) => {
+                        CFString::from_void(window_owner_name_ref).to_string()
+                    }
+                    _ => String::default(),
+                };
 
-            let cg_rect = get_window_cg_rect(window_cf_dictionary_ref);
+            let cg_rect = get_window_cg_rect(window_cf_dictionary_ref)?;
 
             let is_minimized = {
                 let window_is_on_screen_ref =
-                    get_cf_dictionary_get_value(window_cf_dictionary_ref, "kCGWindowIsOnscreen");
+                    get_cf_dictionary_get_value(window_cf_dictionary_ref, "kCGWindowIsOnscreen")?;
                 !CFBooleanGetValue(window_is_on_screen_ref as CFBooleanRef)
             };
 
@@ -162,8 +190,13 @@ impl ImplWindow {
                     continue;
                 }
 
-                let window_sharing_state_ref =
-                    get_cf_dictionary_get_value(window_cf_dictionary_ref, "kCGWindowSharingState");
+                let window_sharing_state_ref = match get_cf_dictionary_get_value(
+                    window_cf_dictionary_ref,
+                    "kCGWindowSharingState",
+                ) {
+                    Ok(window_sharing_state_ref) => window_sharing_state_ref,
+                    _ => continue,
+                };
 
                 let mut window_sharing_state: u32 = 0;
                 CFNumberGetValue(
@@ -176,7 +209,9 @@ impl ImplWindow {
                     continue;
                 }
 
-                impl_windows.push(ImplWindow::new(window_cf_dictionary_ref, &impl_monitors)?);
+                if let Ok(impl_window) = ImplWindow::new(window_cf_dictionary_ref, &impl_monitors) {
+                    impl_windows.push(impl_window);
+                }
             }
 
             Ok(impl_windows)
@@ -187,7 +222,7 @@ impl ImplWindow {
 impl ImplWindow {
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         capture(
-            get_window_cg_rect(self.window_cf_dictionary_ref),
+            get_window_cg_rect(self.window_cf_dictionary_ref)?,
             kCGWindowListOptionIncludingWindow,
             self.id,
         )
