@@ -8,7 +8,7 @@ use core_foundation::{
 use core_graphics::{
     display::{
         kCGNullWindowID, kCGWindowListExcludeDesktopElements, kCGWindowListOptionIncludingWindow,
-        kCGWindowListOptionOnScreenOnly, CGPoint, CGWindowListCopyWindowInfo,
+        kCGWindowListOptionOnScreenOnly, CGDisplay, CGPoint, CGWindowListCopyWindowInfo,
     },
     geometry::CGRect,
     window::kCGWindowSharingNone,
@@ -131,6 +131,8 @@ impl ImplWindow {
                 !CFBooleanGetValue(window_is_on_screen_ref as CFBooleanRef)
             };
 
+            let primary_monitor = ImplMonitor::new(CGDisplay::main().id)?;
+
             let (is_maximized, current_monitor) = {
                 // 获取窗口中心点的坐标
                 let window_center_x = cg_rect.origin.x + cg_rect.size.width / 2.0;
@@ -146,7 +148,7 @@ impl ImplWindow {
                         let display_bounds = impl_monitor.cg_display.bounds();
                         display_bounds.contains(&cg_point) || display_bounds.is_intersects(&cg_rect)
                     })
-                    .unwrap_or(&impl_monitors[0]);
+                    .unwrap_or(&primary_monitor);
 
                 (
                     cg_rect.size.width as u32 >= impl_monitor.width

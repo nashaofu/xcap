@@ -34,7 +34,7 @@ extern "C" {
 }
 
 impl ImplMonitor {
-    fn new(id: CGDirectDisplayID) -> XCapResult<ImplMonitor> {
+    pub(super) fn new(id: CGDirectDisplayID) -> XCapResult<ImplMonitor> {
         let cg_display = CGDisplay::new(id);
         let screen_num = cg_display.model_number();
         let cg_rect = cg_display.bounds();
