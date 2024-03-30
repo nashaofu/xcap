@@ -60,6 +60,9 @@ jobs:
                   override: true
                   components: rustfmt, clippy
 
+            - name: Check semver
+              uses: obi1kenobi/cargo-semver-checks-action@v2
+
             - name: Publish
               env:
                   CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN  }}

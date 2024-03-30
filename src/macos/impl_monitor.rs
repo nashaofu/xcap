@@ -63,11 +63,9 @@ impl ImplMonitor {
         let mut impl_monitors: Vec<ImplMonitor> = Vec::with_capacity(display_ids.len());
 
         for display_id in display_ids {
-            /**
-             * 运行过程中，如果遇到显示器插拔，可能会导致调用报错
-             * 对于报错的情况，就把报错的情况给排除掉
-             * https://github.com/nashaofu/xcap/issues/118
-             */
+            // 运行过程中，如果遇到显示器插拔，可能会导致调用报错
+            // 对于报错的情况，就把报错的情况给排除掉
+            // https://github.com/nashaofu/xcap/issues/118
             if let Ok(impl_monitor) = ImplMonitor::new(display_id) {
                 impl_monitors.push(impl_monitor);
             } else {
