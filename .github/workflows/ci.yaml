@@ -44,6 +44,9 @@ jobs:
 
             - name: Test
               run: cargo test
+
+            - name: Check semver
+              uses: obi1kenobi/cargo-semver-checks-action@v2
     publish:
         name: Publish
         runs-on: ubuntu-latest
@@ -59,9 +62,6 @@ jobs:
                   toolchain: stable
                   override: true
                   components: rustfmt, clippy
-
-            - name: Check semver
-              uses: obi1kenobi/cargo-semver-checks-action@v2
 
             - name: Publish
               env:
