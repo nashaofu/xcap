@@ -115,7 +115,7 @@ impl ImplWindow {
         let current_monitor = {
             let mut max_area = 0;
             let mut find_result = impl_monitors
-                .get(0)
+                .first()
                 .ok_or(XCapError::new("Get screen info failed"))?;
 
             let window_rect = Rect::new(x, y, width, height);
@@ -198,14 +198,34 @@ impl ImplWindow {
             let query_pointer_cookie = conn.send_request(&QueryPointer {
                 window: root_window,
             });
-            let query_pointer_reply = conn.wait_for_reply(query_pointer_cookie)?;
+            let query_pointer_reply = match conn.wait_for_reply(query_pointer_cookie) {
+                Ok(query_pointer_reply) => query_pointer_reply,
+                _ => continue,
+            };
 
             if query_pointer_reply.same_screen() {
-                let list_window_reply =
-                    get_window_property(&conn, root_window, client_list_atom, ATOM_NONE, 0, 100)?;
+                let list_window_reply = match get_window_property(
+                    &conn,
+                    root_window,
+                    client_list_atom,
+                    ATOM_NONE,
+                    0,
+                    100,
+                ) {
+                    Ok(list_window_reply) => list_window_reply,
+                    _ => continue,
+                };
 
                 for client in list_window_reply.value::<Window>() {
-                    impl_windows.push(ImplWindow::new(&conn, client, &impl_monitors)?);
+                    if let Ok(impl_window) = ImplWindow::new(&conn, client, &impl_monitors) {
+                        impl_windows.push(impl_window);
+                    } else {
+                        log::error!(
+                            "ImplWindow::new(&conn, {:?}, {:?}) failed",
+                            client,
+                            &impl_monitors
+                        );
+                    }
                 }
             }
         }
@@ -216,6 +236,6 @@ impl ImplWindow {
 
 impl ImplWindow {
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
-        capture_window(&self)
+        capture_window(self)
     }
 }

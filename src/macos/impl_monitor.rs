@@ -34,7 +34,7 @@ extern "C" {
 }
 
 impl ImplMonitor {
-    fn new(id: CGDirectDisplayID) -> XCapResult<ImplMonitor> {
+    pub(super) fn new(id: CGDirectDisplayID) -> XCapResult<ImplMonitor> {
         let cg_display = CGDisplay::new(id);
         let screen_num = cg_display.model_number();
         let cg_rect = cg_display.bounds();
@@ -63,7 +63,14 @@ impl ImplMonitor {
         let mut impl_monitors: Vec<ImplMonitor> = Vec::with_capacity(display_ids.len());
 
         for display_id in display_ids {
-            impl_monitors.push(ImplMonitor::new(display_id)?);
+            // 运行过程中，如果遇到显示器插拔，可能会导致调用报错
+            // 对于报错的情况，就把报错的情况给排除掉
+            // https://github.com/nashaofu/xcap/issues/118
+            if let Ok(impl_monitor) = ImplMonitor::new(display_id) {
+                impl_monitors.push(impl_monitor);
+            } else {
+                log::error!("ImplMonitor::new({}) failed", display_id);
+            }
         }
 
         Ok(impl_monitors)

@@ -78,7 +78,7 @@ fn get_scale_factor(conn: &Connection, screen: &Screen) -> XCapResult<f32> {
         .strip_prefix(xft_dpi_prefix)
         .ok_or_else(|| XCapError::new("Xft.dpi parse failed"))?;
 
-    let dpi = xft_dpi.parse::<f32>().map_err(|err| XCapError::new(err))?;
+    let dpi = xft_dpi.parse::<f32>().map_err(XCapError::new)?;
 
     Ok(dpi / 96.0)
 }
@@ -178,18 +178,18 @@ impl ImplMonitor {
 
         let mode_infos = get_screen_resources_reply.modes();
 
-        let mut impl_monitor = Vec::new();
+        let mut impl_monitors = Vec::new();
 
         for monitor_info in monitor_info_iterator {
-            let output = monitor_info
-                .outputs()
-                .get(0)
-                .ok_or_else(|| XCapError::new("Not found output"))?;
+            let output = match monitor_info.outputs().first() {
+                Some(output) => output,
+                _ => continue,
+            };
 
             let (rotation, frequency) =
                 get_rotation_frequency(&conn, mode_infos, output).unwrap_or((0.0, 0.0));
 
-            impl_monitor.push(ImplMonitor::new(
+            if let Ok(impl_monitor) = ImplMonitor::new(
                 &conn,
                 screen,
                 monitor_info,
@@ -197,10 +197,22 @@ impl ImplMonitor {
                 rotation,
                 scale_factor,
                 frequency,
-            )?);
+            ) {
+                impl_monitors.push(impl_monitor);
+            } else {
+                log::error!(
+                    "ImplMonitor::new(&conn, {:?}, {:?}, {:?}, {}, {}, {}) failed",
+                    screen,
+                    monitor_info,
+                    output,
+                    rotation,
+                    scale_factor,
+                    frequency
+                );
+            }
         }
 
-        Ok(impl_monitor)
+        Ok(impl_monitors)
     }
 
     pub fn from_point(x: i32, y: i32) -> XCapResult<ImplMonitor> {

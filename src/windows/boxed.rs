@@ -32,10 +32,8 @@ impl Drop for BoxHDC {
                 if ReleaseDC(hwnd, self.hdc) != 1 {
                     log::error!("ReleaseDC {:?} failed", self)
                 }
-            } else {
-                if !DeleteDC(self.hdc).as_bool() {
-                    log::error!("DeleteDC {:?} failed", self)
-                }
+            } else if !DeleteDC(self.hdc).as_bool() {
+                log::error!("DeleteDC {:?} failed", self)
             }
         };
     }
