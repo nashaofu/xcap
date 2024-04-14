@@ -45,7 +45,7 @@ impl Window {
     pub fn x(&self) -> i32 {
         self.impl_window.x
     }
-    /// The window x coordinate.
+    /// The window y coordinate.
     pub fn y(&self) -> i32 {
         self.impl_window.y
     }
