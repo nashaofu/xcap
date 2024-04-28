@@ -14,7 +14,7 @@ use core_graphics::{
     window::{kCGNullWindowID, kCGWindowSharingNone},
 };
 use image::RgbaImage;
-use std::ffi::c_void;
+use std::{ffi::c_void, sync::Arc};
 
 use crate::{error::XCapResult, XCapError};
 
@@ -22,7 +22,7 @@ use super::{capture::capture, impl_monitor::ImplMonitor};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImplWindow {
-    pub window_cf_dictionary_ref: CFDictionaryRef,
+    pub window_cf_dictionary_ref: Arc<CFDictionaryRef>,
     pub id: u32,
     pub title: String,
     pub app_name: String,
@@ -158,7 +158,7 @@ impl ImplWindow {
             !get_cf_bool_value(window_cf_dictionary_ref, "kCGWindowIsOnscreen")? && !is_maximized;
 
         Ok(ImplWindow {
-            window_cf_dictionary_ref,
+            window_cf_dictionary_ref: Arc::new(window_cf_dictionary_ref),
             id,
             title: window_name,
             app_name: window_owner_name,
@@ -249,8 +249,10 @@ impl ImplWindow {
 
 impl ImplWindow {
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
+        let window_cf_dictionary_ref = Arc::into_inner(self.window_cf_dictionary_ref.clone())
+            .ok_or(XCapError::new("window_cf_dictionary_ref is null"))?;
         capture(
-            get_window_cg_rect(self.window_cf_dictionary_ref)?,
+            get_window_cg_rect(window_cf_dictionary_ref)?,
             kCGWindowListOptionIncludingWindow,
             self.id,
         )
