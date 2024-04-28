@@ -22,7 +22,6 @@ use super::{capture::capture, impl_monitor::ImplMonitor};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImplWindow {
-    // 保证线程安全
     pub window_cf_dictionary_ref: CFDictionaryRef,
     pub id: u32,
     pub title: String,
