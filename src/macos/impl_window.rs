@@ -35,6 +35,8 @@ pub(crate) struct ImplWindow {
     pub is_maximized: bool,
 }
 
+unsafe impl Send for ImplWindow {}
+
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
     fn CGRectMakeWithDictionaryRepresentation(
