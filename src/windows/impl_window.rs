@@ -41,6 +41,7 @@ pub(crate) struct ImplWindow {
     pub id: u32,
     pub title: String,
     pub app_name: String,
+    pub process_id: u32,
     pub current_monitor: ImplMonitor,
     pub x: i32,
     pub y: i32,
@@ -119,8 +120,7 @@ fn is_valid_window(hwnd: HWND) -> bool {
         // windows owned by the current process. Consumers should either ensure that
         // the thread running their message loop never waits on this operation, or use
         // the option to exclude these windows from the source list.
-        let mut lp_dw_process_id = 0;
-        GetWindowThreadProcessId(hwnd, Some(&mut lp_dw_process_id));
+        let lp_dw_process_id = get_process_id(hwnd);
         if lp_dw_process_id == GetCurrentProcessId() {
             return false;
         }
@@ -192,10 +192,17 @@ fn get_module_basename(box_process_handle: BoxProcessHandle) -> XCapResult<Strin
     }
 }
 
-fn get_app_name(hwnd: HWND) -> XCapResult<String> {
+fn get_process_id(hwnd: HWND) -> u32 {
     unsafe {
         let mut lp_dw_process_id = 0;
         GetWindowThreadProcessId(hwnd, Some(&mut lp_dw_process_id));
+        lp_dw_process_id
+    }
+}
+
+fn get_app_name(hwnd: HWND) -> XCapResult<String> {
+    unsafe {
+        let lp_dw_process_id = get_process_id(hwnd);
 
         let box_process_handle =
             match BoxProcessHandle::open(PROCESS_ALL_ACCESS, false, lp_dw_process_id) {
@@ -311,6 +318,7 @@ impl ImplWindow {
                 id: hwnd.0 as u32,
                 title,
                 app_name,
+                process_id: get_process_id(hwnd),
                 current_monitor: ImplMonitor::new(hmonitor)?,
                 x: rc_window.left,
                 y: rc_window.top,

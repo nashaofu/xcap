@@ -37,6 +37,12 @@ impl Window {
     pub fn title(&self) -> &str {
         &self.impl_window.title
     }
+
+    #[cfg(target_os = "windows")]
+    /// The window process id
+    pub fn process_id(&self) -> u32 {
+        self.impl_window.process_id
+    }
     /// The window current monitor
     pub fn current_monitor(&self) -> Monitor {
         Monitor::new(self.impl_window.current_monitor.to_owned())
