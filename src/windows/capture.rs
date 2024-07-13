@@ -64,10 +64,11 @@ fn to_rgba_image(
         }
     };
 
+    let is_old_version = get_os_major_version() < 8;
     for src in buffer.chunks_exact_mut(4) {
         src.swap(0, 2);
         // fix https://github.com/nashaofu/xcap/issues/92#issuecomment-1910014951
-        if src[3] == 0 && get_os_major_version() < 8 {
+        if src[3] == 0 && is_old_version {
             src[3] = 255;
         }
     }
