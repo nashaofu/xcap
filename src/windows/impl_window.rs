@@ -4,9 +4,9 @@ use std::{cmp::Ordering, ffi::c_void, mem, ptr};
 use windows::{
     core::{HSTRING, PCWSTR},
     Win32::{
-        Foundation::{BOOL, HWND, LPARAM, MAX_PATH, TRUE},
+        Foundation::{BOOL, HWND, LPARAM, MAX_PATH, RECT, TRUE},
         Graphics::{
-            Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED},
+            Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS},
             Gdi::{IsRectEmpty, MonitorFromWindow, MONITOR_DEFAULTTONEAREST},
         },
         Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW},
@@ -27,11 +27,7 @@ use crate::{
     platform::{boxed::BoxProcessHandle, utils::log_last_error},
 };
 
-use super::{
-    capture::capture_window,
-    impl_monitor::ImplMonitor,
-    utils::{get_window_rect, wide_string_to_string},
-};
+use super::{capture::capture_window, impl_monitor::ImplMonitor, utils::wide_string_to_string};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImplWindow {
@@ -140,9 +136,21 @@ fn is_valid_window(hwnd: HWND) -> bool {
             return false;
         }
 
-        let is_rect_empty = get_window_rect(hwnd).is_ok_and(|rect| IsRectEmpty(&rect).as_bool());
+        let mut rect = RECT::default();
 
-        if is_rect_empty {
+        let get_rect_is_err = DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut rect as *mut RECT as *mut c_void,
+            mem::size_of::<RECT>() as u32,
+        )
+        .is_err();
+
+        if get_rect_is_err {
+            return false;
+        }
+
+        if IsRectEmpty(&rect).as_bool() {
             return false;
         }
     }
@@ -308,7 +316,7 @@ impl ImplWindow {
             let app_name = get_app_name(hwnd)?;
 
             let hmonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-            let rc_window = window_info.rcWindow;
+            let rc_client = window_info.rcClient;
             let is_minimized = IsIconic(hwnd).as_bool();
             let is_maximized = IsZoomed(hwnd).as_bool();
 
@@ -320,10 +328,10 @@ impl ImplWindow {
                 app_name,
                 process_id: get_process_id(hwnd),
                 current_monitor: ImplMonitor::new(hmonitor)?,
-                x: rc_window.left,
-                y: rc_window.top,
-                width: (rc_window.right - rc_window.left) as u32,
-                height: (rc_window.bottom - rc_window.top) as u32,
+                x: rc_client.left,
+                y: rc_client.top,
+                width: (rc_client.right - rc_client.left) as u32,
+                height: (rc_client.bottom - rc_client.top) as u32,
                 is_minimized,
                 is_maximized,
             })
@@ -355,6 +363,10 @@ impl ImplWindow {
 impl ImplWindow {
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         // TODO: 在win10之后，不同窗口有不同的dpi，所以可能存在截图不全或者截图有较大空白，实际窗口没有填充满图片
-        capture_window(self.hwnd, self.current_monitor.scale_factor)
+        capture_window(
+            self.hwnd,
+            self.current_monitor.scale_factor,
+            &self.window_info,
+        )
     }
 }

@@ -1,4 +1,4 @@
-use image::RgbaImage;
+use image::{DynamicImage, RgbaImage};
 use std::{ffi::c_void, mem};
 use windows::Win32::{
     Foundation::HWND,
@@ -11,13 +11,10 @@ use windows::Win32::{
         },
     },
     Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS},
-    UI::WindowsAndMessaging::GetDesktopWindow,
+    UI::WindowsAndMessaging::{GetDesktopWindow, WINDOWINFO},
 };
 
-use crate::{
-    error::{XCapError, XCapResult},
-    platform::utils::get_window_rect,
-};
+use crate::error::{XCapError, XCapResult};
 
 use super::{
     boxed::{BoxHBITMAP, BoxHDC},
@@ -115,12 +112,17 @@ pub fn capture_monitor(x: i32, y: i32, width: i32, height: i32) -> XCapResult<Rg
 }
 
 #[allow(unused)]
-pub fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaImage> {
+pub fn capture_window(
+    hwnd: HWND,
+    scale_factor: f32,
+    window_info: &WINDOWINFO,
+) -> XCapResult<RgbaImage> {
     unsafe {
         let box_hdc_window: BoxHDC = BoxHDC::from(hwnd);
-        let rect = get_window_rect(hwnd)?;
-        let mut width = rect.right - rect.left;
-        let mut height = rect.bottom - rect.top;
+        let rc_window = window_info.rcWindow;
+
+        let mut width = rc_window.right - rc_window.left;
+        let mut height = rc_window.bottom - rc_window.top;
 
         let hgdi_obj = GetCurrentObject(*box_hdc_window, OBJ_BITMAP);
         let mut bitmap = BITMAP::default();
@@ -138,8 +140,8 @@ pub fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaImage> {
             height = bitmap.bmHeight;
         }
 
-        width = (width as f32 * scale_factor) as i32;
-        height = (height as f32 * scale_factor) as i32;
+        width = (width as f32 * scale_factor).ceil() as i32;
+        height = (height as f32 * scale_factor).ceil() as i32;
 
         // 内存中的HDC，使用 DeleteDC 函数释放
         // https://learn.microsoft.com/zh-cn/windows/win32/api/wingdi/nf-wingdi-createcompatibledc
@@ -180,6 +182,17 @@ pub fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaImage> {
 
         SelectObject(*box_hdc_mem, previous_object);
 
-        to_rgba_image(box_hdc_mem, box_h_bitmap, width, height)
+        let image = to_rgba_image(box_hdc_mem, box_h_bitmap, width, height)?;
+
+        let mut rc_client = window_info.rcClient;
+
+        let x = ((rc_client.left - rc_window.left) as f32 * scale_factor).ceil();
+        let y = ((rc_client.top - rc_window.top) as f32 * scale_factor).ceil();
+        let w = ((rc_client.right - rc_client.left) as f32 * scale_factor).floor();
+        let h = ((rc_client.bottom - rc_client.top) as f32 * scale_factor).floor();
+
+        Ok(DynamicImage::ImageRgba8(image)
+            .crop(x as u32, y as u32, w as u32, h as u32)
+            .to_rgba8())
     }
 }
