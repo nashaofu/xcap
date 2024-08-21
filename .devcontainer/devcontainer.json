@@ -4,9 +4,14 @@
     "name": "Rust",
     // Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
     "image": "mcr.microsoft.com/devcontainers/rust:1-1-bullseye",
-    // Features to add to the dev container. More info: https://containers.dev/features.
     "features": {
-        "ghcr.io/devcontainers/features/desktop-lite:1": {}
+        "ghcr.io/devcontainers/features/desktop-lite:1": {
+            "version": "latest",
+            "noVncVersion": "1.2.0",
+            "password": "noPassword",
+            "webPort": "6080",
+            "vncPort": "5901"
+        }
     },
 
     // Use 'mounts' to make the cargo cache persistent in a Docker Volume.
@@ -19,25 +24,23 @@
     // ]
 
     // Use 'forwardPorts' to make a list of ports inside the container available locally.
-    "forwardPorts": [6080],
+    "forwardPorts": [6080, 5901],
+
+    // Use 'postCreateCommand' to run commands after the container is created.
+    // "postCreateCommand": "rustc --version",
+
+    // Configure tool-specific properties.
     "customizations": {
         "vscode": {
             "extensions": [
                 "wengerk.highlight-bad-chars",
                 "streetsidesoftware.code-spell-checker",
-                "serayuzgur.crates",
                 "EditorConfig.EditorConfig",
                 "tamasfe.even-better-toml",
                 "rust-lang.rust-analyzer"
             ]
         }
     }
-
-    // Use 'postCreateCommand' to run commands after the container is created.
-    // "postCreateCommand": "rustc --version",
-
-    // Configure tool-specific properties.
-    // "customizations": {},
 
     // Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
     // "remoteUser": "root"

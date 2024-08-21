@@ -235,6 +235,25 @@ impl ImplWindow {
 }
 
 impl ImplWindow {
+    pub fn refresh(&mut self) -> XCapResult<()> {
+        let (conn, _) = Connection::connect(None)?;
+        let impl_monitors = ImplMonitor::all()?;
+        let impl_window = ImplWindow::new(&conn, &self.window, &impl_monitors)?;
+
+        self.window = impl_window.window;
+        self.id = impl_window.id;
+        self.title = impl_window.title;
+        self.app_name = impl_window.app_name;
+        self.current_monitor = impl_window.current_monitor;
+        self.x = impl_window.x;
+        self.y = impl_window.y;
+        self.width = impl_window.width;
+        self.height = impl_window.height;
+        self.is_minimized = impl_window.is_minimized;
+        self.is_maximized = impl_window.is_maximized;
+
+        Ok(())
+    }
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         capture_window(self)
     }

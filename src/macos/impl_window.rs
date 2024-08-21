@@ -120,6 +120,39 @@ fn get_window_cg_rect(window_cf_dictionary_ref: CFDictionaryRef) -> XCapResult<C
     }
 }
 
+fn get_window_cf_dictionary_ref(window_id: u32) -> XCapResult<CFDictionaryRef> {
+    unsafe {
+        let cg_window_list_copy_window_info = CGWindowListCopyWindowInfo(
+            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+            kCGNullWindowID,
+        );
+
+        if cg_window_list_copy_window_info.is_null() {
+            return Err(XCapError::new("Run CGWindowListCopyWindowInfo error"));
+        }
+
+        let num_windows = CFArrayGetCount(cg_window_list_copy_window_info);
+
+        for i in 0..num_windows {
+            let window_cf_dictionary_ref =
+                CFArrayGetValueAtIndex(cg_window_list_copy_window_info, i) as CFDictionaryRef;
+
+            if window_cf_dictionary_ref.is_null() {
+                continue;
+            }
+
+            let k_cg_window_number =
+                get_cf_number_u32_value(window_cf_dictionary_ref, "kCGWindowNumber")?;
+
+            if k_cg_window_number == window_id {
+                return Ok(window_cf_dictionary_ref);
+            }
+        }
+
+        Err(XCapError::new("Not Found window"))
+    }
+}
+
 impl ImplWindow {
     pub fn new(
         window_cf_dictionary_ref: CFDictionaryRef,
@@ -250,6 +283,44 @@ impl ImplWindow {
 }
 
 impl ImplWindow {
+    pub fn refresh(&mut self) -> XCapResult<()> {
+        let impl_monitors = ImplMonitor::all()?;
+
+        let window_cf_dictionary_ref: *const core_foundation::dictionary::__CFDictionary =
+            get_window_cf_dictionary_ref(self.id)?;
+
+        let window_name = match get_cf_string_value(window_cf_dictionary_ref, "kCGWindowName") {
+            Ok(window_name) => window_name,
+            _ => return Err(XCapError::new("Get window name failed")),
+        };
+
+        let window_owner_name =
+            match get_cf_string_value(window_cf_dictionary_ref, "kCGWindowOwnerName") {
+                Ok(window_owner_name) => window_owner_name,
+                _ => return Err(XCapError::new("Get window owner name failed")),
+            };
+
+        let impl_window = ImplWindow::new(
+            window_cf_dictionary_ref,
+            &impl_monitors,
+            window_name,
+            window_owner_name,
+        )?;
+
+        self.window_cf_dictionary_ref = impl_window.window_cf_dictionary_ref;
+        self.id = impl_window.id;
+        self.title = impl_window.title;
+        self.app_name = impl_window.app_name;
+        self.current_monitor = impl_window.current_monitor;
+        self.x = impl_window.x;
+        self.y = impl_window.y;
+        self.width = impl_window.width;
+        self.height = impl_window.height;
+        self.is_minimized = impl_window.is_minimized;
+        self.is_maximized = impl_window.is_maximized;
+
+        Ok(())
+    }
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         capture(
             get_window_cg_rect(self.window_cf_dictionary_ref)?,
