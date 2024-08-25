@@ -74,6 +74,9 @@ impl Window {
 }
 
 impl Window {
+    pub fn refresh(&mut self) -> XCapResult<()> {
+        self.impl_window.refresh()
+    }
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         self.impl_window.capture_image()
     }

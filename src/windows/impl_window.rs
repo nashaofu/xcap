@@ -361,6 +361,26 @@ impl ImplWindow {
 }
 
 impl ImplWindow {
+    pub fn refresh(&mut self) -> XCapResult<()> {
+        let impl_window = ImplWindow::new(self.hwnd)?;
+
+        self.hwnd = impl_window.hwnd;
+        self.window_info = impl_window.window_info;
+        self.id = impl_window.id;
+        self.title = impl_window.title;
+        self.app_name = impl_window.app_name;
+        self.process_id = impl_window.process_id;
+        self.current_monitor = impl_window.current_monitor;
+        self.x = impl_window.x;
+        self.y = impl_window.y;
+        self.width = impl_window.width;
+        self.height = impl_window.height;
+        self.is_minimized = impl_window.is_minimized;
+        self.is_maximized = impl_window.is_maximized;
+
+        Ok(())
+    }
+
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         // TODO: 在win10之后，不同窗口有不同的dpi，所以可能存在截图不全或者截图有较大空白，实际窗口没有填充满图片
         capture_window(
