@@ -8,7 +8,7 @@ use core_foundation::{
 use core_graphics::{
     display::{
         kCGWindowListExcludeDesktopElements, kCGWindowListOptionIncludingWindow,
-        kCGWindowListOptionOnScreenOnly, CGDisplay, CGPoint, CGWindowListCopyWindowInfo,
+        kCGWindowListOptionOnScreenOnly, CGDisplay, CGPoint, CGSize, CGWindowListCopyWindowInfo,
     },
     geometry::CGRect,
     window::{kCGNullWindowID, kCGWindowSharingNone},
@@ -18,11 +18,10 @@ use std::ffi::c_void;
 
 use crate::{error::XCapResult, XCapError};
 
-use super::{capture::capture, impl_monitor::ImplMonitor};
+use super::{boxed::BoxCFArrayRef, capture::capture, impl_monitor::ImplMonitor};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImplWindow {
-    pub window_cf_dictionary_ref: CFDictionaryRef,
     pub id: u32,
     pub title: String,
     pub app_name: String,
@@ -120,39 +119,6 @@ fn get_window_cg_rect(window_cf_dictionary_ref: CFDictionaryRef) -> XCapResult<C
     }
 }
 
-fn get_window_cf_dictionary_ref(window_id: u32) -> XCapResult<CFDictionaryRef> {
-    unsafe {
-        let cg_window_list_copy_window_info = CGWindowListCopyWindowInfo(
-            kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
-            kCGNullWindowID,
-        );
-
-        if cg_window_list_copy_window_info.is_null() {
-            return Err(XCapError::new("Run CGWindowListCopyWindowInfo error"));
-        }
-
-        let num_windows = CFArrayGetCount(cg_window_list_copy_window_info);
-
-        for i in 0..num_windows {
-            let window_cf_dictionary_ref =
-                CFArrayGetValueAtIndex(cg_window_list_copy_window_info, i) as CFDictionaryRef;
-
-            if window_cf_dictionary_ref.is_null() {
-                continue;
-            }
-
-            let k_cg_window_number =
-                get_cf_number_u32_value(window_cf_dictionary_ref, "kCGWindowNumber")?;
-
-            if k_cg_window_number == window_id {
-                return Ok(window_cf_dictionary_ref);
-            }
-        }
-
-        Err(XCapError::new("Not Found window"))
-    }
-}
-
 impl ImplWindow {
     pub fn new(
         window_cf_dictionary_ref: CFDictionaryRef,
@@ -193,7 +159,6 @@ impl ImplWindow {
             !get_cf_bool_value(window_cf_dictionary_ref, "kCGWindowIsOnscreen")? && !is_maximized;
 
         Ok(ImplWindow {
-            window_cf_dictionary_ref,
             id,
             title: window_name,
             app_name: window_owner_name,
@@ -212,20 +177,20 @@ impl ImplWindow {
             let impl_monitors = ImplMonitor::all()?;
             let mut impl_windows = Vec::new();
 
-            let cg_window_list_copy_window_info = CGWindowListCopyWindowInfo(
+            let box_cf_array_ref = BoxCFArrayRef::new(CGWindowListCopyWindowInfo(
                 kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
                 kCGNullWindowID,
-            );
+            ));
 
-            if cg_window_list_copy_window_info.is_null() {
+            if box_cf_array_ref.is_null() {
                 return Ok(impl_windows);
             }
 
-            let num_windows = CFArrayGetCount(cg_window_list_copy_window_info);
+            let num_windows = CFArrayGetCount(*box_cf_array_ref);
 
             for i in 0..num_windows {
                 let window_cf_dictionary_ref =
-                    CFArrayGetValueAtIndex(cg_window_list_copy_window_info, i) as CFDictionaryRef;
+                    CFArrayGetValueAtIndex(*box_cf_array_ref, i) as CFDictionaryRef;
 
                 if window_cf_dictionary_ref.is_null() {
                     continue;
@@ -284,46 +249,75 @@ impl ImplWindow {
 
 impl ImplWindow {
     pub fn refresh(&mut self) -> XCapResult<()> {
-        let impl_monitors = ImplMonitor::all()?;
+        unsafe {
+            let impl_monitors = ImplMonitor::all()?;
 
-        let window_cf_dictionary_ref: *const core_foundation::dictionary::__CFDictionary =
-            get_window_cf_dictionary_ref(self.id)?;
+            let box_cf_array_ref = BoxCFArrayRef::new(CGWindowListCopyWindowInfo(
+                kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+                kCGNullWindowID,
+            ));
 
-        let window_name = match get_cf_string_value(window_cf_dictionary_ref, "kCGWindowName") {
-            Ok(window_name) => window_name,
-            _ => return Err(XCapError::new("Get window name failed")),
-        };
+            if box_cf_array_ref.is_null() {
+                return Err(XCapError::new("Run CGWindowListCopyWindowInfo error"));
+            }
 
-        let window_owner_name =
-            match get_cf_string_value(window_cf_dictionary_ref, "kCGWindowOwnerName") {
-                Ok(window_owner_name) => window_owner_name,
-                _ => return Err(XCapError::new("Get window owner name failed")),
-            };
+            let num_windows = CFArrayGetCount(*box_cf_array_ref);
 
-        let impl_window = ImplWindow::new(
-            window_cf_dictionary_ref,
-            &impl_monitors,
-            window_name,
-            window_owner_name,
-        )?;
+            for i in 0..num_windows {
+                let window_cf_dictionary_ref =
+                    CFArrayGetValueAtIndex(*box_cf_array_ref, i) as CFDictionaryRef;
 
-        self.window_cf_dictionary_ref = impl_window.window_cf_dictionary_ref;
-        self.id = impl_window.id;
-        self.title = impl_window.title;
-        self.app_name = impl_window.app_name;
-        self.current_monitor = impl_window.current_monitor;
-        self.x = impl_window.x;
-        self.y = impl_window.y;
-        self.width = impl_window.width;
-        self.height = impl_window.height;
-        self.is_minimized = impl_window.is_minimized;
-        self.is_maximized = impl_window.is_maximized;
+                if window_cf_dictionary_ref.is_null() {
+                    continue;
+                }
 
-        Ok(())
+                let k_cg_window_number =
+                    get_cf_number_u32_value(window_cf_dictionary_ref, "kCGWindowNumber")?;
+
+                if k_cg_window_number == self.id {
+                    let window_name =
+                        match get_cf_string_value(window_cf_dictionary_ref, "kCGWindowName") {
+                            Ok(window_name) => window_name,
+                            _ => return Err(XCapError::new("Get window name failed")),
+                        };
+
+                    let window_owner_name =
+                        match get_cf_string_value(window_cf_dictionary_ref, "kCGWindowOwnerName") {
+                            Ok(window_owner_name) => window_owner_name,
+                            _ => return Err(XCapError::new("Get window owner name failed")),
+                        };
+
+                    let impl_window = ImplWindow::new(
+                        window_cf_dictionary_ref,
+                        &impl_monitors,
+                        window_name,
+                        window_owner_name,
+                    )?;
+
+                    self.id = impl_window.id;
+                    self.title = impl_window.title;
+                    self.app_name = impl_window.app_name;
+                    self.current_monitor = impl_window.current_monitor;
+                    self.x = impl_window.x;
+                    self.y = impl_window.y;
+                    self.width = impl_window.width;
+                    self.height = impl_window.height;
+                    self.is_minimized = impl_window.is_minimized;
+                    self.is_maximized = impl_window.is_maximized;
+
+                    return Ok(());
+                }
+            }
+
+            Err(XCapError::new("Not Found window"))
+        }
     }
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         capture(
-            get_window_cg_rect(self.window_cf_dictionary_ref)?,
+            CGRect::new(
+                &CGPoint::new(self.x as f64, self.y as f64),
+                &CGSize::new(self.width as f64, self.height as f64),
+            ),
             kCGWindowListOptionIncludingWindow,
             self.id,
         )

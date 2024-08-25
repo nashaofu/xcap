@@ -1,3 +1,4 @@
+mod boxed;
 mod capture;
 
 pub mod impl_monitor;
