@@ -17,7 +17,7 @@ fn main() {
             continue;
         }
 
-        if window.title().contains("起始页") {
+        if window.title().contains("Chrome") {
             break;
         }
 
