@@ -43,7 +43,7 @@ impl SignalArgs for OrgFreedesktopPortalRequestResponse {
     const NAME: &'static str = "Response";
     const INTERFACE: &'static str = "org.freedesktop.portal.Request";
 }
-
+static DBUS_LOCK: Mutex<()> = Mutex::new(());
 fn org_gnome_shell_screenshot(
     conn: &Connection,
     x: i32,
@@ -174,7 +174,31 @@ pub fn wayland_capture(impl_monitor: &ImplMonitor) -> XCapResult<RgbaImage> {
     let height = ((impl_monitor.height as f32) * impl_monitor.scale_factor) as i32;
 
     let conn = Connection::new_session()?;
-
-    org_gnome_shell_screenshot(&conn, x, y, width, height)
-        .or_else(|_| org_freedesktop_portal_screenshot(&conn, x, y, width, height))
+    let lock = DBUS_LOCK.lock();
+    let res = org_gnome_shell_screenshot(&conn, x, y, width, height)
+        .or_else(|_| org_freedesktop_portal_screenshot(&conn, x, y, width, height));
+    drop(lock);
+    res
+}
+#[test]
+fn screnshot_multithreaded() {
+    fn make_screenshots() {
+        let monitors = crate::monitor::Monitor::all().unwrap();
+        for monitor in monitors {
+            monitor.capture_image().unwrap();
+        }
+    }
+    // Try making screenshots in paralel. If this times out, then this means that there is a threading issue.
+    const PARALELISM: usize = 1;
+    let handles: Vec<_> = (0..PARALELISM)
+        .map(|_| {
+            std::thread::spawn(|| {
+                make_screenshots();
+            })
+        })
+        .collect();
+    make_screenshots();
+    handles
+        .into_iter()
+        .for_each(|handle| handle.join().unwrap());
 }
