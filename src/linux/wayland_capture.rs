@@ -172,9 +172,8 @@ pub fn wayland_capture(impl_monitor: &ImplMonitor) -> XCapResult<RgbaImage> {
     let y = ((impl_monitor.y as f32) * impl_monitor.scale_factor) as i32;
     let width = ((impl_monitor.width as f32) * impl_monitor.scale_factor) as i32;
     let height = ((impl_monitor.height as f32) * impl_monitor.scale_factor) as i32;
-
-    let conn = Connection::new_session()?;
     let lock = DBUS_LOCK.lock();
+    let conn = Connection::new_session()?;
     let res = org_gnome_shell_screenshot(&conn, x, y, width, height)
         .or_else(|_| org_freedesktop_portal_screenshot(&conn, x, y, width, height));
     drop(lock);
@@ -189,7 +188,7 @@ fn screnshot_multithreaded() {
         }
     }
     // Try making screenshots in paralel. If this times out, then this means that there is a threading issue.
-    const PARALELISM: usize = 1;
+    const PARALELISM: usize = 10;
     let handles: Vec<_> = (0..PARALELISM)
         .map(|_| {
             std::thread::spawn(|| {
