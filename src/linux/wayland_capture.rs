@@ -167,7 +167,6 @@ fn org_freedesktop_portal_screenshot(
     Ok(rgba_image)
 }
 
-
 static DBUS_LOCK: Mutex<()> = Mutex::new(());
 
 pub fn wayland_capture(impl_monitor: &ImplMonitor) -> XCapResult<RgbaImage> {
