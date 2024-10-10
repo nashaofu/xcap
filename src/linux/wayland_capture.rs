@@ -43,7 +43,7 @@ impl SignalArgs for OrgFreedesktopPortalRequestResponse {
     const NAME: &'static str = "Response";
     const INTERFACE: &'static str = "org.freedesktop.portal.Request";
 }
-static DBUS_LOCK: Mutex<()> = Mutex::new(());
+
 fn org_gnome_shell_screenshot(
     conn: &Connection,
     x: i32,
@@ -167,16 +167,23 @@ fn org_freedesktop_portal_screenshot(
     Ok(rgba_image)
 }
 
+
+static DBUS_LOCK: Mutex<()> = Mutex::new(());
+
 pub fn wayland_capture(impl_monitor: &ImplMonitor) -> XCapResult<RgbaImage> {
     let x = ((impl_monitor.x as f32) * impl_monitor.scale_factor) as i32;
     let y = ((impl_monitor.y as f32) * impl_monitor.scale_factor) as i32;
     let width = ((impl_monitor.width as f32) * impl_monitor.scale_factor) as i32;
     let height = ((impl_monitor.height as f32) * impl_monitor.scale_factor) as i32;
+
     let lock = DBUS_LOCK.lock();
+
     let conn = Connection::new_session()?;
     let res = org_gnome_shell_screenshot(&conn, x, y, width, height)
         .or_else(|_| org_freedesktop_portal_screenshot(&conn, x, y, width, height));
+
     drop(lock);
+
     res
 }
 #[test]
