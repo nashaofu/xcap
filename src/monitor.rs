@@ -78,4 +78,8 @@ impl Monitor {
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         self.impl_monitor.capture_image()
     }
+
+    pub fn capture_bytes(&self) -> XCapResult<Vec<u8>> {
+        self.impl_monitor.capture_bytes()
+    }
 }
