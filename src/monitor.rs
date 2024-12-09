@@ -1,6 +1,6 @@
 use image::RgbaImage;
 
-use crate::{error::XCapResult, platform::impl_monitor::ImplMonitor};
+use crate::{error::XCapResult, platform::impl_monitor::ImplMonitor, VideoRecorder};
 
 #[derive(Debug, Clone)]
 pub struct Monitor {
@@ -77,5 +77,11 @@ impl Monitor {
     /// Capture image of the monitor
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         self.impl_monitor.capture_image()
+    }
+
+    pub fn video_recorder(&self) -> XCapResult<VideoRecorder> {
+        let impl_video_recorder = self.impl_monitor.video_recorder()?;
+
+        Ok(VideoRecorder::new(impl_video_recorder))
     }
 }
