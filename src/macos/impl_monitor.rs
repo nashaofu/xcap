@@ -6,7 +6,7 @@ use image::RgbaImage;
 
 use crate::error::{XCapError, XCapResult};
 
-use super::capture::capture;
+use super::capture::{capture, capture_bytes};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImplMonitor {
@@ -127,6 +127,14 @@ fn get_cg_display_mode(cg_display: CGDisplay) -> XCapResult<CGDisplayMode> {
 impl ImplMonitor {
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         capture(
+            self.cg_display.bounds(),
+            kCGWindowListOptionAll,
+            kCGNullWindowID,
+        )
+    }
+
+    pub fn capture_bytes(&self) -> XCapResult<Vec<u8>> {
+        capture_bytes(
             self.cg_display.bounds(),
             kCGWindowListOptionAll,
             kCGNullWindowID,

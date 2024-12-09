@@ -35,3 +35,15 @@ pub fn capture(
     RgbaImage::from_raw(width as u32, height as u32, buffer)
         .ok_or_else(|| XCapError::new("RgbaImage::from_raw failed"))
 }
+
+pub fn capture_bytes(
+    cg_rect: CGRect,
+    list_option: CGWindowListOption,
+    window_id: CGWindowID,
+) -> XCapResult<Vec<u8>> {
+    let cg_image = create_image(cg_rect, list_option, window_id, kCGWindowImageDefault)
+        .ok_or_else(|| XCapError::new(format!("Capture failed {} {:?}", window_id, cg_rect)))?;
+
+    let bytes = Vec::from(cg_image.data().bytes());
+    Ok(bytes)
+}
