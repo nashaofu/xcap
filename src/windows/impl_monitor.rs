@@ -14,7 +14,7 @@ use windows::{
     },
 };
 
-use crate::{error::{XCapError, XCapResult}, Frame};
+use crate::error::{XCapError, XCapResult};
 
 use super::{
     boxed::BoxHDC, capture::capture_monitor, monitor_recorder::MonitorRecorder,
@@ -165,11 +165,7 @@ impl ImplMonitor {
         capture_monitor(self.x, self.y, self.width as i32, self.height as i32)
     }
 
-    pub fn start<F>(&self, on_frame: F) -> XCapResult<()>
-    where
-        F: Fn(Frame) -> XCapResult<()> + Send + 'static,
-    {
-        let monitor_recorder = MonitorRecorder::from_monitor(self.hmonitor)?;
-        monitor_recorder.start(on_frame)
+    pub fn video_recorder(&self) -> XCapResult<MonitorRecorder> {
+        MonitorRecorder::new(self.hmonitor)
     }
 }

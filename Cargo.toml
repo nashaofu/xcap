@@ -17,8 +17,6 @@ vendored = ["dbus/vendored"]
 [dependencies]
 image = "0.25"
 log = "0.4"
-repng = "0.2.2"
-scrap = "0.5.0"
 sysinfo = "0.33"
 thiserror = "2.0"
 

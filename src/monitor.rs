@@ -1,6 +1,9 @@
 use image::RgbaImage;
 
-use crate::{error::XCapResult, platform::impl_monitor::ImplMonitor, Frame};
+use crate::{
+    error::XCapResult,
+    platform::{impl_monitor::ImplMonitor, monitor_recorder::MonitorRecorder},
+};
 
 #[derive(Debug, Clone)]
 pub struct Monitor {
@@ -79,10 +82,7 @@ impl Monitor {
         self.impl_monitor.capture_image()
     }
 
-    pub fn start<F>(&self, on_frame: F) -> XCapResult<()>
-    where
-        F: Fn(Frame) -> XCapResult<()> + Send + 'static,
-    {
-        self.impl_monitor.start(on_frame)
+    pub fn video_recorder(&self) -> XCapResult<MonitorRecorder> {
+        self.impl_monitor.video_recorder()
     }
 }

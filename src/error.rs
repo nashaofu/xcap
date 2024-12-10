@@ -1,9 +1,13 @@
+use std::sync::PoisonError;
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum XCapError {
     #[error("{0}")]
     Error(String),
+    #[error("StdSyncPoisonError {0}")]
+    StdSyncPoisonError(String),
 
     #[cfg(target_os = "linux")]
     #[error(transparent)]
@@ -53,3 +57,9 @@ impl From<core_graphics::display::CGError> for XCapError {
 }
 
 pub type XCapResult<T> = Result<T, XCapError>;
+
+impl<T> From<PoisonError<T>> for XCapError {
+    fn from(value: PoisonError<T>) -> Self {
+        XCapError::StdSyncPoisonError(value.to_string())
+    }
+}
