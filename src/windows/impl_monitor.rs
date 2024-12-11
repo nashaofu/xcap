@@ -16,7 +16,10 @@ use windows::{
 
 use crate::error::{XCapError, XCapResult};
 
-use super::{boxed::BoxHDC, capture::capture_monitor, utils::wide_string_to_string};
+use super::{
+    boxed::BoxHDC, capture::capture_monitor, impl_video_recorder::ImplVideoRecorder,
+    utils::wide_string_to_string,
+};
 
 // A 函数与 W 函数区别
 // https://learn.microsoft.com/zh-cn/windows/win32/learnwin32/working-with-strings
@@ -160,5 +163,9 @@ impl ImplMonitor {
 impl ImplMonitor {
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         capture_monitor(self.x, self.y, self.width as i32, self.height as i32)
+    }
+
+    pub fn video_recorder(&self) -> XCapResult<ImplVideoRecorder> {
+        ImplVideoRecorder::new(self.hmonitor)
     }
 }

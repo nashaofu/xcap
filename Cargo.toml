@@ -1,8 +1,8 @@
 [package]
 name = "xcap"
-version = "0.0.15"
+version = "0.1.0"
 edition = "2021"
-description = "XCap is a cross-platform screen capture library written in Rust. It supports Linux (X11, Wayland), MacOS, and Windows. XCap supports screenshot and video recording (to be implemented)."
+description = "XCap is a cross-platform screen capture library written in Rust. It supports Linux (X11, Wayland), MacOS, and Windows. XCap supports screenshot and video recording (WIP)."
 license = "Apache-2.0"
 documentation = "https://docs.rs/xcap"
 homepage = "https://github.com/nashaofu/xcap"
@@ -15,10 +15,10 @@ keywords = ["screen", "monitor", "window", "capture", "image"]
 vendored = ["dbus/vendored"]
 
 [dependencies]
-image = "0.24"
+image = "0.25"
 log = "0.4"
-sysinfo = "0.32"
-thiserror = "1.0"
+sysinfo = "0.33"
+thiserror = "2.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
@@ -34,11 +34,15 @@ windows = { version = "0.58", features = [
     "Win32_System_Threading",
     "Win32_System_ProcessStatus",
     "Win32_Storage_FileSystem",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Dxgi_Common",
 ] }
 
 [target.'cfg(target_os="linux")'.dependencies]
 percent-encoding = "2.3"
-xcb = { version = "1.4", features = ["randr"] }
+xcb = { version = "1.5", features = ["randr"] }
 dbus = { version = "0.9" }
 
 [dev-dependencies]
