@@ -1,7 +1,5 @@
-use std::{thread, time::Duration};
+use std::{sync::Arc, thread, time::Duration};
 use xcap::Monitor;
-
-use std::sync::Arc;
 
 fn main() {
     let monitor = Monitor::from_point(100, 100).unwrap();

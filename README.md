@@ -2,22 +2,22 @@
 
 English | [简体中文](README-zh_CN.md)
 
-XCap is a cross-platform screen capture library written in Rust. It supports Linux (X11, Wayland), MacOS, and Windows. XCap supports screenshot and video recording (to be implemented).
+XCap is a cross-platform screen capture library written in Rust. It supports Linux (X11, Wayland), MacOS, and Windows. XCap supports screenshot and video recording (WIP).
 
 ## Features
 
 -   Cross-platform: Supports Linux (X11, Wayland), MacOS, and Windows.
 -   Supports multiple screenshot modes: Can take screenshots of the screen and windows.
--   Supports video recording: Supports recording of the screen or window (to be implemented).
+-   Supports video recording: Supports recording of the screen or window (WIP).
 
 ### Implementation Status
 
-| Feature          | Linux(X11) | Linux(Wayland) | MacOS | Windows |
-| ---------------- | ---------- | -------------- | ----- | ------- |
-| Screen Capture   | ✅         | ⛔             | ✅    | ✅      |
-| Window Capture   | ✅         | ⛔             | ✅    | ✅      |
-| Screen Recording | 🛠️         | 🛠️             | 🛠️    | 🛠️      |
-| Window Recording | 🛠️         | 🛠️             | 🛠️    | 🛠️      |
+| Feature          | Linux(X11) | Linux(Wayland) | MacOS | Windows(>=Windows 8.1) |
+| ---------------- | ---------- | -------------- | ----- | ---------------------- |
+| Screen Capture   | ✅         | ⛔             | ✅    | ✅                     |
+| Window Capture   | ✅         | ⛔             | ✅    | ✅                     |
+| Screen Recording | 🛠️         | 🛠️             | 🛠️    | ✅                     |
+| Window Recording | 🛠️         | 🛠️             | 🛠️    | 🛠️                     |
 
 -   ✅: Feature available
 -   ⛔: Feature available, but not fully supported in some special scenarios
@@ -53,6 +53,42 @@ fn main() {
 
     println!("运行耗时: {:?}", start.elapsed());
 }
+```
+
+-   Screen Record
+
+```rust
+use std::{sync::Arc, thread, time::Duration};
+use xcap::Monitor;
+
+fn main() {
+    let monitor = Monitor::from_point(100, 100).unwrap();
+
+    let video_recorder = Arc::new(monitor.video_recorder().unwrap());
+
+    let video_recorder_clone = video_recorder.clone();
+    thread::spawn(move || {
+        video_recorder_clone
+            .on_frame(|frame| {
+                println!("frame: {:?}", frame.width);
+                Ok(())
+            })
+            .unwrap();
+    });
+
+    println!("start");
+    video_recorder.start().unwrap();
+    thread::sleep(Duration::from_secs(2));
+    println!("stop");
+    video_recorder.stop().unwrap();
+    thread::sleep(Duration::from_secs(2));
+    println!("start");
+    video_recorder.start().unwrap();
+    thread::sleep(Duration::from_secs(2));
+    println!("stop");
+    video_recorder.stop().unwrap();
+}
+
 ```
 
 -   Window Capture
@@ -103,6 +139,8 @@ fn main() {
     println!("运行耗时: {:?}", start.elapsed());
 }
 ```
+
+More examples in [examples](./examples)
 
 ## Linux System Requirements
 
