@@ -15,6 +15,7 @@ impl Frame {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) struct RecorderWaker {
     parking: Mutex<bool>,
@@ -22,28 +23,30 @@ pub(crate) struct RecorderWaker {
 }
 
 impl RecorderWaker {
-    pub(crate) fn new() -> Self {
+    #[allow(dead_code)]
+    pub fn new() -> Self {
         Self {
             parking: Mutex::new(true),
             condvar: Condvar::new(),
         }
     }
-    pub(crate) fn wake(&self) -> XCapResult<()> {
+    #[allow(dead_code)]
+    pub fn wake(&self) -> XCapResult<()> {
         let mut parking = self.parking.lock()?;
         *parking = false;
         self.condvar.notify_one();
 
         Ok(())
     }
-
-    pub(crate) fn sleep(&self) -> XCapResult<()> {
+    #[allow(dead_code)]
+    pub fn sleep(&self) -> XCapResult<()> {
         let mut parking = self.parking.lock()?;
         *parking = true;
 
         Ok(())
     }
-
-    pub(crate) fn wait(&self) -> XCapResult<()> {
+    #[allow(dead_code)]
+    pub fn wait(&self) -> XCapResult<()> {
         let mut parking = self.parking.lock()?;
         while *parking {
             parking = self.condvar.wait(parking)?;

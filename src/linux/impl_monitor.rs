@@ -11,7 +11,7 @@ use xcb::{
 
 use crate::error::{XCapError, XCapResult};
 
-use super::capture::capture_monitor;
+use super::{capture::capture_monitor, impl_video_recorder::ImplVideoRecorder};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImplMonitor {
@@ -235,5 +235,9 @@ impl ImplMonitor {
 impl ImplMonitor {
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         capture_monitor(self)
+    }
+
+    pub fn video_recorder(&self) -> XCapResult<ImplVideoRecorder> {
+        ImplVideoRecorder::new()
     }
 }

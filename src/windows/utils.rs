@@ -48,6 +48,6 @@ pub(super) fn bgra_to_rgba_image(
     height: u32,
     buffer: Vec<u8>,
 ) -> XCapResult<RgbaImage> {
-    RgbaImage::from_raw(width as u32, height as u32, bgra_to_rgba(buffer))
+    RgbaImage::from_raw(width, height, bgra_to_rgba(buffer))
         .ok_or_else(|| XCapError::new("RgbaImage::from_raw failed"))
 }

@@ -6,7 +6,7 @@ use image::RgbaImage;
 
 use crate::error::{XCapError, XCapResult};
 
-use super::capture::capture;
+use super::{capture::capture, impl_video_recorder::ImplVideoRecorder};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImplMonitor {
@@ -131,5 +131,9 @@ impl ImplMonitor {
             kCGWindowListOptionAll,
             kCGNullWindowID,
         )
+    }
+
+    pub fn video_recorder(&self) -> XCapResult<ImplVideoRecorder> {
+        ImplVideoRecorder::new()
     }
 }
