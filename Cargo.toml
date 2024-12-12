@@ -12,10 +12,11 @@ keywords = ["screen", "monitor", "window", "capture", "image"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
+default = ["default-image"]
 vendored = ["dbus/vendored"]
-
+default-image = ["image/default"]
 [dependencies]
-image = "0.25"
+image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
 sysinfo = "0.33"
 thiserror = "2.0"
