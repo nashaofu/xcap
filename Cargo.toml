@@ -13,9 +13,9 @@ keywords = ["screen", "monitor", "window", "capture", "image"]
 
 [features]
 vendored = ["dbus/vendored"]
-
+default-image = ["image/default"]
 [dependencies]
-image = "0.25"
+image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
 sysinfo = "0.33"
 thiserror = "2.0"
