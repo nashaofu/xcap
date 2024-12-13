@@ -4,7 +4,7 @@ use xcb::{
     x::{
         Atom, Drawable, GetGeometry, GetProperty, GetPropertyReply, InternAtom, QueryPointer,
         TranslateCoordinates, Window, ATOM_ATOM, ATOM_NONE, ATOM_STRING, ATOM_WM_CLASS,
-        ATOM_WM_NAME,
+        ATOM_WM_NAME, ATOM_WINDOW,
     },
     Connection, Xid,
 };
@@ -26,6 +26,7 @@ pub(crate) struct ImplWindow {
     pub height: u32,
     pub is_minimized: bool,
     pub is_maximized: bool,
+    pub is_focused: bool,
 }
 
 fn get_atom(conn: &Connection, name: &str) -> XCapResult<Atom> {
@@ -63,6 +64,26 @@ fn get_window_property(
     let window_property_reply = conn.wait_for_reply(window_property_cookie)?;
 
     Ok(window_property_reply)
+}
+
+fn get_focused_window(conn: &Connection, root_window: Window) -> XCapResult<Window> {
+    let active_window_atom = get_atom(conn, "_NET_ACTIVE_WINDOW")?;
+    
+    let active_window_reply = get_window_property(
+        conn,
+        root_window,
+        active_window_atom,
+        ATOM_WINDOW,
+        0,
+        1,
+    )?;
+
+    let active_window = active_window_reply.value::<Window>()
+        .first()
+        .copied()
+        .unwrap_or(Window::none());
+
+    Ok(active_window)
 }
 
 impl ImplWindow {
@@ -167,6 +188,13 @@ impl ImplWindow {
             )
         };
 
+        let is_focused = {
+            let setup = conn.get_setup();
+            let screen = setup.roots().next().ok_or(XCapError::new("No screen found"))?;
+            let focused_window = get_focused_window(conn, screen.root())?;
+            focused_window == *window
+        };
+
         Ok(ImplWindow {
             window: *window,
             id: window.resource_id(),
@@ -179,6 +207,7 @@ impl ImplWindow {
             height,
             is_minimized,
             is_maximized,
+            is_focused,
         })
     }
 
@@ -251,6 +280,7 @@ impl ImplWindow {
         self.height = impl_window.height;
         self.is_minimized = impl_window.is_minimized;
         self.is_maximized = impl_window.is_maximized;
+        self.is_focused = impl_window.is_focused;
 
         Ok(())
     }

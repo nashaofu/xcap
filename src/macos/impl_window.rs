@@ -32,6 +32,7 @@ pub(crate) struct ImplWindow {
     pub height: u32,
     pub is_minimized: bool,
     pub is_maximized: bool,
+    pub is_focused: bool,
 }
 
 unsafe impl Send for ImplWindow {}
@@ -98,6 +99,28 @@ fn get_cf_bool_value(cf_dictionary_ref: CFDictionaryRef, key: &str) -> XCapResul
     Ok(unsafe { CFBooleanGetValue(value_ref as CFBooleanRef) })
 }
 
+fn get_cf_number_i32_value(cf_dictionary_ref: CFDictionaryRef, key: &str) -> XCapResult<i32> {
+    unsafe {
+        let cf_number_ref = get_cf_dictionary_get_value(cf_dictionary_ref, key)?;
+
+        let mut value: i32 = 0;
+        let is_success = CFNumberGetValue(
+            cf_number_ref as CFNumberRef,
+            kCFNumberIntType,
+            &mut value as *mut _ as *mut c_void,
+        );
+
+        if !is_success {
+            return Err(XCapError::new(format!(
+                "Get {} CFNumberGetValue failed",
+                key
+            )));
+        }
+
+        Ok(value)
+    }
+}
+
 fn get_window_cg_rect(window_cf_dictionary_ref: CFDictionaryRef) -> XCapResult<CGRect> {
     unsafe {
         let window_bounds_ref =
@@ -158,6 +181,10 @@ impl ImplWindow {
         let is_minimized =
             !get_cf_bool_value(window_cf_dictionary_ref, "kCGWindowIsOnscreen")? && !is_maximized;
 
+        let is_on_screen = get_cf_bool_value(window_cf_dictionary_ref, "kCGWindowIsOnscreen")?;
+        let window_layer = get_cf_number_i32_value(window_cf_dictionary_ref, "kCGWindowLayer")?;
+        let is_focused = is_on_screen && window_layer == 0;
+
         Ok(ImplWindow {
             id,
             title: window_name,
@@ -169,6 +196,7 @@ impl ImplWindow {
             height: cg_rect.size.height as u32,
             is_minimized,
             is_maximized,
+            is_focused,
         })
     }
 
@@ -304,6 +332,7 @@ impl ImplWindow {
                     self.height = impl_window.height;
                     self.is_minimized = impl_window.is_minimized;
                     self.is_maximized = impl_window.is_maximized;
+                    self.is_focused = impl_window.is_focused;
 
                     return Ok(());
                 }
