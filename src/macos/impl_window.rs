@@ -43,6 +43,10 @@ extern "C" {
         dict: CFDictionaryRef,
         rect: &mut CGRect,
     ) -> CFBooleanRef;
+    fn CGEventSourceCreate(stateID: i32) -> *mut c_void;
+    fn CGEventGetUnflippedLocation(event: *mut c_void) -> CGPoint;
+    fn CGEventCreate(source: *mut c_void) -> *mut c_void;
+    fn CFRelease(cf: *mut c_void);
 }
 
 fn get_cf_dictionary_get_value(
@@ -142,6 +146,18 @@ fn get_window_cg_rect(window_cf_dictionary_ref: CFDictionaryRef) -> XCapResult<C
     }
 }
 
+fn get_mouse_position() -> CGPoint {
+    unsafe {
+        // HIDSystemState = 1
+        let source = CGEventSourceCreate(1);
+        let event = CGEventCreate(source);
+        let position = CGEventGetUnflippedLocation(event);
+        CFRelease(event);
+        CFRelease(source);
+        position
+    }
+}
+
 impl ImplWindow {
     pub fn new(
         window_cf_dictionary_ref: CFDictionaryRef,
@@ -181,9 +197,10 @@ impl ImplWindow {
         let is_minimized =
             !get_cf_bool_value(window_cf_dictionary_ref, "kCGWindowIsOnscreen")? && !is_maximized;
 
-        let is_on_screen = get_cf_bool_value(window_cf_dictionary_ref, "kCGWindowIsOnscreen")?;
-        let window_layer = get_cf_number_i32_value(window_cf_dictionary_ref, "kCGWindowLayer")?;
-        let is_focused = is_on_screen && window_layer == 0;
+        let is_focused = {
+            let mouse_pos = get_mouse_position();
+            cg_rect.contains(&mouse_pos)
+        };
 
         Ok(ImplWindow {
             id,
