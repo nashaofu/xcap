@@ -3,8 +3,8 @@ use std::str;
 use xcb::{
     x::{
         Atom, Drawable, GetGeometry, GetProperty, GetPropertyReply, InternAtom, QueryPointer,
-        TranslateCoordinates, Window, ATOM_ATOM, ATOM_NONE, ATOM_STRING, ATOM_WM_CLASS,
-        ATOM_WM_NAME, ATOM_WINDOW,
+        TranslateCoordinates, Window, ATOM_ATOM, ATOM_NONE, ATOM_STRING, ATOM_WINDOW,
+        ATOM_WM_CLASS, ATOM_WM_NAME,
     },
     Connection, Xid,
 };
@@ -68,17 +68,12 @@ fn get_window_property(
 
 fn get_focused_window(conn: &Connection, root_window: Window) -> XCapResult<Window> {
     let active_window_atom = get_atom(conn, "_NET_ACTIVE_WINDOW")?;
-    
-    let active_window_reply = get_window_property(
-        conn,
-        root_window,
-        active_window_atom,
-        ATOM_WINDOW,
-        0,
-        1,
-    )?;
 
-    let active_window = active_window_reply.value::<Window>()
+    let active_window_reply =
+        get_window_property(conn, root_window, active_window_atom, ATOM_WINDOW, 0, 1)?;
+
+    let active_window = active_window_reply
+        .value::<Window>()
         .first()
         .copied()
         .unwrap_or(Window::none());
@@ -190,7 +185,10 @@ impl ImplWindow {
 
         let is_focused = {
             let setup = conn.get_setup();
-            let screen = setup.roots().next().ok_or(XCapError::new("No screen found"))?;
+            let screen = setup
+                .roots()
+                .next()
+                .ok_or(XCapError::new("No screen found"))?;
             let focused_window = get_focused_window(conn, screen.root())?;
             focused_window == *window
         };
