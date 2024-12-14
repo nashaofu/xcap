@@ -1,5 +1,6 @@
 use image::RgbaImage;
-use sysinfo::System;
+use windows::core::w;
+use windows::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD};
 use windows::Win32::Foundation::GetLastError;
 
 use crate::{error::XCapResult, XCapError};
@@ -15,12 +16,24 @@ pub(super) fn wide_string_to_string(wide_string: &[u16]) -> XCapResult<String> {
 }
 
 pub(super) fn get_os_major_version() -> u8 {
-    System::os_version()
-        .map(|os_version| {
-            let strs: Vec<&str> = os_version.split(' ').collect();
-            strs[0].parse::<u8>().unwrap_or(0)
-        })
-        .unwrap_or(0)
+    unsafe {
+        let mut buf_len: u32 = 4;
+        let mut buf = [0u8; 4];
+        let err = RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            w!(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"),
+            w!("CurrentMajorVersionNumber"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some(buf.as_mut_ptr().cast()),
+            Some(&mut buf_len),
+        );
+        if err.is_ok() {
+            u32::from_le_bytes(buf) as u8
+        } else {
+            0
+        }
+    }
 }
 
 pub(super) fn log_last_error<T: ToString>(label: T) {
