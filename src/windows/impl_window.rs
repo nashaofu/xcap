@@ -15,9 +15,9 @@ use windows::{
             Threading::{GetCurrentProcessId, PROCESS_ALL_ACCESS},
         },
         UI::WindowsAndMessaging::{
-            EnumWindows, GetClassNameW, GetWindowInfo, GetWindowLongPtrW, GetWindowTextLengthW,
-            GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible,
-            IsZoomed, GWL_EXSTYLE, WINDOWINFO, WINDOW_EX_STYLE, WS_EX_TOOLWINDOW,
+            EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowInfo, GetWindowLongPtrW,
+            GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
+            IsWindowVisible, IsZoomed, GWL_EXSTYLE, WINDOWINFO, WINDOW_EX_STYLE, WS_EX_TOOLWINDOW,
         },
     },
 };
