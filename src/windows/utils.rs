@@ -1,7 +1,11 @@
 use image::RgbaImage;
-use windows::core::w;
-use windows::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD};
-use windows::Win32::Foundation::GetLastError;
+use windows::{
+    core::w,
+    Win32::{
+        Foundation::GetLastError,
+        System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ},
+    },
+};
 
 use crate::{error::XCapResult, XCapError};
 
@@ -15,24 +19,44 @@ pub(super) fn wide_string_to_string(wide_string: &[u16]) -> XCapResult<String> {
     Ok(string)
 }
 
-pub(super) fn get_os_major_version() -> u8 {
+pub(super) fn get_build_number() -> u32 {
     unsafe {
-        let mut buf_len: u32 = 4;
-        let mut buf = [0u8; 4];
+        let mut buf_len: u32 = 2048;
+        let mut buf: Vec<u16> = Vec::with_capacity(buf_len as usize);
+
         let err = RegGetValueW(
             HKEY_LOCAL_MACHINE,
             w!(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"),
-            w!("CurrentMajorVersionNumber"),
-            RRF_RT_REG_DWORD,
+            w!("CurrentBuildNumber"),
+            RRF_RT_REG_SZ,
             None,
             Some(buf.as_mut_ptr().cast()),
             Some(&mut buf_len),
         );
-        if err.is_ok() {
-            u32::from_le_bytes(buf) as u8
-        } else {
-            0
+
+        if err.is_err() {
+            return 0;
         }
+
+        buf.set_len(buf_len as usize);
+
+        let build_version = wide_string_to_string(&buf).unwrap_or_default();
+
+        build_version.parse().unwrap_or(0)
+    }
+}
+
+pub(super) fn get_os_major_version() -> u8 {
+    let build_number = get_build_number();
+    // https://en.wikipedia.org/wiki/List_of_Microsoft_Windows_versions
+    if build_number >= 22000 {
+        11
+    } else if build_number >= 10240 {
+        10
+    } else if build_number >= 9200 {
+        8
+    } else {
+        7
     }
 }
 
