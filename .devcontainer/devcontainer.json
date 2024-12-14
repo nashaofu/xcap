@@ -23,6 +23,9 @@
     // 	}
     // ]
 
+    // Features to add to the dev container. More info: https://containers.dev/features.
+    // "features": {},
+
     // Use 'forwardPorts' to make a list of ports inside the container available locally.
     "forwardPorts": [6080, 5901],
 
@@ -33,9 +36,9 @@
     "customizations": {
         "vscode": {
             "extensions": [
-                "wengerk.highlight-bad-chars",
                 "streetsidesoftware.code-spell-checker",
-                "EditorConfig.EditorConfig",
+                "wengerk.highlight-bad-chars",
+                "editorconfig.editorconfig",
                 "tamasfe.even-better-toml",
                 "rust-lang.rust-analyzer"
             ]
