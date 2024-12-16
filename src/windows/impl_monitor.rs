@@ -5,10 +5,9 @@ use windows::{
     Win32::{
         Foundation::{BOOL, LPARAM, POINT, RECT, TRUE},
         Graphics::Gdi::{
-            EnumDisplayMonitors, EnumDisplaySettingsW, GetDeviceCaps, GetMonitorInfoW,
-            MonitorFromPoint, DESKTOPHORZRES, DEVMODEW, DMDO_180, DMDO_270, DMDO_90, DMDO_DEFAULT,
-            ENUM_CURRENT_SETTINGS, HDC, HMONITOR, HORZRES, MONITORINFO, MONITORINFOEXW,
-            MONITOR_DEFAULTTONULL,
+            EnumDisplayMonitors, EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromPoint, DEVMODEW,
+            DMDO_180, DMDO_270, DMDO_90, DMDO_DEFAULT, ENUM_CURRENT_SETTINGS, HDC, HMONITOR,
+            MONITORINFO, MONITORINFOEXW, MONITOR_DEFAULTTONULL,
         },
         UI::WindowsAndMessaging::MONITORINFOF_PRIMARY,
     },
@@ -70,6 +69,53 @@ fn get_dev_mode_w(monitor_info_exw: &MONITORINFOEXW) -> XCapResult<DEVMODEW> {
     Ok(dev_mode_w)
 }
 
+#[cfg(any(
+    feature = "windows_hi_dpi_effective",
+    feature = "windows_hi_dpi_angular",
+    feature = "windows_hi_dpi_raw"
+))]
+fn get_scale_factor(hmonitor: HMONITOR, _: BoxHDC) -> XCapResult<f32> {
+    use cfg_if::cfg_if;
+    use windows::Win32::UI::HiDpi::GetDpiForMonitor;
+
+    let dpi_type = {
+        cfg_if! {
+            if #[cfg(feature = "windows_hi_dpi_effective")] {
+                use windows::Win32::UI::HiDpi::MDT_EFFECTIVE_DPI;
+                MDT_EFFECTIVE_DPI
+            } else if #[cfg(feature = "windows_hi_dpi_angular")] {
+                use windows::Win32::UI::HiDpi::MDT_ANGULAR_DPI;
+                MDT_ANGULAR_DPI
+            } else {
+                use windows::Win32::UI::HiDpi::MDT_RAW_DPI;
+                MDT_RAW_DPI
+            }
+        }
+    };
+
+    unsafe {
+        let mut dpi_x = 0;
+        let mut dpi_y: u32 = 0;
+        GetDpiForMonitor(hmonitor, dpi_type, &mut dpi_x, &mut dpi_y)?;
+        Ok(96.0 / dpi_x as f32)
+    }
+}
+
+#[cfg(not(any(
+    feature = "windows_hi_dpi_effective",
+    feature = "windows_hi_dpi_angular",
+    feature = "windows_hi_dpi_raw"
+)))]
+fn get_scale_factor(_: HMONITOR, box_hdc_monitor: BoxHDC) -> XCapResult<f32> {
+    use windows::Win32::Graphics::Gdi::{GetDeviceCaps, DESKTOPHORZRES, HORZRES};
+    unsafe {
+        let physical_width = GetDeviceCaps(*box_hdc_monitor, DESKTOPHORZRES);
+        let logical_width = GetDeviceCaps(*box_hdc_monitor, HORZRES);
+
+        Ok(physical_width as f32 / logical_width as f32)
+    }
+}
+
 impl ImplMonitor {
     pub fn new(hmonitor: HMONITOR) -> XCapResult<ImplMonitor> {
         let mut monitor_info_ex_w = MONITORINFOEXW::default();
@@ -97,13 +143,7 @@ impl ImplMonitor {
         };
 
         let box_hdc_monitor = BoxHDC::from(&monitor_info_ex_w.szDevice);
-
-        let scale_factor = unsafe {
-            let physical_width = GetDeviceCaps(*box_hdc_monitor, DESKTOPHORZRES);
-            let logical_width = GetDeviceCaps(*box_hdc_monitor, HORZRES);
-
-            physical_width as f32 / logical_width as f32
-        };
+        let scale_factor = get_scale_factor(hmonitor, box_hdc_monitor)?;
 
         Ok(ImplMonitor {
             hmonitor,
