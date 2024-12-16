@@ -12,9 +12,12 @@ keywords = ["screen", "monitor", "window", "capture", "image"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["default-image"]
 vendored = ["dbus/vendored"]
-default-image = ["image/default"]
+image = ["image/default"]
+windows_hi_dpi_effective = ["windows/Win32_UI_HiDpi"]
+windows_hi_dpi_angular = ["windows/Win32_UI_HiDpi"]
+windows_hi_dpi_raw = ["windows/Win32_UI_HiDpi"]
+
 [dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
@@ -25,6 +28,7 @@ core-foundation = "0.10"
 core-graphics = "0.24"
 
 [target.'cfg(target_os = "windows")'.dependencies]
+cfg-if = "1.0"
 windows = { version = "0.58", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
