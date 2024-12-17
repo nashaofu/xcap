@@ -14,6 +14,7 @@ use core_graphics::{
     window::{kCGNullWindowID, kCGWindowSharingNone},
 };
 use image::RgbaImage;
+use objc2_app_kit::NSWorkspace;
 use std::ffi::c_void;
 
 use crate::{error::XCapResult, XCapError};
@@ -43,10 +44,6 @@ extern "C" {
         dict: CFDictionaryRef,
         rect: &mut CGRect,
     ) -> CFBooleanRef;
-    fn CGEventSourceCreate(stateID: i32) -> *mut c_void;
-    fn CGEventGetUnflippedLocation(event: *mut c_void) -> CGPoint;
-    fn CGEventCreate(source: *mut c_void) -> *mut c_void;
-    fn CFRelease(cf: *mut c_void);
 }
 
 fn get_cf_dictionary_get_value(
@@ -103,28 +100,6 @@ fn get_cf_bool_value(cf_dictionary_ref: CFDictionaryRef, key: &str) -> XCapResul
     Ok(unsafe { CFBooleanGetValue(value_ref as CFBooleanRef) })
 }
 
-fn get_cf_number_i32_value(cf_dictionary_ref: CFDictionaryRef, key: &str) -> XCapResult<i32> {
-    unsafe {
-        let cf_number_ref = get_cf_dictionary_get_value(cf_dictionary_ref, key)?;
-
-        let mut value: i32 = 0;
-        let is_success = CFNumberGetValue(
-            cf_number_ref as CFNumberRef,
-            kCFNumberIntType,
-            &mut value as *mut _ as *mut c_void,
-        );
-
-        if !is_success {
-            return Err(XCapError::new(format!(
-                "Get {} CFNumberGetValue failed",
-                key
-            )));
-        }
-
-        Ok(value)
-    }
-}
-
 fn get_window_cg_rect(window_cf_dictionary_ref: CFDictionaryRef) -> XCapResult<CGRect> {
     unsafe {
         let window_bounds_ref =
@@ -146,15 +121,12 @@ fn get_window_cg_rect(window_cf_dictionary_ref: CFDictionaryRef) -> XCapResult<C
     }
 }
 
-fn get_mouse_position() -> CGPoint {
+fn get_focused_app_pid() -> Option<u32> {
     unsafe {
-        // HIDSystemState = 1
-        let source = CGEventSourceCreate(1);
-        let event = CGEventCreate(source);
-        let position = CGEventGetUnflippedLocation(event);
-        CFRelease(event);
-        CFRelease(source);
-        position
+        let ns_workspace = NSWorkspace::sharedWorkspace();
+        let frontmost_application = ns_workspace.frontmostApplication()?;
+
+        Some(frontmost_application.processIdentifier() as u32)
     }
 }
 
@@ -164,6 +136,7 @@ impl ImplWindow {
         impl_monitors: &[ImplMonitor],
         window_name: String,
         window_owner_name: String,
+        is_focused: bool,
     ) -> XCapResult<ImplWindow> {
         let id = get_cf_number_u32_value(window_cf_dictionary_ref, "kCGWindowNumber")?;
         let cg_rect = get_window_cg_rect(window_cf_dictionary_ref)?;
@@ -197,11 +170,6 @@ impl ImplWindow {
         let is_minimized =
             !get_cf_bool_value(window_cf_dictionary_ref, "kCGWindowIsOnscreen")? && !is_maximized;
 
-        let is_focused = {
-            let mouse_pos = get_mouse_position();
-            cg_rect.contains(&mouse_pos)
-        };
-
         Ok(ImplWindow {
             id,
             title: window_name,
@@ -221,7 +189,12 @@ impl ImplWindow {
         unsafe {
             let impl_monitors = ImplMonitor::all()?;
             let mut impl_windows = Vec::new();
+            let focused_app_pid = get_focused_app_pid();
+            // 是否已经设置过焦点窗口
+            let mut is_set_focused_window = false;
 
+            // CGWindowListCopyWindowInfo 返回窗口顺序为从顶层到最底层
+            // 即在前面的窗口在数组前面
             let box_cf_array_ref = BoxCFArrayRef::new(CGWindowListCopyWindowInfo(
                 kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
                 kCGNullWindowID,
@@ -269,11 +242,30 @@ impl ImplWindow {
                     continue;
                 }
 
+                let window_owner_pid =
+                    match get_cf_number_u32_value(window_cf_dictionary_ref, "kCGWindowOwnerPID") {
+                        Ok(window_owner_pid) => Some(window_owner_pid),
+                        _ => None,
+                    };
+
+                let is_focused = if focused_app_pid.is_some() && window_owner_pid == focused_app_pid
+                {
+                    if !is_set_focused_window {
+                        is_set_focused_window = true;
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
                 if let Ok(impl_window) = ImplWindow::new(
                     window_cf_dictionary_ref,
                     &impl_monitors,
                     window_name.clone(),
                     window_owner_name.clone(),
+                    is_focused,
                 ) {
                     impl_windows.push(impl_window);
                 } else {
@@ -296,6 +288,9 @@ impl ImplWindow {
     pub fn refresh(&mut self) -> XCapResult<()> {
         unsafe {
             let impl_monitors = ImplMonitor::all()?;
+            let focused_app_pid = get_focused_app_pid();
+            // 是否已经设置过焦点窗口
+            let mut is_set_focused_window = false;
 
             let box_cf_array_ref = BoxCFArrayRef::new(CGWindowListCopyWindowInfo(
                 kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
@@ -319,6 +314,24 @@ impl ImplWindow {
                 let k_cg_window_number =
                     get_cf_number_u32_value(window_cf_dictionary_ref, "kCGWindowNumber")?;
 
+                let window_owner_pid =
+                    match get_cf_number_u32_value(window_cf_dictionary_ref, "kCGWindowOwnerPID") {
+                        Ok(window_owner_pid) => Some(window_owner_pid),
+                        _ => None,
+                    };
+
+                let is_focused = if focused_app_pid.is_some() && window_owner_pid == focused_app_pid
+                {
+                    if !is_set_focused_window {
+                        is_set_focused_window = true;
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
                 if k_cg_window_number == self.id {
                     let window_name =
                         match get_cf_string_value(window_cf_dictionary_ref, "kCGWindowName") {
@@ -337,6 +350,7 @@ impl ImplWindow {
                         &impl_monitors,
                         window_name,
                         window_owner_name,
+                        is_focused,
                     )?;
 
                     self.id = impl_window.id;
