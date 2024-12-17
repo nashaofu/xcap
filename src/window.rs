@@ -71,6 +71,10 @@ impl Window {
     pub fn is_maximized(&self) -> bool {
         self.impl_window.is_maximized
     }
+    /// The window is focused.
+    pub fn is_focused(&self) -> bool {
+        self.impl_window.is_focused
+    }
 }
 
 impl Window {
