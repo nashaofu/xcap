@@ -38,7 +38,7 @@ impl Window {
         &self.impl_window.title
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     /// The window process id
     pub fn process_id(&self) -> u32 {
         self.impl_window.process_id
@@ -55,6 +55,11 @@ impl Window {
     pub fn y(&self) -> i32 {
         self.impl_window.y
     }
+    #[cfg(any(target_os = "macos"))]
+    /// The window z coordinate.
+    pub fn z(&self) -> i32 {
+        self.impl_window.z
+    }
     /// The window pixel width.
     pub fn width(&self) -> u32 {
         self.impl_window.width
@@ -70,10 +75,6 @@ impl Window {
     /// The window is maximized.
     pub fn is_maximized(&self) -> bool {
         self.impl_window.is_maximized
-    }
-    /// The window is focused.
-    pub fn is_focused(&self) -> bool {
-        self.impl_window.is_focused
     }
 }
 

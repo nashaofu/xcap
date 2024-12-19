@@ -13,9 +13,9 @@ fn main() {
                 window.title(),
                 window.app_name(),
             window.current_monitor().name(),
-            (window.x(), window.y()),
+            (window.x(), window.y(), window.z()),
             (window.width(), window.height()),
-            (window.is_minimized(), window.is_maximized(), window.is_focused())
+            (window.is_minimized(), window.is_maximized(), window.process_id())
         );
     }
 }
