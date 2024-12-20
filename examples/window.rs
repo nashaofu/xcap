@@ -8,14 +8,15 @@ fn main() {
 
     for window in windows.clone() {
         println!(
-                "Window:\n id: {}\n title: {}\n app_name: {}\n monitor: {:?}\n position: {:?}\n size {:?}\n state {:?}\n",
+                "Window:\n id: {}\n title: {}\n app_name: {}\n pid: {}\n monitor: {:?}\n position: {:?}\n size {:?}\n state {:?}\n",
                 window.id(),
                 window.title(),
                 window.app_name(),
+                window.pid(),
             window.current_monitor().name(),
-            (window.x(), window.y()),
+            (window.x(), window.y(), window.z()),
             (window.width(), window.height()),
-            (window.is_minimized(), window.is_maximized(), window.is_focused())
+            (window.is_minimized(), window.is_maximized())
         );
     }
 }
