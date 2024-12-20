@@ -38,7 +38,6 @@ impl Window {
     pub fn title(&self) -> &str {
         &self.impl_window.title
     }
-
     /// The window process id
     pub fn pid(&self) -> u32 {
         self.impl_window.pid

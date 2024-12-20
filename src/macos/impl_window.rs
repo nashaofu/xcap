@@ -25,7 +25,7 @@ pub(crate) struct ImplWindow {
     pub id: u32,
     pub title: String,
     pub app_name: String,
-    pub process_id: u32,
+    pub pid: u32,
     pub current_monitor: ImplMonitor,
     pub x: i32,
     pub y: i32,
@@ -129,8 +129,7 @@ impl ImplWindow {
         window_owner_name: String,
     ) -> XCapResult<ImplWindow> {
         let id = get_cf_number_i32_value(window_cf_dictionary_ref, "kCGWindowNumber")? as u32;
-        let process_id =
-            get_cf_number_i32_value(window_cf_dictionary_ref, "kCGWindowOwnerPID")? as u32;
+        let pid = get_cf_number_i32_value(window_cf_dictionary_ref, "kCGWindowOwnerPID")? as u32;
 
         let cg_rect = get_window_cg_rect(window_cf_dictionary_ref)?;
 
@@ -169,7 +168,7 @@ impl ImplWindow {
             id,
             title: window_name,
             app_name: window_owner_name,
-            process_id,
+            pid,
             current_monitor: current_monitor.clone(),
             x: cg_rect.origin.x as i32,
             y: cg_rect.origin.y as i32,
@@ -259,71 +258,6 @@ impl ImplWindow {
 }
 
 impl ImplWindow {
-    pub fn refresh(&mut self) -> XCapResult<()> {
-        unsafe {
-            let impl_monitors = ImplMonitor::all()?;
-
-            let box_cf_array_ref = BoxCFArrayRef::new(CGWindowListCopyWindowInfo(
-                kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
-                kCGNullWindowID,
-            ));
-
-            if box_cf_array_ref.is_null() {
-                return Err(XCapError::new("Run CGWindowListCopyWindowInfo error"));
-            }
-
-            let num_windows = CFArrayGetCount(*box_cf_array_ref);
-
-            for i in 0..num_windows {
-                let window_cf_dictionary_ref =
-                    CFArrayGetValueAtIndex(*box_cf_array_ref, i) as CFDictionaryRef;
-
-                if window_cf_dictionary_ref.is_null() {
-                    continue;
-                }
-
-                let k_cg_window_number =
-                    get_cf_number_i32_value(window_cf_dictionary_ref, "kCGWindowNumber")? as u32;
-
-                if k_cg_window_number == self.id {
-                    let window_name =
-                        match get_cf_string_value(window_cf_dictionary_ref, "kCGWindowName") {
-                            Ok(window_name) => window_name,
-                            _ => return Err(XCapError::new("Get window name failed")),
-                        };
-
-                    let window_owner_name =
-                        match get_cf_string_value(window_cf_dictionary_ref, "kCGWindowOwnerName") {
-                            Ok(window_owner_name) => window_owner_name,
-                            _ => return Err(XCapError::new("Get window owner name failed")),
-                        };
-
-                    let impl_window = ImplWindow::new(
-                        window_cf_dictionary_ref,
-                        &impl_monitors,
-                        window_name,
-                        window_owner_name,
-                    )?;
-
-                    self.id = impl_window.id;
-                    self.title = impl_window.title;
-                    self.app_name = impl_window.app_name;
-                    self.current_monitor = impl_window.current_monitor;
-                    self.x = impl_window.x;
-                    self.y = impl_window.y;
-                    self.z = impl_window.z;
-                    self.width = impl_window.width;
-                    self.height = impl_window.height;
-                    self.is_minimized = impl_window.is_minimized;
-                    self.is_maximized = impl_window.is_maximized;
-
-                    return Ok(());
-                }
-            }
-
-            Err(XCapError::new("Not Found window"))
-        }
-    }
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         capture(
             CGRect::new(
