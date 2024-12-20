@@ -14,7 +14,6 @@ use core_graphics::{
     window::{kCGNullWindowID, kCGWindowSharingNone},
 };
 use image::RgbaImage;
-use objc2_app_kit::NSWorkspace;
 use std::ffi::c_void;
 
 use crate::{error::XCapResult, XCapError};
@@ -26,14 +25,15 @@ pub(crate) struct ImplWindow {
     pub id: u32,
     pub title: String,
     pub app_name: String,
+    pub pid: u32,
     pub current_monitor: ImplMonitor,
     pub x: i32,
     pub y: i32,
+    pub z: i32,
     pub width: u32,
     pub height: u32,
     pub is_minimized: bool,
     pub is_maximized: bool,
-    pub is_focused: bool,
 }
 
 unsafe impl Send for ImplWindow {}
@@ -66,11 +66,11 @@ fn get_cf_dictionary_get_value(
     }
 }
 
-fn get_cf_number_u32_value(cf_dictionary_ref: CFDictionaryRef, key: &str) -> XCapResult<u32> {
+fn get_cf_number_i32_value(cf_dictionary_ref: CFDictionaryRef, key: &str) -> XCapResult<i32> {
     unsafe {
         let cf_number_ref = get_cf_dictionary_get_value(cf_dictionary_ref, key)?;
 
-        let mut value: u32 = 0;
+        let mut value: i32 = 0;
         let is_success = CFNumberGetValue(
             cf_number_ref as CFNumberRef,
             kCFNumberIntType,
@@ -121,25 +121,19 @@ fn get_window_cg_rect(window_cf_dictionary_ref: CFDictionaryRef) -> XCapResult<C
     }
 }
 
-fn get_focused_app_pid() -> Option<u32> {
-    unsafe {
-        let ns_workspace = NSWorkspace::sharedWorkspace();
-        let frontmost_application = ns_workspace.frontmostApplication()?;
-
-        Some(frontmost_application.processIdentifier() as u32)
-    }
-}
-
 impl ImplWindow {
     pub fn new(
         window_cf_dictionary_ref: CFDictionaryRef,
         impl_monitors: &[ImplMonitor],
         window_name: String,
         window_owner_name: String,
-        is_focused: bool,
     ) -> XCapResult<ImplWindow> {
-        let id = get_cf_number_u32_value(window_cf_dictionary_ref, "kCGWindowNumber")?;
+        let id = get_cf_number_i32_value(window_cf_dictionary_ref, "kCGWindowNumber")? as u32;
+        let pid = get_cf_number_i32_value(window_cf_dictionary_ref, "kCGWindowOwnerPID")? as u32;
+
         let cg_rect = get_window_cg_rect(window_cf_dictionary_ref)?;
+
+        let window_layer = get_cf_number_i32_value(window_cf_dictionary_ref, "kCGWindowLayer")?;
 
         let primary_monitor = ImplMonitor::new(CGDisplay::main().id)?;
 
@@ -174,14 +168,15 @@ impl ImplWindow {
             id,
             title: window_name,
             app_name: window_owner_name,
+            pid,
             current_monitor: current_monitor.clone(),
             x: cg_rect.origin.x as i32,
             y: cg_rect.origin.y as i32,
+            z: window_layer,
             width: cg_rect.size.width as u32,
             height: cg_rect.size.height as u32,
             is_minimized,
             is_maximized,
-            is_focused,
         })
     }
 
@@ -189,9 +184,6 @@ impl ImplWindow {
         unsafe {
             let impl_monitors = ImplMonitor::all()?;
             let mut impl_windows = Vec::new();
-            let focused_app_pid = get_focused_app_pid();
-            // 是否已经设置过焦点窗口
-            let mut is_set_focused_window = false;
 
             // CGWindowListCopyWindowInfo 返回窗口顺序为从顶层到最底层
             // 即在前面的窗口在数组前面
@@ -230,11 +222,11 @@ impl ImplWindow {
                     continue;
                 }
 
-                let window_sharing_state = match get_cf_number_u32_value(
+                let window_sharing_state = match get_cf_number_i32_value(
                     window_cf_dictionary_ref,
                     "kCGWindowSharingState",
                 ) {
-                    Ok(window_sharing_state) => window_sharing_state,
+                    Ok(window_sharing_state) => window_sharing_state as u32,
                     _ => continue,
                 };
 
@@ -242,30 +234,11 @@ impl ImplWindow {
                     continue;
                 }
 
-                let window_owner_pid =
-                    match get_cf_number_u32_value(window_cf_dictionary_ref, "kCGWindowOwnerPID") {
-                        Ok(window_owner_pid) => Some(window_owner_pid),
-                        _ => None,
-                    };
-
-                let is_focused = if focused_app_pid.is_some() && window_owner_pid == focused_app_pid
-                {
-                    if !is_set_focused_window {
-                        is_set_focused_window = true;
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-
                 if let Ok(impl_window) = ImplWindow::new(
                     window_cf_dictionary_ref,
                     &impl_monitors,
                     window_name.clone(),
                     window_owner_name.clone(),
-                    is_focused,
                 ) {
                     impl_windows.push(impl_window);
                 } else {
@@ -285,93 +258,6 @@ impl ImplWindow {
 }
 
 impl ImplWindow {
-    pub fn refresh(&mut self) -> XCapResult<()> {
-        unsafe {
-            let impl_monitors = ImplMonitor::all()?;
-            let focused_app_pid = get_focused_app_pid();
-            // 是否已经设置过焦点窗口
-            let mut is_set_focused_window = false;
-
-            let box_cf_array_ref = BoxCFArrayRef::new(CGWindowListCopyWindowInfo(
-                kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
-                kCGNullWindowID,
-            ));
-
-            if box_cf_array_ref.is_null() {
-                return Err(XCapError::new("Run CGWindowListCopyWindowInfo error"));
-            }
-
-            let num_windows = CFArrayGetCount(*box_cf_array_ref);
-
-            for i in 0..num_windows {
-                let window_cf_dictionary_ref =
-                    CFArrayGetValueAtIndex(*box_cf_array_ref, i) as CFDictionaryRef;
-
-                if window_cf_dictionary_ref.is_null() {
-                    continue;
-                }
-
-                let k_cg_window_number =
-                    get_cf_number_u32_value(window_cf_dictionary_ref, "kCGWindowNumber")?;
-
-                let window_owner_pid =
-                    match get_cf_number_u32_value(window_cf_dictionary_ref, "kCGWindowOwnerPID") {
-                        Ok(window_owner_pid) => Some(window_owner_pid),
-                        _ => None,
-                    };
-
-                let is_focused = if focused_app_pid.is_some() && window_owner_pid == focused_app_pid
-                {
-                    if !is_set_focused_window {
-                        is_set_focused_window = true;
-                        true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                };
-
-                if k_cg_window_number == self.id {
-                    let window_name =
-                        match get_cf_string_value(window_cf_dictionary_ref, "kCGWindowName") {
-                            Ok(window_name) => window_name,
-                            _ => return Err(XCapError::new("Get window name failed")),
-                        };
-
-                    let window_owner_name =
-                        match get_cf_string_value(window_cf_dictionary_ref, "kCGWindowOwnerName") {
-                            Ok(window_owner_name) => window_owner_name,
-                            _ => return Err(XCapError::new("Get window owner name failed")),
-                        };
-
-                    let impl_window = ImplWindow::new(
-                        window_cf_dictionary_ref,
-                        &impl_monitors,
-                        window_name,
-                        window_owner_name,
-                        is_focused,
-                    )?;
-
-                    self.id = impl_window.id;
-                    self.title = impl_window.title;
-                    self.app_name = impl_window.app_name;
-                    self.current_monitor = impl_window.current_monitor;
-                    self.x = impl_window.x;
-                    self.y = impl_window.y;
-                    self.width = impl_window.width;
-                    self.height = impl_window.height;
-                    self.is_minimized = impl_window.is_minimized;
-                    self.is_maximized = impl_window.is_maximized;
-                    self.is_focused = impl_window.is_focused;
-
-                    return Ok(());
-                }
-            }
-
-            Err(XCapError::new("Not Found window"))
-        }
-    }
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         capture(
             CGRect::new(
