@@ -253,8 +253,6 @@ impl ImplWindow {
                 }
             }
 
-            impl_windows.sort_by(|a, b| b.z.cmp(&a.z));
-
             Ok(impl_windows)
         }
     }

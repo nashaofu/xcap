@@ -15,9 +15,9 @@ use windows::{
             Threading::{GetCurrentProcessId, PROCESS_ALL_ACCESS},
         },
         UI::WindowsAndMessaging::{
-            EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowInfo, GetWindowLongPtrW,
-            GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
-            IsWindowVisible, IsZoomed, GWL_EXSTYLE, WINDOWINFO, WINDOW_EX_STYLE, WS_EX_TOOLWINDOW,
+            EnumWindows, GetClassNameW, GetWindowInfo, GetWindowLongPtrW, GetWindowTextLengthW,
+            GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible,
+            IsZoomed, GWL_EXSTYLE, WINDOWINFO, WINDOW_EX_STYLE, WS_EX_TOOLWINDOW,
         },
     },
 };
@@ -25,6 +25,7 @@ use windows::{
 use crate::{
     error::XCapResult,
     platform::{boxed::BoxProcessHandle, utils::log_last_error},
+    XCapError,
 };
 
 use super::{capture::capture_window, impl_monitor::ImplMonitor, utils::wide_string_to_string};
@@ -41,11 +42,11 @@ pub(crate) struct ImplWindow {
     pub current_monitor: ImplMonitor,
     pub x: i32,
     pub y: i32,
+    pub z: i32,
     pub width: u32,
     pub height: u32,
     pub is_minimized: bool,
     pub is_maximized: bool,
-    pub is_focused: bool,
 }
 
 fn is_window_cloaked(hwnd: HWND) -> bool {
@@ -160,12 +161,13 @@ fn is_valid_window(hwnd: HWND) -> bool {
 }
 
 unsafe extern "system" fn enum_windows_proc(hwnd: HWND, state: LPARAM) -> BOOL {
-    if !is_valid_window(hwnd) {
-        return TRUE;
+    let state = Box::leak(Box::from_raw(state.0 as *mut (Vec<(HWND, i32)>, i32)));
+
+    if is_valid_window(hwnd) {
+        state.0.push((hwnd, state.1));
     }
 
-    let state = Box::leak(Box::from_raw(state.0 as *mut Vec<HWND>));
-    state.push(hwnd);
+    state.1 += 1;
 
     TRUE
 }
@@ -303,12 +305,8 @@ fn get_app_name(hwnd: HWND) -> XCapResult<String> {
     }
 }
 
-fn is_window_focused(hwnd: HWND) -> bool {
-    unsafe { GetForegroundWindow() == hwnd }
-}
-
 impl ImplWindow {
-    fn new(hwnd: HWND) -> XCapResult<ImplWindow> {
+    fn new(hwnd: HWND, z: i32) -> XCapResult<ImplWindow> {
         unsafe {
             let mut window_info = WINDOWINFO {
                 cbSize: mem::size_of::<WINDOWINFO>() as u32,
@@ -324,7 +322,6 @@ impl ImplWindow {
             let rc_client = window_info.rcClient;
             let is_minimized = IsIconic(hwnd).as_bool();
             let is_maximized = IsZoomed(hwnd).as_bool();
-            let is_focused = is_window_focused(hwnd);
 
             Ok(ImplWindow {
                 hwnd,
@@ -336,27 +333,32 @@ impl ImplWindow {
                 current_monitor: ImplMonitor::new(hmonitor)?,
                 x: rc_client.left,
                 y: rc_client.top,
+                z,
                 width: (rc_client.right - rc_client.left) as u32,
                 height: (rc_client.bottom - rc_client.top) as u32,
                 is_minimized,
                 is_maximized,
-                is_focused,
             })
         }
     }
 
     pub fn all() -> XCapResult<Vec<ImplWindow>> {
-        let hwnds_mut_ptr: *mut Vec<HWND> = Box::into_raw(Box::default());
+        // (HWND, i32) 表示当前窗口以及层级，既（窗口，层级 z），i32 表示 max_z_order，既最大的窗口的 z 顺序
+        // 窗口当前层级为 max_z_order - z
+        let hwnds_mut_ptr: *mut (Vec<(HWND, i32)>, i32) = Box::into_raw(Box::default());
 
         let hwnds = unsafe {
+            // EnumWindows 函数按照 Z 顺序遍历顶层窗口，从最顶层的窗口开始，依次向下遍历。
             EnumWindows(Some(enum_windows_proc), LPARAM(hwnds_mut_ptr as isize))?;
             Box::from_raw(hwnds_mut_ptr)
         };
 
         let mut impl_windows = Vec::new();
 
-        for &hwnd in hwnds.iter() {
-            if let Ok(impl_window) = ImplWindow::new(hwnd) {
+        let max_z_order = hwnds.1;
+
+        for &(hwnd, z) in hwnds.0.iter() {
+            if let Ok(impl_window) = ImplWindow::new(hwnd, max_z_order - z) {
                 impl_windows.push(impl_window);
             } else {
                 log::error!("ImplWindow::new({:?}) failed", hwnd);
@@ -369,22 +371,26 @@ impl ImplWindow {
 
 impl ImplWindow {
     pub fn refresh(&mut self) -> XCapResult<()> {
-        let impl_window = ImplWindow::new(self.hwnd)?;
+        let impl_windows = ImplWindow::all()?;
+        let impl_window = impl_windows
+            .iter()
+            .find(|win| self.hwnd == win.hwnd)
+            .ok_or(XCapError::new("Not found window"))?;
 
         self.hwnd = impl_window.hwnd;
         self.window_info = impl_window.window_info;
         self.id = impl_window.id;
-        self.title = impl_window.title;
-        self.app_name = impl_window.app_name;
+        self.title = impl_window.title.to_owned();
+        self.app_name = impl_window.app_name.to_owned();
         self.process_id = impl_window.process_id;
-        self.current_monitor = impl_window.current_monitor;
+        self.current_monitor = impl_window.current_monitor.to_owned();
         self.x = impl_window.x;
         self.y = impl_window.y;
+        self.z = impl_window.z;
         self.width = impl_window.width;
         self.height = impl_window.height;
         self.is_minimized = impl_window.is_minimized;
         self.is_maximized = impl_window.is_maximized;
-        self.is_focused = is_window_focused(self.hwnd);
 
         Ok(())
     }
