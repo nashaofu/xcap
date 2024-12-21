@@ -1,3 +1,5 @@
+use std::ffi::c_void;
+
 use core_foundation::{
     array::{CFArrayGetCount, CFArrayGetValueAtIndex},
     base::{FromVoid, TCFType},
@@ -14,7 +16,6 @@ use core_graphics::{
     window::{kCGNullWindowID, kCGWindowSharingNone},
 };
 use image::RgbaImage;
-use std::ffi::c_void;
 
 use crate::{error::XCapResult, XCapError};
 
@@ -127,13 +128,12 @@ impl ImplWindow {
         impl_monitors: &[ImplMonitor],
         window_name: String,
         window_owner_name: String,
+        z: i32,
     ) -> XCapResult<ImplWindow> {
         let id = get_cf_number_i32_value(window_cf_dictionary_ref, "kCGWindowNumber")? as u32;
         let pid = get_cf_number_i32_value(window_cf_dictionary_ref, "kCGWindowOwnerPID")? as u32;
 
         let cg_rect = get_window_cg_rect(window_cf_dictionary_ref)?;
-
-        let window_layer = get_cf_number_i32_value(window_cf_dictionary_ref, "kCGWindowLayer")?;
 
         let primary_monitor = ImplMonitor::new(CGDisplay::main().id)?;
 
@@ -172,7 +172,7 @@ impl ImplWindow {
             current_monitor: current_monitor.clone(),
             x: cg_rect.origin.x as i32,
             y: cg_rect.origin.y as i32,
-            z: window_layer,
+            z,
             width: cg_rect.size.width as u32,
             height: cg_rect.size.height as u32,
             is_minimized,
@@ -239,6 +239,7 @@ impl ImplWindow {
                     &impl_monitors,
                     window_name.clone(),
                     window_owner_name.clone(),
+                    num_windows as i32 - i as i32 - 1,
                 ) {
                     impl_windows.push(impl_window);
                 } else {
