@@ -167,7 +167,10 @@ impl BoxHModule {
             let hmodule = LoadLibraryW(lib_filename)?;
 
             if hmodule.is_invalid() {
-                return Err(XCapError::new("LoadLibraryW Shcore.dll failed"));
+                return Err(XCapError::new(format!(
+                    "LoadLibraryW error {:?}",
+                    GetLastError()
+                )));
             }
 
             Ok(Self(hmodule))
