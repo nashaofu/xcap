@@ -2,9 +2,12 @@ use std::{ops::Deref, ptr};
 use windows::{
     core::PCWSTR,
     Win32::{
-        Foundation::{CloseHandle, GetLastError, HANDLE, HWND},
+        Foundation::{CloseHandle, FreeLibrary, GetLastError, HANDLE, HMODULE, HWND},
         Graphics::Gdi::{CreateDCW, DeleteDC, DeleteObject, GetWindowDC, ReleaseDC, HBITMAP, HDC},
-        System::Threading::{OpenProcess, PROCESS_ACCESS_RIGHTS},
+        System::{
+            LibraryLoader::LoadLibraryW,
+            Threading::{OpenProcess, PROCESS_ACCESS_RIGHTS},
+        },
     },
 };
 
@@ -134,6 +137,40 @@ impl BoxProcessHandle {
             }
 
             Ok(BoxProcessHandle(h_process))
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct BoxHModule(HMODULE);
+
+impl Deref for BoxHModule {
+    type Target = HMODULE;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for BoxHModule {
+    fn drop(&mut self) {
+        unsafe {
+            if let Err(err) = FreeLibrary(self.0) {
+                log::error!("FreeLibrary {:?} failed {:?}", self, err);
+            }
+        };
+    }
+}
+
+impl BoxHModule {
+    pub fn new(lib_filename: PCWSTR) -> XCapResult<Self> {
+        unsafe {
+            let hmodule = LoadLibraryW(lib_filename)?;
+
+            if hmodule.is_invalid() {
+                return Err(XCapError::new("LoadLibraryW Shcore.dll failed"));
+            }
+
+            Ok(Self(hmodule))
         }
     }
 }
