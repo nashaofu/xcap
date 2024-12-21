@@ -37,10 +37,11 @@ pub(crate) struct ImplWindow {
     pub id: u32,
     pub title: String,
     pub app_name: String,
-    pub process_id: u32,
+    pub pid: u32,
     pub current_monitor: ImplMonitor,
     pub x: i32,
     pub y: i32,
+    pub z: i32,
     pub width: u32,
     pub height: u32,
     pub is_minimized: bool,
@@ -116,7 +117,7 @@ fn is_valid_window(hwnd: HWND) -> bool {
         // windows owned by the current process. Consumers should either ensure that
         // the thread running their message loop never waits on this operation, or use
         // the option to exclude these windows from the source list.
-        let lp_dw_process_id = get_process_id(hwnd);
+        let lp_dw_process_id = get_window_pid(hwnd);
         if lp_dw_process_id == GetCurrentProcessId() {
             return false;
         }
@@ -159,12 +160,13 @@ fn is_valid_window(hwnd: HWND) -> bool {
 }
 
 unsafe extern "system" fn enum_windows_proc(hwnd: HWND, state: LPARAM) -> BOOL {
-    if !is_valid_window(hwnd) {
-        return TRUE;
+    let state = Box::leak(Box::from_raw(state.0 as *mut (Vec<(HWND, i32)>, i32)));
+
+    if is_valid_window(hwnd) {
+        state.0.push((hwnd, state.1));
     }
 
-    let state = Box::leak(Box::from_raw(state.0 as *mut Vec<HWND>));
-    state.push(hwnd);
+    state.1 += 1;
 
     TRUE
 }
@@ -200,7 +202,7 @@ fn get_module_basename(box_process_handle: BoxProcessHandle) -> XCapResult<Strin
     }
 }
 
-fn get_process_id(hwnd: HWND) -> u32 {
+fn get_window_pid(hwnd: HWND) -> u32 {
     unsafe {
         let mut lp_dw_process_id = 0;
         GetWindowThreadProcessId(hwnd, Some(&mut lp_dw_process_id));
@@ -208,18 +210,15 @@ fn get_process_id(hwnd: HWND) -> u32 {
     }
 }
 
-fn get_app_name(hwnd: HWND) -> XCapResult<String> {
+fn get_app_name(pid: u32) -> XCapResult<String> {
     unsafe {
-        let lp_dw_process_id = get_process_id(hwnd);
-
-        let box_process_handle =
-            match BoxProcessHandle::open(PROCESS_ALL_ACCESS, false, lp_dw_process_id) {
-                Ok(box_handle) => box_handle,
-                Err(err) => {
-                    log::error!("{}", err);
-                    return Ok(String::new());
-                }
-            };
+        let box_process_handle = match BoxProcessHandle::open(PROCESS_ALL_ACCESS, false, pid) {
+            Ok(box_handle) => box_handle,
+            Err(err) => {
+                log::error!("{}", err);
+                return Ok(String::new());
+            }
+        };
 
         let mut filename = [0; MAX_PATH as usize];
         GetModuleFileNameExW(*box_process_handle, None, &mut filename);
@@ -303,7 +302,7 @@ fn get_app_name(hwnd: HWND) -> XCapResult<String> {
 }
 
 impl ImplWindow {
-    fn new(hwnd: HWND) -> XCapResult<ImplWindow> {
+    fn new(hwnd: HWND, z: i32) -> XCapResult<ImplWindow> {
         unsafe {
             let mut window_info = WINDOWINFO {
                 cbSize: mem::size_of::<WINDOWINFO>() as u32,
@@ -313,7 +312,8 @@ impl ImplWindow {
             GetWindowInfo(hwnd, &mut window_info)?;
 
             let title = get_window_title(hwnd)?;
-            let app_name = get_app_name(hwnd)?;
+            let pid = get_window_pid(hwnd);
+            let app_name = get_app_name(pid)?;
 
             let hmonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
             let rc_client = window_info.rcClient;
@@ -326,10 +326,11 @@ impl ImplWindow {
                 id: hwnd.0 as u32,
                 title,
                 app_name,
-                process_id: get_process_id(hwnd),
+                pid,
                 current_monitor: ImplMonitor::new(hmonitor)?,
                 x: rc_client.left,
                 y: rc_client.top,
+                z,
                 width: (rc_client.right - rc_client.left) as u32,
                 height: (rc_client.bottom - rc_client.top) as u32,
                 is_minimized,
@@ -339,17 +340,22 @@ impl ImplWindow {
     }
 
     pub fn all() -> XCapResult<Vec<ImplWindow>> {
-        let hwnds_mut_ptr: *mut Vec<HWND> = Box::into_raw(Box::default());
+        // (HWND, i32) 表示当前窗口以及层级，既（窗口，层级 z），i32 表示 max_z_order，既最大的窗口的 z 顺序
+        // 窗口当前层级为 max_z_order - z
+        let hwnds_mut_ptr: *mut (Vec<(HWND, i32)>, i32) = Box::into_raw(Box::default());
 
         let hwnds = unsafe {
+            // EnumWindows 函数按照 Z 顺序遍历顶层窗口，从最顶层的窗口开始，依次向下遍历。
             EnumWindows(Some(enum_windows_proc), LPARAM(hwnds_mut_ptr as isize))?;
             Box::from_raw(hwnds_mut_ptr)
         };
 
         let mut impl_windows = Vec::new();
 
-        for &hwnd in hwnds.iter() {
-            if let Ok(impl_window) = ImplWindow::new(hwnd) {
+        let max_z_order = hwnds.1;
+
+        for &(hwnd, z) in hwnds.0.iter() {
+            if let Ok(impl_window) = ImplWindow::new(hwnd, max_z_order - z) {
                 impl_windows.push(impl_window);
             } else {
                 log::error!("ImplWindow::new({:?}) failed", hwnd);
@@ -361,26 +367,6 @@ impl ImplWindow {
 }
 
 impl ImplWindow {
-    pub fn refresh(&mut self) -> XCapResult<()> {
-        let impl_window = ImplWindow::new(self.hwnd)?;
-
-        self.hwnd = impl_window.hwnd;
-        self.window_info = impl_window.window_info;
-        self.id = impl_window.id;
-        self.title = impl_window.title;
-        self.app_name = impl_window.app_name;
-        self.process_id = impl_window.process_id;
-        self.current_monitor = impl_window.current_monitor;
-        self.x = impl_window.x;
-        self.y = impl_window.y;
-        self.width = impl_window.width;
-        self.height = impl_window.height;
-        self.is_minimized = impl_window.is_minimized;
-        self.is_maximized = impl_window.is_maximized;
-
-        Ok(())
-    }
-
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         // TODO: 在win10之后，不同窗口有不同的dpi，所以可能存在截图不全或者截图有较大空白，实际窗口没有填充满图片
         capture_window(

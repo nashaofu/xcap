@@ -14,6 +14,7 @@ impl Window {
 }
 
 impl Window {
+    /// List all windows, sorted by z coordinate.
     pub fn all() -> XCapResult<Vec<Window>> {
         let windows = ImplWindow::all()?
             .iter()
@@ -37,11 +38,9 @@ impl Window {
     pub fn title(&self) -> &str {
         &self.impl_window.title
     }
-
-    #[cfg(target_os = "windows")]
     /// The window process id
-    pub fn process_id(&self) -> u32 {
-        self.impl_window.process_id
+    pub fn pid(&self) -> u32 {
+        self.impl_window.pid
     }
     /// The window current monitor
     pub fn current_monitor(&self) -> Monitor {
@@ -54,6 +53,10 @@ impl Window {
     /// The window y coordinate.
     pub fn y(&self) -> i32 {
         self.impl_window.y
+    }
+    /// The window z coordinate.
+    pub fn z(&self) -> i32 {
+        self.impl_window.z
     }
     /// The window pixel width.
     pub fn width(&self) -> u32 {
@@ -74,9 +77,6 @@ impl Window {
 }
 
 impl Window {
-    pub fn refresh(&mut self) -> XCapResult<()> {
-        self.impl_window.refresh()
-    }
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         self.impl_window.capture_image()
     }

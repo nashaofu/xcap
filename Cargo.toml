@@ -43,9 +43,9 @@ windows = { version = "0.58", features = [
 ] }
 
 [target.'cfg(target_os="linux")'.dependencies]
+dbus = "0.9"
 percent-encoding = "2.3"
 xcb = { version = "1.5", features = ["randr"] }
-dbus = { version = "0.9" }
 
 [dev-dependencies]
 fs_extra = "1.3"
