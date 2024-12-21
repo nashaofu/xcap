@@ -1,15 +1,17 @@
-use image::RgbaImage;
 use std::mem;
+
+use image::RgbaImage;
 use windows::{
-    core::PCWSTR,
+    core::{s, w, HRESULT, PCWSTR},
     Win32::{
-        Foundation::{BOOL, LPARAM, POINT, RECT, TRUE},
+        Foundation::{BOOL, HANDLE, LPARAM, POINT, RECT, TRUE},
         Graphics::Gdi::{
             EnumDisplayMonitors, EnumDisplaySettingsW, GetDeviceCaps, GetMonitorInfoW,
             MonitorFromPoint, DESKTOPHORZRES, DEVMODEW, DMDO_180, DMDO_270, DMDO_90, DMDO_DEFAULT,
             ENUM_CURRENT_SETTINGS, HDC, HMONITOR, HORZRES, MONITORINFO, MONITORINFOEXW,
             MONITOR_DEFAULTTONULL,
         },
+        System::LibraryLoader::GetProcAddress,
         UI::WindowsAndMessaging::MONITORINFOF_PRIMARY,
     },
 };
@@ -17,7 +19,9 @@ use windows::{
 use crate::error::{XCapError, XCapResult};
 
 use super::{
-    boxed::BoxHDC, capture::capture_monitor, impl_video_recorder::ImplVideoRecorder,
+    boxed::{BoxHDC, BoxHModule},
+    capture::capture_monitor,
+    impl_video_recorder::ImplVideoRecorder,
     utils::wide_string_to_string,
 };
 
@@ -70,6 +74,70 @@ fn get_dev_mode_w(monitor_info_exw: &MONITORINFOEXW) -> XCapResult<DEVMODEW> {
     Ok(dev_mode_w)
 }
 
+// 定义 GetProcessDpiAwareness 函数的类型
+type GetProcessDpiAwareness =
+    unsafe extern "system" fn(hprocess: HANDLE, value: *mut u32) -> HRESULT;
+
+// 定义 GetDpiForMonitor 函数的类型
+type GetDpiForMonitor = unsafe extern "system" fn(
+    hmonitor: HMONITOR,
+    dpi_type: u32,
+    dpi_x: *mut u32,
+    dpi_y: *mut u32,
+) -> HRESULT;
+
+fn get_hi_dpi_scale_factor(hmonitor: HMONITOR) -> XCapResult<f32> {
+    unsafe {
+        let box_hmodule = BoxHModule::new(w!("Shcore.dll"))?;
+
+        let get_get_process_dpi_awareness_proc_address =
+            GetProcAddress(*box_hmodule, s!("GetProcessDpiAwareness")).ok_or(XCapError::new(
+                "GetProcAddress GetProcessDpiAwareness failed",
+            ))?;
+
+        let get_get_process_dpi_awareness: GetProcessDpiAwareness =
+            mem::transmute(get_get_process_dpi_awareness_proc_address);
+
+        let mut process_dpi_awareness = 0;
+        // https://learn.microsoft.com/zh-cn/windows/win32/api/shellscalingapi/nf-shellscalingapi-getprocessdpiawareness
+        get_get_process_dpi_awareness(HANDLE::default(), &mut process_dpi_awareness).ok()?;
+
+        // 当前进程不感知 DPI，则回退到 GetDeviceCaps 获取 DPI
+        if process_dpi_awareness == 0 {
+            return Err(XCapError::new("Process not DPI aware"));
+        }
+
+        let get_dpi_for_monitor_proc_address = GetProcAddress(*box_hmodule, s!("GetDpiForMonitor"))
+            .ok_or(XCapError::new("GetProcAddress GetDpiForMonitor failed"))?;
+
+        let get_dpi_for_monitor: GetDpiForMonitor =
+            mem::transmute(get_dpi_for_monitor_proc_address);
+
+        let mut dpi_x = 0;
+        let mut dpi_y = 0;
+
+        // https://learn.microsoft.com/zh-cn/windows/win32/api/shellscalingapi/ne-shellscalingapi-monitor_dpi_type
+        get_dpi_for_monitor(hmonitor, 0, &mut dpi_x, &mut dpi_y).ok()?;
+
+        Ok(dpi_x as f32 / 96.0)
+    }
+}
+
+fn get_scale_factor(hmonitor: HMONITOR, box_hdc_monitor: BoxHDC) -> XCapResult<f32> {
+    let scale_factor = get_hi_dpi_scale_factor(hmonitor).unwrap_or_else(|err| {
+        log::info!("{}", err);
+        // https://learn.microsoft.com/zh-cn/windows/win32/api/wingdi/nf-wingdi-getdevicecaps
+        unsafe {
+            let physical_width = GetDeviceCaps(*box_hdc_monitor, DESKTOPHORZRES);
+            let logical_width = GetDeviceCaps(*box_hdc_monitor, HORZRES);
+
+            physical_width as f32 / logical_width as f32
+        }
+    });
+
+    Ok(scale_factor)
+}
+
 impl ImplMonitor {
     pub fn new(hmonitor: HMONITOR) -> XCapResult<ImplMonitor> {
         let mut monitor_info_ex_w = MONITORINFOEXW::default();
@@ -97,13 +165,7 @@ impl ImplMonitor {
         };
 
         let box_hdc_monitor = BoxHDC::from(&monitor_info_ex_w.szDevice);
-
-        let scale_factor = unsafe {
-            let physical_width = GetDeviceCaps(*box_hdc_monitor, DESKTOPHORZRES);
-            let logical_width = GetDeviceCaps(*box_hdc_monitor, HORZRES);
-
-            physical_width as f32 / logical_width as f32
-        };
+        let scale_factor = get_scale_factor(hmonitor, box_hdc_monitor)?;
 
         Ok(ImplMonitor {
             hmonitor,
