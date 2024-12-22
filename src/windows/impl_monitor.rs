@@ -4,14 +4,14 @@ use image::RgbaImage;
 use windows::{
     core::{s, w, HRESULT, PCWSTR},
     Win32::{
-        Foundation::{BOOL, HANDLE, LPARAM, POINT, RECT, TRUE},
+        Foundation::{BOOL, LPARAM, POINT, RECT, TRUE},
         Graphics::Gdi::{
             EnumDisplayMonitors, EnumDisplaySettingsW, GetDeviceCaps, GetMonitorInfoW,
             MonitorFromPoint, DESKTOPHORZRES, DEVMODEW, DMDO_180, DMDO_270, DMDO_90, DMDO_DEFAULT,
             ENUM_CURRENT_SETTINGS, HDC, HMONITOR, HORZRES, MONITORINFO, MONITORINFOEXW,
             MONITOR_DEFAULTTONULL,
         },
-        System::LibraryLoader::GetProcAddress,
+        System::{LibraryLoader::GetProcAddress, Threading::GetCurrentProcess},
         UI::WindowsAndMessaging::MONITORINFOF_PRIMARY,
     },
 };
@@ -22,7 +22,7 @@ use super::{
     boxed::{BoxHDC, BoxHModule},
     capture::capture_monitor,
     impl_video_recorder::ImplVideoRecorder,
-    utils::wide_string_to_string,
+    utils::{get_process_is_dpi_awareness, wide_string_to_string},
 };
 
 // A 函数与 W 函数区别
@@ -74,10 +74,6 @@ fn get_dev_mode_w(monitor_info_exw: &MONITORINFOEXW) -> XCapResult<DEVMODEW> {
     Ok(dev_mode_w)
 }
 
-// 定义 GetProcessDpiAwareness 函数的类型
-type GetProcessDpiAwareness =
-    unsafe extern "system" fn(hprocess: HANDLE, value: *mut u32) -> HRESULT;
-
 // 定义 GetDpiForMonitor 函数的类型
 type GetDpiForMonitor = unsafe extern "system" fn(
     hmonitor: HMONITOR,
@@ -88,24 +84,14 @@ type GetDpiForMonitor = unsafe extern "system" fn(
 
 fn get_hi_dpi_scale_factor(hmonitor: HMONITOR) -> XCapResult<f32> {
     unsafe {
-        let box_hmodule = BoxHModule::new(w!("Shcore.dll"))?;
-
-        let get_get_process_dpi_awareness_proc_address =
-            GetProcAddress(*box_hmodule, s!("GetProcessDpiAwareness")).ok_or(XCapError::new(
-                "GetProcAddress GetProcessDpiAwareness failed",
-            ))?;
-
-        let get_get_process_dpi_awareness: GetProcessDpiAwareness =
-            mem::transmute(get_get_process_dpi_awareness_proc_address);
-
-        let mut process_dpi_awareness = 0;
-        // https://learn.microsoft.com/zh-cn/windows/win32/api/shellscalingapi/nf-shellscalingapi-getprocessdpiawareness
-        get_get_process_dpi_awareness(HANDLE::default(), &mut process_dpi_awareness).ok()?;
+        let current_process_is_dpi_awareness: bool = get_process_is_dpi_awareness(GetCurrentProcess())?;
 
         // 当前进程不感知 DPI，则回退到 GetDeviceCaps 获取 DPI
-        if process_dpi_awareness == 0 {
+        if !current_process_is_dpi_awareness {
             return Err(XCapError::new("Process not DPI aware"));
         }
+
+        let box_hmodule = BoxHModule::new(w!("Shcore.dll"))?;
 
         let get_dpi_for_monitor_proc_address = GetProcAddress(*box_hmodule, s!("GetDpiForMonitor"))
             .ok_or(XCapError::new("GetProcAddress GetDpiForMonitor failed"))?;
