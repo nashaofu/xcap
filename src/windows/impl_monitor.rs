@@ -84,7 +84,8 @@ type GetDpiForMonitor = unsafe extern "system" fn(
 
 fn get_hi_dpi_scale_factor(hmonitor: HMONITOR) -> XCapResult<f32> {
     unsafe {
-        let current_process_is_dpi_awareness: bool = get_process_is_dpi_awareness(GetCurrentProcess())?;
+        let current_process_is_dpi_awareness: bool =
+            get_process_is_dpi_awareness(GetCurrentProcess())?;
 
         // 当前进程不感知 DPI，则回退到 GetDeviceCaps 获取 DPI
         if !current_process_is_dpi_awareness {
