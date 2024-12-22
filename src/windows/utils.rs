@@ -1,13 +1,20 @@
+use std::mem;
+
 use image::RgbaImage;
 use windows::{
-    core::w,
+    core::{s, w, HRESULT},
     Win32::{
-        Foundation::GetLastError,
-        System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ},
+        Foundation::{GetLastError, HANDLE},
+        System::{
+            LibraryLoader::GetProcAddress,
+            Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ},
+        },
     },
 };
 
 use crate::{error::XCapResult, XCapError};
+
+use super::boxed::BoxHModule;
 
 pub(super) fn wide_string_to_string(wide_string: &[u16]) -> XCapResult<String> {
     let string = if let Some(null_pos) = wide_string.iter().position(|pos| *pos == 0) {
@@ -87,4 +94,29 @@ pub(super) fn bgra_to_rgba_image(
 ) -> XCapResult<RgbaImage> {
     RgbaImage::from_raw(width, height, bgra_to_rgba(buffer))
         .ok_or_else(|| XCapError::new("RgbaImage::from_raw failed"))
+}
+
+// 定义 GetProcessDpiAwareness 函数的类型
+type GetProcessDpiAwareness =
+    unsafe extern "system" fn(hprocess: HANDLE, value: *mut u32) -> HRESULT;
+
+pub(super) fn get_process_is_dpi_awareness(process: HANDLE) -> XCapResult<bool> {
+    unsafe {
+        let box_hmodule = BoxHModule::new(w!("Shcore.dll"))?;
+
+        let get_process_dpi_awareness_proc_address =
+            GetProcAddress(*box_hmodule, s!("GetProcessDpiAwareness")).ok_or(XCapError::new(
+                "GetProcAddress GetProcessDpiAwareness failed",
+            ))?;
+
+        let get_process_dpi_awareness: GetProcessDpiAwareness =
+            mem::transmute(get_process_dpi_awareness_proc_address);
+
+        let mut process_dpi_awareness = 0;
+        // https://learn.microsoft.com/zh-cn/windows/win32/api/shellscalingapi/nf-shellscalingapi-getprocessdpiawareness
+        get_process_dpi_awareness(process, &mut process_dpi_awareness).ok()?;
+
+        // 当前进程不感知 DPI，则回退到 GetDeviceCaps 获取 DPI
+        Ok(process_dpi_awareness != 0)
+    }
 }
