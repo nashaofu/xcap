@@ -1,23 +1,22 @@
-use std::time::Instant;
+use std::thread;
 use xcap::Window;
 
 fn main() {
-    let start = Instant::now();
-    let windows = Window::all().unwrap();
-    println!("Window::all() 运行耗时: {:?}", start.elapsed());
+    thread::sleep(std::time::Duration::from_secs(3));
 
-    for window in windows {
+    let windows = Window::all().unwrap();
+
+    for window in windows.clone() {
         println!(
-            "Window:\n id: {}\n title: {}\n app_name: {}\n monitor: {:?}\n position: {:?}\n size {:?}\n state {:?}\n",
+            "Window:\n id: {}\n title: {}\n app_name: {}\n pid: {}\n monitor: {:?}\n position: {:?}\n size {:?}\n state {:?}\n",
             window.id(),
             window.title(),
             window.app_name(),
+            window.pid(),
             window.current_monitor().name(),
-            (window.x(), window.y()),
+            (window.x(), window.y(), window.z()),
             (window.width(), window.height()),
             (window.is_minimized(), window.is_maximized())
         );
     }
-
-    println!("运行耗时: {:?}", start.elapsed());
 }
