@@ -10,8 +10,8 @@ use windows::Win32::{
             OBJ_BITMAP, SRCCOPY,
         },
     },
-    Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS},
-    UI::WindowsAndMessaging::{GetDesktopWindow, WINDOWINFO},
+    Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS, PW_CLIENTONLY},
+    UI::WindowsAndMessaging::{GetDesktopWindow, PW_RENDERFULLCONTENT, WINDOWINFO},
 };
 
 use crate::error::{XCapError, XCapResult};
