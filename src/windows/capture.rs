@@ -46,7 +46,7 @@ fn to_rgba_image(
 
     unsafe {
         // 读取数据到 buffer 中
-        let is_success = GetDIBits(
+        let is_failed = GetDIBits(
             *box_hdc_mem,
             *box_h_bitmap,
             0,
@@ -56,7 +56,7 @@ fn to_rgba_image(
             DIB_RGB_COLORS,
         ) == 0;
 
-        if is_success {
+        if is_failed {
             return Err(XCapError::new("Get RGBA data failed"));
         }
     };
@@ -152,7 +152,7 @@ pub fn capture_window(
         }
 
         if !is_success {
-            is_success = PrintWindow(hwnd, *box_hdc_mem, PRINT_WINDOW_FLAGS(3)).as_bool();
+            is_success = PrintWindow(hwnd, *box_hdc_mem, PRINT_WINDOW_FLAGS(4)).as_bool();
         }
 
         if !is_success {
