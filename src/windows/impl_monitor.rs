@@ -211,7 +211,13 @@ impl ImplMonitor {
 
 impl ImplMonitor {
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
-        capture_monitor(self.x, self.y, self.width as i32, self.height as i32)
+        capture_monitor(
+            self.hmonitor,
+            self.x,
+            self.y,
+            self.width as i32,
+            self.height as i32,
+        )
     }
 
     pub fn video_recorder(&self) -> XCapResult<ImplVideoRecorder> {

@@ -1,6 +1,8 @@
 mod boxed;
 mod capture;
+mod gdi;
 mod utils;
+mod wgc;
 
 pub mod impl_monitor;
 pub mod impl_video_recorder;
