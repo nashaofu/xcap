@@ -2,12 +2,21 @@ use std::mem;
 
 use image::RgbaImage;
 use windows::{
-    core::{s, w, HRESULT},
+    core::{s, w, Interface, HRESULT},
+    Graphics::DirectX::Direct3D11::IDirect3DDevice,
     Win32::{
         Foundation::{GetLastError, HANDLE},
+        Graphics::{
+            Direct3D::D3D_DRIVER_TYPE_HARDWARE,
+            Direct3D11::{
+                D3D11CreateDevice, ID3D11Device, D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION,
+            },
+            Dxgi::IDXGIDevice,
+        },
         System::{
             LibraryLoader::GetProcAddress,
             Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ},
+            WinRT::Direct3D11::CreateDirect3D11DeviceFromDXGIDevice,
         },
     },
 };
@@ -118,5 +127,34 @@ pub(super) fn get_process_is_dpi_awareness(process: HANDLE) -> XCapResult<bool> 
 
         // 当前进程不感知 DPI，则回退到 GetDeviceCaps 获取 DPI
         Ok(process_dpi_awareness != 0)
+    }
+}
+
+pub fn create_d3d11_device(flags: D3D11_CREATE_DEVICE_FLAG) -> XCapResult<ID3D11Device> {
+    unsafe {
+        let mut d3d_device = None;
+        D3D11CreateDevice(
+            None,
+            D3D_DRIVER_TYPE_HARDWARE,
+            None,
+            flags,
+            None,
+            D3D11_SDK_VERSION,
+            Some(&mut d3d_device),
+            None,
+            None,
+        )?;
+
+        d3d_device.ok_or(XCapError::new("Call D3D11CreateDevice failed"))
+    }
+}
+
+pub fn create_direct3d_device(d3d_device: &ID3D11Device) -> XCapResult<IDirect3DDevice> {
+    unsafe {
+        let dxgi_device = d3d_device.cast::<IDXGIDevice>()?;
+        let inspectable = CreateDirect3D11DeviceFromDXGIDevice(&dxgi_device)?;
+        let direct_3d_device = inspectable.cast::<IDirect3DDevice>()?;
+
+        Ok(direct_3d_device)
     }
 }
