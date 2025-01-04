@@ -1,5 +1,8 @@
 use fs_extra::dir;
-use std::time::Instant;
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 use xcap::Monitor;
 
 fn normalized(filename: &str) -> String {
@@ -7,6 +10,7 @@ fn normalized(filename: &str) -> String {
 }
 
 fn main() {
+    thread::sleep(Duration::from_secs(1));
     let start = Instant::now();
     let monitors = Monitor::all().unwrap();
 

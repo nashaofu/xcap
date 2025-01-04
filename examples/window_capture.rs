@@ -1,5 +1,6 @@
 use fs_extra::dir;
 use std::time::Instant;
+use std::{thread, time::Duration};
 use xcap::Window;
 
 fn normalized(filename: &str) -> String {
@@ -7,6 +8,8 @@ fn normalized(filename: &str) -> String {
 }
 
 fn main() {
+    // thread::sleep(Duration::from_secs(2));
+
     let start = Instant::now();
     let windows = Window::all().unwrap();
 
