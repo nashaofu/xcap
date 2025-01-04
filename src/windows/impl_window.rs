@@ -12,7 +12,9 @@ use windows::{
         Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW},
         System::{
             ProcessStatus::{GetModuleBaseNameW, GetModuleFileNameExW},
-            Threading::{GetCurrentProcess, GetCurrentProcessId, PROCESS_ALL_ACCESS},
+            Threading::{
+                GetCurrentProcess, GetCurrentProcessId, PROCESS_QUERY_LIMITED_INFORMATION,
+            },
         },
         UI::WindowsAndMessaging::{
             EnumWindows, GetClassNameW, GetWindowInfo, GetWindowLongPtrW, GetWindowTextLengthW,
@@ -216,13 +218,14 @@ fn get_window_pid(hwnd: HWND) -> u32 {
 
 fn get_app_name(pid: u32) -> XCapResult<String> {
     unsafe {
-        let box_process_handle = match BoxProcessHandle::open(PROCESS_ALL_ACCESS, false, pid) {
-            Ok(box_handle) => box_handle,
-            Err(err) => {
-                log::error!("{}", err);
-                return Ok(String::new());
-            }
-        };
+        let box_process_handle =
+            match BoxProcessHandle::open(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+                Ok(box_handle) => box_handle,
+                Err(err) => {
+                    log::error!("{}", err);
+                    return Ok(String::new());
+                }
+            };
 
         let mut filename = [0; MAX_PATH as usize];
         GetModuleFileNameExW(*box_process_handle, None, &mut filename);
@@ -374,7 +377,8 @@ impl ImplWindow {
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         // 在win10之后，不同窗口有不同的dpi，所以可能存在截图不全或者截图有较大空白，实际窗口没有填充满图片
         // 如果窗口不感知dpi，那么就不需要缩放，如果当前进程感知dpi，那么也不需要缩放
-        let box_process_handle = BoxProcessHandle::open(PROCESS_ALL_ACCESS, false, self.pid)?;
+        let box_process_handle =
+            BoxProcessHandle::open(PROCESS_QUERY_LIMITED_INFORMATION, false, self.pid)?;
         let window_is_dpi_awareness = get_process_is_dpi_awareness(*box_process_handle)?;
         let current_process_is_dpi_awareness =
             unsafe { get_process_is_dpi_awareness(GetCurrentProcess())? };
