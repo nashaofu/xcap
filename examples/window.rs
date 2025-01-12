@@ -16,7 +16,7 @@ fn main() {
             window.current_monitor().name(),
             (window.x(), window.y(), window.z()),
             (window.width(), window.height()),
-            (window.is_minimized(), window.is_maximized())
+            (window.is_minimized(), window.is_maximized(), window.is_focused())
         );
     }
 }
