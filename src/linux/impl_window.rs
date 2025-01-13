@@ -227,7 +227,7 @@ impl ImplWindow {
         // https://specifications.freedesktop.org/wm-spec/1.5/ar01s03.html#id-1.4.4
         // list all windows by stacking order
         let client_list_atom = get_atom(&conn, "_NET_CLIENT_LIST_STACKING")?;
-        let get_active_window_id = get_active_window_id(&conn);
+        let active_window_id = get_active_window_id(&conn);
 
         let mut impl_windows = Vec::new();
         let impl_monitors = ImplMonitor::all()?;
@@ -267,7 +267,7 @@ impl ImplWindow {
                         }
                     };
 
-                    let is_focused = get_active_window_id.eq(&Some(client.resource_id()));
+                    let is_focused = active_window_id.eq(&Some(client.resource_id()));
 
                     if let Ok(impl_window) =
                         ImplWindow::new(&conn, client, pid, z, is_focused, &impl_monitors)
