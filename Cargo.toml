@@ -23,6 +23,11 @@ thiserror = "2.0"
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
 core-graphics = "0.24"
+objc2-app-kit = { version = "0.2.2", features = [
+    "libc",
+    "NSWorkspace",
+    "NSRunningApplication",
+] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = [
