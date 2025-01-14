@@ -16,6 +16,7 @@ use core_graphics::{
     window::{kCGNullWindowID, kCGWindowSharingNone},
 };
 use image::RgbaImage;
+use objc2_app_kit::NSWorkspace;
 
 use crate::{error::XCapResult, XCapError};
 
@@ -35,6 +36,7 @@ pub(crate) struct ImplWindow {
     pub height: u32,
     pub is_minimized: bool,
     pub is_maximized: bool,
+    pub is_focused: bool,
 }
 
 unsafe impl Send for ImplWindow {}
@@ -129,9 +131,10 @@ impl ImplWindow {
         window_name: String,
         window_owner_name: String,
         z: i32,
+        focused_app_pid: Option<i32>,
     ) -> XCapResult<ImplWindow> {
         let id = get_cf_number_i32_value(window_cf_dictionary_ref, "kCGWindowNumber")? as u32;
-        let pid = get_cf_number_i32_value(window_cf_dictionary_ref, "kCGWindowOwnerPID")? as u32;
+        let pid = get_cf_number_i32_value(window_cf_dictionary_ref, "kCGWindowOwnerPID")?;
 
         let cg_rect = get_window_cg_rect(window_cf_dictionary_ref)?;
 
@@ -164,11 +167,13 @@ impl ImplWindow {
         let is_minimized =
             !get_cf_bool_value(window_cf_dictionary_ref, "kCGWindowIsOnscreen")? && !is_maximized;
 
+        let is_focused = focused_app_pid.eq(&Some(pid));
+
         Ok(ImplWindow {
             id,
             title: window_name,
             app_name: window_owner_name,
-            pid,
+            pid: pid as u32,
             current_monitor: current_monitor.clone(),
             x: cg_rect.origin.x as i32,
             y: cg_rect.origin.y as i32,
@@ -177,12 +182,18 @@ impl ImplWindow {
             height: cg_rect.size.height as u32,
             is_minimized,
             is_maximized,
+            is_focused,
         })
     }
 
     pub fn all() -> XCapResult<Vec<ImplWindow>> {
         unsafe {
             let impl_monitors = ImplMonitor::all()?;
+            let workspace = NSWorkspace::sharedWorkspace();
+            let focused_app_pid = workspace
+                .frontmostApplication()
+                .map(|focused_app| focused_app.processIdentifier());
+
             let mut impl_windows = Vec::new();
 
             // CGWindowListCopyWindowInfo 返回窗口顺序为从顶层到最底层
@@ -240,6 +251,7 @@ impl ImplWindow {
                     window_name.clone(),
                     window_owner_name.clone(),
                     num_windows as i32 - i as i32 - 1,
+                    focused_app_pid,
                 ) {
                     impl_windows.push(impl_window);
                 } else {

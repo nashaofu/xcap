@@ -12,12 +12,14 @@ use windows::{
         Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW},
         System::{
             ProcessStatus::{GetModuleBaseNameW, GetModuleFileNameExW},
-            Threading::{GetCurrentProcess, GetCurrentProcessId, PROCESS_ALL_ACCESS},
+            Threading::{
+                GetCurrentProcess, GetCurrentProcessId, PROCESS_QUERY_LIMITED_INFORMATION,
+            },
         },
         UI::WindowsAndMessaging::{
-            EnumWindows, GetClassNameW, GetWindowInfo, GetWindowLongPtrW, GetWindowTextLengthW,
-            GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible,
-            IsZoomed, GWL_EXSTYLE, WINDOWINFO, WINDOW_EX_STYLE, WS_EX_TOOLWINDOW,
+            EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowInfo, GetWindowLongPtrW,
+            GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
+            IsWindowVisible, IsZoomed, GWL_EXSTYLE, WINDOWINFO, WINDOW_EX_STYLE, WS_EX_TOOLWINDOW,
         },
     },
 };
@@ -50,6 +52,7 @@ pub(crate) struct ImplWindow {
     pub height: u32,
     pub is_minimized: bool,
     pub is_maximized: bool,
+    pub is_focused: bool,
 }
 
 fn is_window_cloaked(hwnd: HWND) -> bool {
@@ -216,13 +219,14 @@ fn get_window_pid(hwnd: HWND) -> u32 {
 
 fn get_app_name(pid: u32) -> XCapResult<String> {
     unsafe {
-        let box_process_handle = match BoxProcessHandle::open(PROCESS_ALL_ACCESS, false, pid) {
-            Ok(box_handle) => box_handle,
-            Err(err) => {
-                log::error!("{}", err);
-                return Ok(String::new());
-            }
-        };
+        let box_process_handle =
+            match BoxProcessHandle::open(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+                Ok(box_handle) => box_handle,
+                Err(err) => {
+                    log::error!("{}", err);
+                    return Ok(String::new());
+                }
+            };
 
         let mut filename = [0; MAX_PATH as usize];
         GetModuleFileNameExW(*box_process_handle, None, &mut filename);
@@ -323,6 +327,7 @@ impl ImplWindow {
             let rc_client = window_info.rcClient;
             let is_minimized = IsIconic(hwnd).as_bool();
             let is_maximized = IsZoomed(hwnd).as_bool();
+            let is_focused = GetForegroundWindow() == hwnd;
 
             Ok(ImplWindow {
                 hwnd,
@@ -339,6 +344,7 @@ impl ImplWindow {
                 height: (rc_client.bottom - rc_client.top) as u32,
                 is_minimized,
                 is_maximized,
+                is_focused,
             })
         }
     }
@@ -374,7 +380,8 @@ impl ImplWindow {
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         // 在win10之后，不同窗口有不同的dpi，所以可能存在截图不全或者截图有较大空白，实际窗口没有填充满图片
         // 如果窗口不感知dpi，那么就不需要缩放，如果当前进程感知dpi，那么也不需要缩放
-        let box_process_handle = BoxProcessHandle::open(PROCESS_ALL_ACCESS, false, self.pid)?;
+        let box_process_handle =
+            BoxProcessHandle::open(PROCESS_QUERY_LIMITED_INFORMATION, false, self.pid)?;
         let window_is_dpi_awareness = get_process_is_dpi_awareness(*box_process_handle)?;
         let current_process_is_dpi_awareness =
             unsafe { get_process_is_dpi_awareness(GetCurrentProcess())? };
