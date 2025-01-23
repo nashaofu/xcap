@@ -40,7 +40,7 @@ pub enum XCapError {
     WindowsCoreError(#[from] windows::core::Error),
     #[cfg(target_os = "windows")]
     #[error(transparent)]
-    StdStringFromUtf16Error(#[from] std::string::FromUtf16Error),
+    Utf16Error(#[from] widestring::error::Utf16Error),
 }
 
 impl XCapError {

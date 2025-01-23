@@ -18,6 +18,7 @@ image = ["image/default"]
 [dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
+scopeguard = "1.2"
 thiserror = "2.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -30,7 +31,8 @@ objc2-app-kit = { version = "0.2.2", features = [
 ] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.58", features = [
+widestring = "1.1"
+windows = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Dwm",
