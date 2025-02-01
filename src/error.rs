@@ -32,8 +32,8 @@ pub enum XCapError {
     StdTimeSystemTimeError(#[from] std::time::SystemTimeError),
 
     #[cfg(target_os = "macos")]
-    #[error("CoreGraphicsDisplayCGError {0}")]
-    CoreGraphicsDisplayCGError(core_graphics::display::CGError),
+    #[error("Objc2CoreGraphicsCGError {:?}", 0)]
+    Objc2CoreGraphicsCGError(objc2_core_graphics::CGError),
 
     #[cfg(target_os = "windows")]
     #[error(transparent)]
@@ -49,12 +49,12 @@ impl XCapError {
     }
 }
 
-#[cfg(target_os = "macos")]
-impl From<core_graphics::display::CGError> for XCapError {
-    fn from(value: core_graphics::display::CGError) -> Self {
-        XCapError::CoreGraphicsDisplayCGError(value)
-    }
-}
+// #[cfg(target_os = "macos")]
+// impl From<core_graphics::display::CGError> for XCapError {
+//     fn from(value: core_graphics::display::CGError) -> Self {
+//         XCapError::CoreGraphicsDisplayCGError(value)
+//     }
+// }
 
 pub type XCapResult<T> = Result<T, XCapError>;
 
