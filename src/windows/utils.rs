@@ -6,12 +6,11 @@ use widestring::U16CString;
 use windows::{
     core::{s, w, HRESULT, PCWSTR},
     Win32::{
-        Foundation::{CloseHandle, FreeLibrary, GetLastError, HANDLE, HMODULE},
-        System::{
+        Devices::Display::{DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QueryDisplayConfig, DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME, DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME, QDC_ONLY_ACTIVE_PATHS}, Foundation::{CloseHandle, FreeLibrary, GetLastError, HANDLE, HMODULE}, Graphics::Gdi::MONITORINFOEXW, System::{
             LibraryLoader::{GetProcAddress, LoadLibraryW},
             Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ},
             Threading::{OpenProcess, PROCESS_ACCESS_RIGHTS},
-        },
+        }
     },
 };
 
@@ -159,5 +158,76 @@ pub(super) fn open_process(
         });
 
         Ok(scope_guard_handle)
+    }
+}
+
+pub(super) fn get_monitor_name(monitor_info_ex_w: MONITORINFOEXW) -> XCapResult<String> {
+    unsafe {
+        let mut number_of_paths = 0;
+        let mut number_of_modes = 0;
+        GetDisplayConfigBufferSizes(
+            QDC_ONLY_ACTIVE_PATHS,
+            &mut number_of_paths,
+            &mut number_of_modes,
+        )
+        .ok()?;
+
+        let mut paths = vec![DISPLAYCONFIG_PATH_INFO::default(); number_of_paths as usize];
+        let mut modes = vec![DISPLAYCONFIG_MODE_INFO::default(); number_of_modes as usize];
+
+        QueryDisplayConfig(
+            QDC_ONLY_ACTIVE_PATHS,
+            &mut number_of_paths,
+            paths.as_mut_ptr(),
+            &mut number_of_modes,
+            modes.as_mut_ptr(),
+            None,
+        )
+        .ok()?;
+
+        for path in paths {
+            let mut source = DISPLAYCONFIG_SOURCE_DEVICE_NAME {
+                header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+                    r#type: DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+                    size: mem::size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32,
+                    adapterId: path.sourceInfo.adapterId,
+                    id: path.sourceInfo.id,
+                },
+                ..DISPLAYCONFIG_SOURCE_DEVICE_NAME::default()
+            };
+
+            if DisplayConfigGetDeviceInfo(&mut source.header) != 0 {
+                continue;
+            }
+
+            if source.viewGdiDeviceName != monitor_info_ex_w.szDevice {
+                continue;
+            }
+
+            let mut target = DISPLAYCONFIG_TARGET_DEVICE_NAME {
+                header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+                    r#type: DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+                    size: mem::size_of::<DISPLAYCONFIG_TARGET_DEVICE_NAME>() as u32,
+                    adapterId: path.sourceInfo.adapterId,
+                    id: path.targetInfo.id,
+                },
+                ..DISPLAYCONFIG_TARGET_DEVICE_NAME::default()
+            };
+
+            if DisplayConfigGetDeviceInfo(&mut target.header) != 0 {
+                continue;
+            }
+
+            let name =
+                U16CString::from_vec_truncate(target.monitorFriendlyDeviceName).to_string()?;
+
+            if name.is_empty() {
+                return Err(XCapError::new("Monitor name is empty"));
+            }
+
+            return Ok(name);
+        }
+
+        Err(XCapError::new("Get monitor name failed"))
     }
 }

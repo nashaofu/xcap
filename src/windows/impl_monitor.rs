@@ -2,7 +2,6 @@ use std::{mem, ptr};
 
 use image::RgbaImage;
 use scopeguard::guard;
-use widestring::U16CString;
 use windows::{
     core::{s, w, HRESULT, PCWSTR},
     Win32::{
@@ -23,7 +22,7 @@ use crate::error::{XCapError, XCapResult};
 use super::{
     capture::capture_monitor,
     impl_video_recorder::ImplVideoRecorder,
-    utils::{get_process_is_dpi_awareness, load_library},
+    utils::{get_monitor_name, get_process_is_dpi_awareness, load_library},
 };
 
 // A 函数与 W 函数区别
@@ -151,7 +150,8 @@ impl ImplMonitor {
         // https://learn.microsoft.com/zh-cn/windows/win32/api/winuser/nf-winuser-getmonitorinfoa
         unsafe { GetMonitorInfoW(h_monitor, monitor_info_ex_w_ptr).ok()? };
 
-        let name = U16CString::from_vec_truncate(monitor_info_ex_w.szDevice).to_string()?;
+        let name = get_monitor_name(monitor_info_ex_w)
+            .unwrap_or(format!("Unknown Monitor {}", h_monitor.0 as u32));
 
         let dev_mode_w = get_dev_mode_w(&monitor_info_ex_w)?;
 
