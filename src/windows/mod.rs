@@ -1,4 +1,3 @@
-mod boxed;
 mod capture;
 mod utils;
 

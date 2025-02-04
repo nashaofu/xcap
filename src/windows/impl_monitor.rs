@@ -1,15 +1,16 @@
-use std::mem;
+use std::{mem, ptr};
 
 use image::RgbaImage;
+use scopeguard::guard;
 use windows::{
     core::{s, w, HRESULT, PCWSTR},
     Win32::{
         Foundation::{BOOL, LPARAM, POINT, RECT, TRUE},
         Graphics::Gdi::{
-            EnumDisplayMonitors, EnumDisplaySettingsW, GetDeviceCaps, GetMonitorInfoW,
-            MonitorFromPoint, DESKTOPHORZRES, DEVMODEW, DMDO_180, DMDO_270, DMDO_90, DMDO_DEFAULT,
-            ENUM_CURRENT_SETTINGS, HDC, HMONITOR, HORZRES, MONITORINFO, MONITORINFOEXW,
-            MONITOR_DEFAULTTONULL,
+            CreateDCW, DeleteDC, EnumDisplayMonitors, EnumDisplaySettingsW, GetDeviceCaps,
+            GetMonitorInfoW, MonitorFromPoint, DESKTOPHORZRES, DEVMODEW, DMDO_180, DMDO_270,
+            DMDO_90, DMDO_DEFAULT, ENUM_CURRENT_SETTINGS, HDC, HMONITOR, HORZRES, MONITORINFO,
+            MONITORINFOEXW, MONITOR_DEFAULTTONULL,
         },
         System::{LibraryLoader::GetProcAddress, Threading::GetCurrentProcess},
         UI::WindowsAndMessaging::MONITORINFOF_PRIMARY,
@@ -19,10 +20,9 @@ use windows::{
 use crate::error::{XCapError, XCapResult};
 
 use super::{
-    boxed::{BoxHDC, BoxHModule},
     capture::capture_monitor,
     impl_video_recorder::ImplVideoRecorder,
-    utils::{get_process_is_dpi_awareness, wide_string_to_string},
+    utils::{get_monitor_name, get_process_is_dpi_awareness, load_library},
 };
 
 // A 函数与 W 函数区别
@@ -31,7 +31,7 @@ use super::{
 #[derive(Debug, Clone)]
 pub(crate) struct ImplMonitor {
     #[allow(unused)]
-    pub hmonitor: HMONITOR,
+    pub h_monitor: HMONITOR,
     #[allow(unused)]
     pub monitor_info_ex_w: MONITORINFOEXW,
     pub id: u32,
@@ -47,14 +47,14 @@ pub(crate) struct ImplMonitor {
 }
 
 extern "system" fn monitor_enum_proc(
-    hmonitor: HMONITOR,
+    h_monitor: HMONITOR,
     _: HDC,
     _: *mut RECT,
     state: LPARAM,
 ) -> BOOL {
     unsafe {
         let state = Box::leak(Box::from_raw(state.0 as *mut Vec<HMONITOR>));
-        state.push(hmonitor);
+        state.push(h_monitor);
 
         TRUE
     }
@@ -76,13 +76,13 @@ fn get_dev_mode_w(monitor_info_exw: &MONITORINFOEXW) -> XCapResult<DEVMODEW> {
 
 // 定义 GetDpiForMonitor 函数的类型
 type GetDpiForMonitor = unsafe extern "system" fn(
-    hmonitor: HMONITOR,
+    h_monitor: HMONITOR,
     dpi_type: u32,
     dpi_x: *mut u32,
     dpi_y: *mut u32,
 ) -> HRESULT;
 
-fn get_hi_dpi_scale_factor(hmonitor: HMONITOR) -> XCapResult<f32> {
+fn get_hi_dpi_scale_factor(h_monitor: HMONITOR) -> XCapResult<f32> {
     unsafe {
         let current_process_is_dpi_awareness: bool =
             get_process_is_dpi_awareness(GetCurrentProcess())?;
@@ -92,10 +92,11 @@ fn get_hi_dpi_scale_factor(hmonitor: HMONITOR) -> XCapResult<f32> {
             return Err(XCapError::new("Process not DPI aware"));
         }
 
-        let box_hmodule = BoxHModule::new(w!("Shcore.dll"))?;
+        let scope_guard_hmodule = load_library(w!("Shcore.dll"))?;
 
-        let get_dpi_for_monitor_proc_address = GetProcAddress(*box_hmodule, s!("GetDpiForMonitor"))
-            .ok_or(XCapError::new("GetProcAddress GetDpiForMonitor failed"))?;
+        let get_dpi_for_monitor_proc_address =
+            GetProcAddress(*scope_guard_hmodule, s!("GetDpiForMonitor"))
+                .ok_or(XCapError::new("GetProcAddress GetDpiForMonitor failed"))?;
 
         let get_dpi_for_monitor: GetDpiForMonitor =
             mem::transmute(get_dpi_for_monitor_proc_address);
@@ -104,19 +105,33 @@ fn get_hi_dpi_scale_factor(hmonitor: HMONITOR) -> XCapResult<f32> {
         let mut dpi_y = 0;
 
         // https://learn.microsoft.com/zh-cn/windows/win32/api/shellscalingapi/ne-shellscalingapi-monitor_dpi_type
-        get_dpi_for_monitor(hmonitor, 0, &mut dpi_x, &mut dpi_y).ok()?;
+        get_dpi_for_monitor(h_monitor, 0, &mut dpi_x, &mut dpi_y).ok()?;
 
         Ok(dpi_x as f32 / 96.0)
     }
 }
 
-fn get_scale_factor(hmonitor: HMONITOR, box_hdc_monitor: BoxHDC) -> XCapResult<f32> {
-    let scale_factor = get_hi_dpi_scale_factor(hmonitor).unwrap_or_else(|err| {
+fn get_scale_factor(h_monitor: HMONITOR, monitor_info_ex_w: MONITORINFOEXW) -> XCapResult<f32> {
+    let scale_factor = get_hi_dpi_scale_factor(h_monitor).unwrap_or_else(|err| {
         log::info!("{}", err);
         // https://learn.microsoft.com/zh-cn/windows/win32/api/wingdi/nf-wingdi-getdevicecaps
         unsafe {
-            let physical_width = GetDeviceCaps(*box_hdc_monitor, DESKTOPHORZRES);
-            let logical_width = GetDeviceCaps(*box_hdc_monitor, HORZRES);
+            let scope_guard_hdc = guard(
+                CreateDCW(
+                    PCWSTR(monitor_info_ex_w.szDevice.as_ptr()),
+                    PCWSTR(monitor_info_ex_w.szDevice.as_ptr()),
+                    PCWSTR(ptr::null()),
+                    None,
+                ),
+                |val| {
+                    if !DeleteDC(val).as_bool() {
+                        log::error!("DeleteDC {:?} failed", val)
+                    }
+                },
+            );
+
+            let physical_width = GetDeviceCaps(Some(*scope_guard_hdc), DESKTOPHORZRES);
+            let logical_width = GetDeviceCaps(Some(*scope_guard_hdc), HORZRES);
 
             physical_width as f32 / logical_width as f32
         }
@@ -126,14 +141,17 @@ fn get_scale_factor(hmonitor: HMONITOR, box_hdc_monitor: BoxHDC) -> XCapResult<f
 }
 
 impl ImplMonitor {
-    pub fn new(hmonitor: HMONITOR) -> XCapResult<ImplMonitor> {
+    pub fn new(h_monitor: HMONITOR) -> XCapResult<ImplMonitor> {
         let mut monitor_info_ex_w = MONITORINFOEXW::default();
         monitor_info_ex_w.monitorInfo.cbSize = mem::size_of::<MONITORINFOEXW>() as u32;
         let monitor_info_ex_w_ptr =
             &mut monitor_info_ex_w as *mut MONITORINFOEXW as *mut MONITORINFO;
 
         // https://learn.microsoft.com/zh-cn/windows/win32/api/winuser/nf-winuser-getmonitorinfoa
-        unsafe { GetMonitorInfoW(hmonitor, monitor_info_ex_w_ptr).ok()? };
+        unsafe { GetMonitorInfoW(h_monitor, monitor_info_ex_w_ptr).ok()? };
+
+        let name = get_monitor_name(monitor_info_ex_w)
+            .unwrap_or(format!("Unknown Monitor {}", h_monitor.0 as u32));
 
         let dev_mode_w = get_dev_mode_w(&monitor_info_ex_w)?;
 
@@ -151,14 +169,13 @@ impl ImplMonitor {
             _ => 0.0,
         };
 
-        let box_hdc_monitor = BoxHDC::from(&monitor_info_ex_w.szDevice);
-        let scale_factor = get_scale_factor(hmonitor, box_hdc_monitor)?;
+        let scale_factor = get_scale_factor(h_monitor, monitor_info_ex_w)?;
 
         Ok(ImplMonitor {
-            hmonitor,
+            h_monitor,
             monitor_info_ex_w,
-            id: hmonitor.0 as u32,
-            name: wide_string_to_string(&monitor_info_ex_w.szDevice)?,
+            id: h_monitor.0 as u32,
+            name,
             x: dm_position.x,
             y: dm_position.y,
             width: dm_pels_width,
@@ -173,9 +190,9 @@ impl ImplMonitor {
     pub fn all() -> XCapResult<Vec<ImplMonitor>> {
         let hmonitors_mut_ptr: *mut Vec<HMONITOR> = Box::into_raw(Box::default());
 
-        let hmonitors = unsafe {
+        let h_monitors = unsafe {
             EnumDisplayMonitors(
-                HDC::default(),
+                None,
                 None,
                 Some(monitor_enum_proc),
                 LPARAM(hmonitors_mut_ptr as isize),
@@ -184,13 +201,13 @@ impl ImplMonitor {
             Box::from_raw(hmonitors_mut_ptr)
         };
 
-        let mut impl_monitors = Vec::with_capacity(hmonitors.len());
+        let mut impl_monitors = Vec::with_capacity(h_monitors.len());
 
-        for &hmonitor in hmonitors.iter() {
-            if let Ok(impl_monitor) = ImplMonitor::new(hmonitor) {
+        for &h_monitor in h_monitors.iter() {
+            if let Ok(impl_monitor) = ImplMonitor::new(h_monitor) {
                 impl_monitors.push(impl_monitor);
             } else {
-                log::error!("ImplMonitor::new({:?}) failed", hmonitor);
+                log::error!("ImplMonitor::new({:?}) failed", h_monitor);
             }
         }
 
@@ -199,13 +216,13 @@ impl ImplMonitor {
 
     pub fn from_point(x: i32, y: i32) -> XCapResult<ImplMonitor> {
         let point = POINT { x, y };
-        let hmonitor = unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTONULL) };
+        let h_monitor = unsafe { MonitorFromPoint(point, MONITOR_DEFAULTTONULL) };
 
-        if hmonitor.is_invalid() {
+        if h_monitor.is_invalid() {
             return Err(XCapError::new("Not found monitor"));
         }
 
-        ImplMonitor::new(hmonitor)
+        ImplMonitor::new(h_monitor)
     }
 }
 
@@ -215,6 +232,6 @@ impl ImplMonitor {
     }
 
     pub fn video_recorder(&self) -> XCapResult<ImplVideoRecorder> {
-        ImplVideoRecorder::new(self.hmonitor)
+        ImplVideoRecorder::new(self.h_monitor)
     }
 }

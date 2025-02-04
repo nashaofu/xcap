@@ -1,8 +1,13 @@
-use core_graphics::display::{
-    kCGNullWindowID, kCGWindowListOptionAll, CGDirectDisplayID, CGDisplay, CGDisplayMode, CGError,
-    CGPoint,
-};
 use image::RgbaImage;
+use objc2::MainThreadMarker;
+use objc2_app_kit::NSScreen;
+use objc2_core_foundation::{CGPoint, CGRect};
+use objc2_core_graphics::{
+    CGDirectDisplayID, CGDisplayBounds, CGDisplayCopyDisplayMode, CGDisplayIsActive,
+    CGDisplayIsMain, CGDisplayModeGetPixelWidth, CGDisplayModeGetRefreshRate, CGDisplayRotation,
+    CGError, CGGetActiveDisplayList, CGGetDisplaysWithPoint, CGWindowListOption,
+};
+use objc2_foundation::{NSNumber, NSString};
 
 use crate::error::{XCapError, XCapResult};
 
@@ -10,7 +15,7 @@ use super::{capture::capture, impl_video_recorder::ImplVideoRecorder};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImplMonitor {
-    pub cg_display: CGDisplay,
+    pub cg_direct_display_id: CGDirectDisplayID,
     pub id: u32,
     pub name: String,
     pub x: i32,
@@ -23,53 +28,90 @@ pub(crate) struct ImplMonitor {
     pub is_primary: bool,
 }
 
-#[link(name = "CoreGraphics", kind = "framework")]
-extern "C" {
-    fn CGGetDisplaysWithPoint(
-        point: CGPoint,
-        max_displays: u32,
-        displays: *mut CGDirectDisplayID,
-        display_count: *mut u32,
-    ) -> CGError;
+fn get_display_friendly_name(display_id: CGDirectDisplayID) -> XCapResult<String> {
+    let screens = NSScreen::screens(unsafe { MainThreadMarker::new_unchecked() });
+    for screen in screens {
+        let device_description = screen.deviceDescription();
+        let screen_number = device_description
+            .objectForKey(&NSString::from_str("NSScreenNumber"))
+            .ok_or(XCapError::new("Get NSScreenNumber failed"))?;
+
+        let screen_id = screen_number
+            .downcast::<NSNumber>()
+            .map_err(|err| XCapError::new(format!("{:?}", err)))?
+            .unsignedIntValue();
+
+        if screen_id == display_id {
+            unsafe { return Ok(screen.localizedName().to_string()) };
+        }
+    }
+
+    Err(XCapError::new(format!(
+        "Get display {} friendly name failed",
+        display_id
+    )))
 }
 
 impl ImplMonitor {
     pub(super) fn new(id: CGDirectDisplayID) -> XCapResult<ImplMonitor> {
-        let cg_display = CGDisplay::new(id);
-        let screen_num = cg_display.model_number();
-        let cg_rect = cg_display.bounds();
-        let cg_display_mode = get_cg_display_mode(cg_display)?;
-        let pixel_width = cg_display_mode.pixel_width();
-        let scale_factor = pixel_width as f32 / cg_rect.size.width as f32;
+        unsafe {
+            let CGRect { origin, size } = CGDisplayBounds(id);
 
-        Ok(ImplMonitor {
-            cg_display,
-            id: cg_display.id,
-            name: format!("Monitor #{screen_num}"),
-            x: cg_rect.origin.x as i32,
-            y: cg_rect.origin.y as i32,
-            width: cg_rect.size.width as u32,
-            height: cg_rect.size.height as u32,
-            rotation: cg_display.rotation() as f32,
-            scale_factor,
-            frequency: cg_display_mode.refresh_rate() as f32,
-            is_primary: cg_display.is_main(),
-        })
+            let rotation = CGDisplayRotation(id) as f32;
+
+            let display_mode = CGDisplayCopyDisplayMode(id);
+            let pixel_width = CGDisplayModeGetPixelWidth(display_mode.as_deref());
+            let scale_factor = pixel_width as f32 / size.width as f32;
+            let frequency = CGDisplayModeGetRefreshRate(display_mode.as_deref()) as f32;
+            let is_primary = CGDisplayIsMain(id);
+
+            Ok(ImplMonitor {
+                cg_direct_display_id: id,
+                id,
+                name: get_display_friendly_name(id).unwrap_or(format!("Unknown Monitor {}", id)),
+                x: origin.x as i32,
+                y: origin.y as i32,
+                width: size.width as u32,
+                height: size.height as u32,
+                rotation,
+                scale_factor,
+                frequency,
+                is_primary,
+            })
+        }
     }
     pub fn all() -> XCapResult<Vec<ImplMonitor>> {
-        // active vs online https://developer.apple.com/documentation/coregraphics/1454964-cggetonlinedisplaylist?language=objc
-        let display_ids = CGDisplay::active_displays()?;
+        let max_displays: u32 = 16;
+        let mut active_displays: Vec<CGDirectDisplayID> = vec![0; max_displays as usize];
+        let mut display_count: u32 = 0;
 
-        let mut impl_monitors: Vec<ImplMonitor> = Vec::with_capacity(display_ids.len());
+        let cg_error = unsafe {
+            CGGetActiveDisplayList(
+                max_displays,
+                active_displays.as_mut_ptr(),
+                &mut display_count,
+            )
+        };
 
-        for display_id in display_ids {
+        if cg_error != CGError::Success {
+            return Err(XCapError::new(format!(
+                "CGGetActiveDisplayList failed: {:?}",
+                cg_error
+            )));
+        }
+
+        active_displays.truncate(display_count as usize);
+
+        let mut impl_monitors = Vec::with_capacity(active_displays.len());
+
+        for display in active_displays {
             // 运行过程中，如果遇到显示器插拔，可能会导致调用报错
             // 对于报错的情况，就把报错的情况给排除掉
             // https://github.com/nashaofu/xcap/issues/118
-            if let Ok(impl_monitor) = ImplMonitor::new(display_id) {
+            if let Ok(impl_monitor) = ImplMonitor::new(display) {
                 impl_monitors.push(impl_monitor);
             } else {
-                log::error!("ImplMonitor::new({}) failed", display_id);
+                log::error!("ImplMonitor::new({}) failed", display);
             }
         }
 
@@ -81,6 +123,7 @@ impl ImplMonitor {
             x: x as f64,
             y: y as f64,
         };
+
         let max_displays: u32 = 16;
         let mut display_ids: Vec<CGDirectDisplayID> = vec![0; max_displays as usize];
         let mut display_count: u32 = 0;
@@ -94,43 +137,29 @@ impl ImplMonitor {
             )
         };
 
-        if cg_error != 0 {
-            return Err(XCapError::CoreGraphicsDisplayCGError(cg_error));
+        if cg_error != CGError::Success {
+            return Err(XCapError::new(format!(
+                "CGGetDisplaysWithPoint failed: {:?}",
+                cg_error
+            )));
         }
 
-        if display_count == 0 {
-            return Err(XCapError::new("Get displays from point failed"));
-        }
-
-        let display_id = display_ids
-            .first()
-            .ok_or(XCapError::new("Monitor not found"))?;
-
-        let impl_monitor = ImplMonitor::new(*display_id)?;
-
-        if !impl_monitor.cg_display.is_active() {
-            Err(XCapError::new("Monitor is not active"))
+        if let Some(&display_id) = display_ids.first() {
+            if unsafe { !CGDisplayIsActive(display_id) } {
+                return Err(XCapError::new("Monitor is not active"));
+            }
+            ImplMonitor::new(display_id)
         } else {
-            Ok(impl_monitor)
+            Err(XCapError::new("Monitor not found"))
         }
     }
 }
 
-fn get_cg_display_mode(cg_display: CGDisplay) -> XCapResult<CGDisplayMode> {
-    let cg_display_mode = cg_display
-        .display_mode()
-        .ok_or_else(|| XCapError::new("Get display mode failed"))?;
-
-    Ok(cg_display_mode)
-}
-
 impl ImplMonitor {
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
-        capture(
-            self.cg_display.bounds(),
-            kCGWindowListOptionAll,
-            kCGNullWindowID,
-        )
+        let cg_rect = unsafe { CGDisplayBounds(self.cg_direct_display_id) };
+
+        capture(cg_rect, CGWindowListOption::OptionAll, 0)
     }
 
     pub fn video_recorder(&self) -> XCapResult<ImplVideoRecorder> {
