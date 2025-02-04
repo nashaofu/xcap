@@ -6,11 +6,20 @@ use widestring::U16CString;
 use windows::{
     core::{s, w, HRESULT, PCWSTR},
     Win32::{
-        Devices::Display::{DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QueryDisplayConfig, DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME, DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME, QDC_ONLY_ACTIVE_PATHS}, Foundation::{CloseHandle, FreeLibrary, GetLastError, HANDLE, HMODULE}, Graphics::Gdi::MONITORINFOEXW, System::{
+        Devices::Display::{
+            DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QueryDisplayConfig,
+            DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+            DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO,
+            DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME,
+            QDC_ONLY_ACTIVE_PATHS,
+        },
+        Foundation::{CloseHandle, FreeLibrary, GetLastError, HANDLE, HMODULE},
+        Graphics::Gdi::MONITORINFOEXW,
+        System::{
             LibraryLoader::{GetProcAddress, LoadLibraryW},
             Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ},
             Threading::{OpenProcess, PROCESS_ACCESS_RIGHTS},
-        }
+        },
     },
 };
 
