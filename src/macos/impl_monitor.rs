@@ -144,10 +144,15 @@ impl ImplMonitor {
             )));
         }
 
+        if display_count == 0 {
+            return Err(XCapError::new("Monitor not found"));
+        }
+
         if let Some(&display_id) = display_ids.first() {
             if unsafe { !CGDisplayIsActive(display_id) } {
                 return Err(XCapError::new("Monitor is not active"));
             }
+            println!("display_id: {}", display_id);
             ImplMonitor::new(display_id)
         } else {
             Err(XCapError::new("Monitor not found"))
