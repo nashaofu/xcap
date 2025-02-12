@@ -28,7 +28,6 @@ pub(crate) struct ImplWindow {
     pub height: u32,
     pub is_minimized: bool,
     pub is_maximized: bool,
-    pub is_focused: bool,
 }
 
 fn get_atom(conn: &Connection, name: &str) -> XCapResult<Atom> {
@@ -80,14 +79,15 @@ pub fn get_window_pid(conn: &Connection, window: &Window) -> XCapResult<u32> {
         .copied()
 }
 
-fn get_active_window_id(conn: &Connection) -> Option<u32> {
-    let active_window_atom = get_atom(conn, "_NET_ACTIVE_WINDOW").ok()?;
+fn get_active_window_id() -> Option<u32> {
+    let (conn, _) = Connection::connect(None).ok()?;
+    let active_window_atom = get_atom(&conn, "_NET_ACTIVE_WINDOW").ok()?;
     let setup = conn.get_setup();
 
     for screen in setup.roots() {
         let root_window = screen.root();
         let active_window_id =
-            get_window_property(conn, root_window, active_window_atom, ATOM_NONE, 0, 4).ok()?;
+            get_window_property(&conn, root_window, active_window_atom, ATOM_NONE, 0, 4).ok()?;
         if let Some(&active_window_id) = active_window_id.value::<u32>().first() {
             return Some(active_window_id);
         }
@@ -102,7 +102,6 @@ impl ImplWindow {
         window: &Window,
         pid: u32,
         z: i32,
-        is_focused: bool,
         impl_monitors: &Vec<ImplMonitor>,
     ) -> XCapResult<ImplWindow> {
         let title = {
@@ -215,8 +214,13 @@ impl ImplWindow {
             height,
             is_minimized,
             is_maximized,
-            is_focused,
         })
+    }
+
+    pub fn is_focused(&self) -> bool {
+        let active_window_id = get_active_window_id();
+
+        active_window_id.eq(&Some(self.pid))
     }
 
     pub fn all() -> XCapResult<Vec<ImplWindow>> {
@@ -227,7 +231,6 @@ impl ImplWindow {
         // https://specifications.freedesktop.org/wm-spec/1.5/ar01s03.html#id-1.4.4
         // list all windows by stacking order
         let client_list_atom = get_atom(&conn, "_NET_CLIENT_LIST_STACKING")?;
-        let active_window_id = get_active_window_id(&conn);
 
         let mut impl_windows = Vec::new();
         let impl_monitors = ImplMonitor::all()?;
@@ -267,10 +270,7 @@ impl ImplWindow {
                         }
                     };
 
-                    let is_focused = active_window_id.eq(&Some(client.resource_id()));
-
-                    if let Ok(impl_window) =
-                        ImplWindow::new(&conn, client, pid, z, is_focused, &impl_monitors)
+                    if let Ok(impl_window) = ImplWindow::new(&conn, client, pid, z, &impl_monitors)
                     {
                         impl_windows.push(impl_window);
                     } else {
