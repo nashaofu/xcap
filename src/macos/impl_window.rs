@@ -11,6 +11,7 @@ use objc2_core_graphics::{
     CGDisplayBounds, CGMainDisplayID, CGRectContainsPoint, CGRectIntersectsRect,
     CGRectMakeWithDictionaryRepresentation, CGWindowListCopyWindowInfo, CGWindowListOption,
 };
+use objc2_foundation::{NSNumber, NSString};
 
 use crate::{error::XCapResult, XCapError};
 
@@ -177,9 +178,12 @@ impl ImplWindow {
         unsafe {
             let impl_monitors = ImplMonitor::all()?;
             let workspace = NSWorkspace::sharedWorkspace();
+            let pid_key = NSString::from_str("NSApplicationProcessIdentifier");
             let focused_app_pid = workspace
-                .frontmostApplication()
-                .map(|focused_app| focused_app.processIdentifier());
+                .activeApplication()
+                .and_then(|dictionary| dictionary.valueForKey(&pid_key))
+                .and_then(|pid| pid.downcast::<NSNumber>().ok())
+                .map(|pid| pid.intValue());
 
             let mut impl_windows = Vec::new();
 
