@@ -51,6 +51,7 @@ pub(crate) struct ImplWindow {
     pub height: u32,
     pub is_minimized: bool,
     pub is_maximized: bool,
+}
 
 fn is_window_cloaked(hwnd: HWND) -> bool {
     unsafe {
