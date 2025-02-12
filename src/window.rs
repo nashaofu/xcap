@@ -76,7 +76,7 @@ impl Window {
     }
     /// The window is focused.
     pub fn is_focused(&self) -> bool {
-        self.impl_window.is_focused
+        self.impl_window.is_focused()
     }
 }
 
