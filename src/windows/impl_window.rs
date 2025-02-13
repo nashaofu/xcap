@@ -101,12 +101,12 @@ fn is_valid_window(hwnd: HWND) -> bool {
         }
 
         let gwl_ex_style = WINDOW_EX_STYLE(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32);
-        let title = get_window_title(hwnd).unwrap_or_default();
 
         // 过滤掉具有 WS_EX_TOOLWINDOW 样式的窗口
         if gwl_ex_style.contains(WS_EX_TOOLWINDOW) {
             // windows 任务栏可以捕获
-            if class_name.cmp(&String::from("Shell_TrayWnd")) != Ordering::Equal && title.is_empty()
+            if class_name.cmp(&String::from("Shell_TrayWnd")) != Ordering::Equal
+                && get_window_title(hwnd).map_or(true, |title| title.is_empty())
             {
                 return false;
             }
