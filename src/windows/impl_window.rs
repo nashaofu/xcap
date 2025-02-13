@@ -6,7 +6,7 @@ use widestring::U16CString;
 use windows::{
     core::{HSTRING, PCWSTR},
     Win32::{
-        Foundation::{BOOL, HANDLE, HWND, LPARAM, MAX_PATH, RECT, TRUE},
+        Foundation::{GetLastError, BOOL, HANDLE, HWND, LPARAM, MAX_PATH, RECT, TRUE, WPARAM},
         Graphics::{
             Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS},
             Gdi::{IsRectEmpty, MonitorFromWindow, MONITOR_DEFAULTTONEAREST},
@@ -18,8 +18,9 @@ use windows::{
         },
         UI::WindowsAndMessaging::{
             EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowInfo, GetWindowLongPtrW,
-            GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
-            IsWindowVisible, IsZoomed, GWL_EXSTYLE, WINDOWINFO, WINDOW_EX_STYLE, WS_EX_TOOLWINDOW,
+            GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, IsZoomed,
+            SendMessageTimeoutW, GWL_EXSTYLE, SMTO_NORMAL, WINDOWINFO, WINDOW_EX_STYLE, WM_GETTEXT,
+            WM_GETTEXTLENGTH, WS_EX_TOOLWINDOW,
         },
     },
 };
@@ -162,10 +163,36 @@ unsafe extern "system" fn enum_windows_proc(hwnd: HWND, state: LPARAM) -> BOOL {
 }
 
 fn get_window_title(hwnd: HWND) -> XCapResult<String> {
+    const TIMEOUT_MS: u32 = 500;
+    // suggested by https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowtexta#remarks
     unsafe {
-        let text_length = GetWindowTextLengthW(hwnd);
-        let mut wide_buffer = vec![0u16; (text_length + 1) as usize];
-        GetWindowTextW(hwnd, &mut wide_buffer);
+        let mut text_length = 0usize;
+        if SendMessageTimeoutW(
+            hwnd,
+            WM_GETTEXTLENGTH,
+            WPARAM::default(),
+            LPARAM::default(),
+            SMTO_NORMAL,
+            TIMEOUT_MS,
+            Some((&mut text_length) as _),
+        )
+        .0 == 0
+        {
+            return Err(crate::XCapError::Error(format!(
+                "GetTitle error: {:?}",
+                GetLastError()
+            )));
+        }
+        let mut wide_buffer = vec![0u16; text_length + 1];
+        SendMessageTimeoutW(
+            hwnd,
+            WM_GETTEXT,
+            WPARAM(wide_buffer.capacity()),
+            LPARAM(wide_buffer.as_mut_ptr() as _),
+            SMTO_NORMAL,
+            TIMEOUT_MS,
+            None,
+        );
         let window_title = U16CString::from_vec_truncate(wide_buffer).to_string()?;
 
         Ok(window_title)
