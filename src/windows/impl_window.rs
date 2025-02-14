@@ -51,7 +51,6 @@ pub(crate) struct ImplWindow {
     pub height: u32,
     pub is_minimized: bool,
     pub is_maximized: bool,
-    pub is_focused: bool,
 }
 
 fn is_window_cloaked(hwnd: HWND) -> bool {
@@ -330,7 +329,6 @@ impl ImplWindow {
             let rc_client = window_info.rcClient;
             let is_minimized = IsIconic(hwnd).as_bool();
             let is_maximized = IsZoomed(hwnd).as_bool();
-            let is_focused = GetForegroundWindow() == hwnd;
 
             Ok(ImplWindow {
                 hwnd,
@@ -347,9 +345,12 @@ impl ImplWindow {
                 height: (rc_client.bottom - rc_client.top) as u32,
                 is_minimized,
                 is_maximized,
-                is_focused,
             })
         }
+    }
+
+    pub fn is_focused(&self) -> bool {
+        unsafe { GetForegroundWindow() == self.hwnd }
     }
 
     pub fn all() -> XCapResult<Vec<ImplWindow>> {

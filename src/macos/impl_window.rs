@@ -11,6 +11,7 @@ use objc2_core_graphics::{
     CGDisplayBounds, CGMainDisplayID, CGRectContainsPoint, CGRectIntersectsRect,
     CGRectMakeWithDictionaryRepresentation, CGWindowListCopyWindowInfo, CGWindowListOption,
 };
+use objc2_foundation::{NSNumber, NSString};
 
 use crate::{error::XCapResult, XCapError};
 
@@ -30,7 +31,6 @@ pub(crate) struct ImplWindow {
     pub height: u32,
     pub is_minimized: bool,
     pub is_maximized: bool,
-    pub is_focused: bool,
 }
 
 unsafe impl Send for ImplWindow {}
@@ -117,7 +117,6 @@ impl ImplWindow {
         window_name: String,
         window_owner_name: String,
         z: i32,
-        focused_app_pid: Option<i32>,
     ) -> XCapResult<ImplWindow> {
         let id = get_cf_number_i32_value(window_cf_dictionary, "kCGWindowNumber")? as u32;
         let pid = get_cf_number_i32_value(window_cf_dictionary, "kCGWindowOwnerPID")?;
@@ -154,8 +153,6 @@ impl ImplWindow {
         let is_minimized =
             !get_cf_bool_value(window_cf_dictionary, "kCGWindowIsOnscreen")? && !is_maximized;
 
-        let is_focused = focused_app_pid.eq(&Some(pid));
-
         Ok(ImplWindow {
             id,
             title: window_name,
@@ -169,17 +166,26 @@ impl ImplWindow {
             height: cg_rect.size.height as u32,
             is_minimized,
             is_maximized,
-            is_focused,
         })
+    }
+
+    pub fn is_focused(&self) -> bool {
+        let focused_app_pid = unsafe {
+            let workspace = NSWorkspace::sharedWorkspace();
+            let pid_key = NSString::from_str("NSApplicationProcessIdentifier");
+            workspace
+                .activeApplication()
+                .and_then(|dictionary| dictionary.valueForKey(&pid_key))
+                .and_then(|pid| pid.downcast::<NSNumber>().ok())
+                .map(|pid| pid.intValue())
+        };
+
+        focused_app_pid.eq(&Some(self.pid as i32))
     }
 
     pub fn all() -> XCapResult<Vec<ImplWindow>> {
         unsafe {
             let impl_monitors = ImplMonitor::all()?;
-            let workspace = NSWorkspace::sharedWorkspace();
-            let focused_app_pid = workspace
-                .frontmostApplication()
-                .map(|focused_app| focused_app.processIdentifier());
 
             let mut impl_windows = Vec::new();
 
@@ -236,7 +242,6 @@ impl ImplWindow {
                     window_name.clone(),
                     window_owner_name.clone(),
                     num_windows as i32 - i as i32 - 1,
-                    focused_app_pid,
                 ) {
                     impl_windows.push(impl_window);
                 } else {
