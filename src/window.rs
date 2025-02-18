@@ -27,55 +27,55 @@ impl Window {
 
 impl Window {
     /// The window id
-    pub fn id(&self) -> u32 {
-        self.impl_window.id
-    }
-    /// The window app name
-    pub fn app_name(&self) -> &str {
-        &self.impl_window.app_name
-    }
-    /// The window title
-    pub fn title(&self) -> &str {
-        &self.impl_window.title
+    pub fn id(&self) -> XCapResult<u32> {
+        self.impl_window.id()
     }
     /// The window process id
-    pub fn pid(&self) -> u32 {
-        self.impl_window.pid
+    pub fn pid(&self) -> XCapResult<u32> {
+        self.impl_window.pid()
+    }
+    /// The window app name
+    pub fn app_name(&self) -> XCapResult<String> {
+        self.impl_window.app_name()
+    }
+    /// The window title
+    pub fn title(&self) -> XCapResult<String> {
+        self.impl_window.title()
     }
     /// The window current monitor
-    pub fn current_monitor(&self) -> Monitor {
-        Monitor::new(self.impl_window.current_monitor.to_owned())
+    pub fn current_monitor(&self) -> XCapResult<Monitor> {
+        Ok(Monitor::new(self.impl_window.current_monitor()?))
     }
     /// The window x coordinate.
-    pub fn x(&self) -> i32 {
-        self.impl_window.x
+    pub fn x(&self) -> XCapResult<i32> {
+        self.impl_window.x()
     }
     /// The window y coordinate.
-    pub fn y(&self) -> i32 {
-        self.impl_window.y
+    pub fn y(&self) -> XCapResult<i32> {
+        self.impl_window.y()
     }
     /// The window z coordinate.
-    pub fn z(&self) -> i32 {
-        self.impl_window.z
+    pub fn z(&self) -> XCapResult<i32> {
+        self.impl_window.z()
     }
     /// The window pixel width.
-    pub fn width(&self) -> u32 {
-        self.impl_window.width
+    pub fn width(&self) -> XCapResult<u32> {
+        self.impl_window.width()
     }
     /// The window pixel height.
-    pub fn height(&self) -> u32 {
-        self.impl_window.height
+    pub fn height(&self) -> XCapResult<u32> {
+        self.impl_window.height()
     }
     /// The window is minimized.
-    pub fn is_minimized(&self) -> bool {
-        self.impl_window.is_minimized
+    pub fn is_minimized(&self) -> XCapResult<bool> {
+        self.impl_window.is_minimized()
     }
     /// The window is maximized.
-    pub fn is_maximized(&self) -> bool {
-        self.impl_window.is_maximized
+    pub fn is_maximized(&self) -> XCapResult<bool> {
+        self.impl_window.is_maximized()
     }
     /// The window is focused.
-    pub fn is_focused(&self) -> bool {
+    pub fn is_focused(&self) -> XCapResult<bool> {
         self.impl_window.is_focused()
     }
 }

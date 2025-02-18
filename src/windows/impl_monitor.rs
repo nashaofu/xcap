@@ -30,20 +30,7 @@ use super::{
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImplMonitor {
-    #[allow(unused)]
     pub h_monitor: HMONITOR,
-    #[allow(unused)]
-    pub monitor_info_ex_w: MONITORINFOEXW,
-    pub id: u32,
-    pub name: String,
-    pub x: i32,
-    pub y: i32,
-    pub width: u32,
-    pub height: u32,
-    pub rotation: f32,
-    pub scale_factor: f32,
-    pub frequency: f32,
-    pub is_primary: bool,
 }
 
 extern "system" fn monitor_enum_proc(
@@ -60,7 +47,19 @@ extern "system" fn monitor_enum_proc(
     }
 }
 
-fn get_dev_mode_w(monitor_info_exw: &MONITORINFOEXW) -> XCapResult<DEVMODEW> {
+fn get_monitor_info_ex_w(h_monitor: HMONITOR) -> XCapResult<MONITORINFOEXW> {
+    let mut monitor_info_ex_w = MONITORINFOEXW::default();
+    monitor_info_ex_w.monitorInfo.cbSize = mem::size_of::<MONITORINFOEXW>() as u32;
+    let monitor_info_ex_w_ptr = &mut monitor_info_ex_w as *mut MONITORINFOEXW as *mut MONITORINFO;
+
+    // https://learn.microsoft.com/zh-cn/windows/win32/api/winuser/nf-winuser-getmonitorinfoa
+    unsafe { GetMonitorInfoW(h_monitor, monitor_info_ex_w_ptr).ok()? };
+
+    Ok(monitor_info_ex_w)
+}
+
+fn get_dev_mode_w(h_monitor: HMONITOR) -> XCapResult<DEVMODEW> {
+    let monitor_info_exw = get_monitor_info_ex_w(h_monitor)?;
     let sz_device = monitor_info_exw.szDevice.as_ptr();
     let mut dev_mode_w = DEVMODEW {
         dmSize: mem::size_of::<DEVMODEW>() as u16,
@@ -111,80 +110,42 @@ fn get_hi_dpi_scale_factor(h_monitor: HMONITOR) -> XCapResult<f32> {
     }
 }
 
-fn get_scale_factor(h_monitor: HMONITOR, monitor_info_ex_w: MONITORINFOEXW) -> XCapResult<f32> {
-    let scale_factor = get_hi_dpi_scale_factor(h_monitor).unwrap_or_else(|err| {
-        log::info!("{}", err);
-        // https://learn.microsoft.com/zh-cn/windows/win32/api/wingdi/nf-wingdi-getdevicecaps
-        unsafe {
-            let scope_guard_hdc = guard(
-                CreateDCW(
-                    PCWSTR(monitor_info_ex_w.szDevice.as_ptr()),
-                    PCWSTR(monitor_info_ex_w.szDevice.as_ptr()),
-                    PCWSTR(ptr::null()),
-                    None,
-                ),
-                |val| {
-                    if !DeleteDC(val).as_bool() {
-                        log::error!("DeleteDC {:?} failed", val)
-                    }
-                },
-            );
+fn get_scale_factor(h_monitor: HMONITOR) -> XCapResult<f32> {
+    let scale_factor = match get_hi_dpi_scale_factor(h_monitor) {
+        Ok(val) => val,
+        Err(err) => {
+            log::info!("{}", err);
+            let monitor_info_ex_w = get_monitor_info_ex_w(h_monitor)?;
+            // https://learn.microsoft.com/zh-cn/windows/win32/api/wingdi/nf-wingdi-getdevicecaps
+            unsafe {
+                let scope_guard_hdc = guard(
+                    CreateDCW(
+                        PCWSTR(monitor_info_ex_w.szDevice.as_ptr()),
+                        PCWSTR(monitor_info_ex_w.szDevice.as_ptr()),
+                        PCWSTR(ptr::null()),
+                        None,
+                    ),
+                    |val| {
+                        if !DeleteDC(val).as_bool() {
+                            log::error!("DeleteDC {:?} failed", val)
+                        }
+                    },
+                );
 
-            let physical_width = GetDeviceCaps(Some(*scope_guard_hdc), DESKTOPHORZRES);
-            let logical_width = GetDeviceCaps(Some(*scope_guard_hdc), HORZRES);
+                let physical_width = GetDeviceCaps(Some(*scope_guard_hdc), DESKTOPHORZRES);
+                let logical_width = GetDeviceCaps(Some(*scope_guard_hdc), HORZRES);
 
-            physical_width as f32 / logical_width as f32
+                physical_width as f32 / logical_width as f32
+            }
         }
-    });
+    };
 
     Ok(scale_factor)
 }
 
 impl ImplMonitor {
-    pub fn new(h_monitor: HMONITOR) -> XCapResult<ImplMonitor> {
-        let mut monitor_info_ex_w = MONITORINFOEXW::default();
-        monitor_info_ex_w.monitorInfo.cbSize = mem::size_of::<MONITORINFOEXW>() as u32;
-        let monitor_info_ex_w_ptr =
-            &mut monitor_info_ex_w as *mut MONITORINFOEXW as *mut MONITORINFO;
-
-        // https://learn.microsoft.com/zh-cn/windows/win32/api/winuser/nf-winuser-getmonitorinfoa
-        unsafe { GetMonitorInfoW(h_monitor, monitor_info_ex_w_ptr).ok()? };
-
-        let name = get_monitor_name(monitor_info_ex_w)
-            .unwrap_or(format!("Unknown Monitor {}", h_monitor.0 as u32));
-
-        let dev_mode_w = get_dev_mode_w(&monitor_info_ex_w)?;
-
-        let dm_position = unsafe { dev_mode_w.Anonymous1.Anonymous2.dmPosition };
-        let dm_pels_width = dev_mode_w.dmPelsWidth;
-        let dm_pels_height = dev_mode_w.dmPelsHeight;
-
-        let dm_display_orientation =
-            unsafe { dev_mode_w.Anonymous1.Anonymous2.dmDisplayOrientation };
-        let rotation = match dm_display_orientation {
-            DMDO_90 => 90.0,
-            DMDO_180 => 180.0,
-            DMDO_270 => 270.0,
-            DMDO_DEFAULT => 0.0,
-            _ => 0.0,
-        };
-
-        let scale_factor = get_scale_factor(h_monitor, monitor_info_ex_w)?;
-
-        Ok(ImplMonitor {
-            h_monitor,
-            monitor_info_ex_w,
-            id: h_monitor.0 as u32,
-            name,
-            x: dm_position.x,
-            y: dm_position.y,
-            width: dm_pels_width,
-            height: dm_pels_height,
-            rotation,
-            scale_factor,
-            frequency: dev_mode_w.dmDisplayFrequency as f32,
-            is_primary: monitor_info_ex_w.monitorInfo.dwFlags == MONITORINFOF_PRIMARY,
-        })
+    pub fn new(h_monitor: HMONITOR) -> ImplMonitor {
+        ImplMonitor { h_monitor }
     }
 
     pub fn all() -> XCapResult<Vec<ImplMonitor>> {
@@ -204,11 +165,7 @@ impl ImplMonitor {
         let mut impl_monitors = Vec::with_capacity(h_monitors.len());
 
         for &h_monitor in h_monitors.iter() {
-            if let Ok(impl_monitor) = ImplMonitor::new(h_monitor) {
-                impl_monitors.push(impl_monitor);
-            } else {
-                log::error!("ImplMonitor::new({:?}) failed", h_monitor);
-            }
+            impl_monitors.push(ImplMonitor::new(h_monitor));
         }
 
         Ok(impl_monitors)
@@ -222,13 +179,81 @@ impl ImplMonitor {
             return Err(XCapError::new("Not found monitor"));
         }
 
-        ImplMonitor::new(h_monitor)
+        Ok(ImplMonitor::new(h_monitor))
     }
 }
 
 impl ImplMonitor {
+    pub fn id(&self) -> XCapResult<u32> {
+        Ok(self.h_monitor.0 as u32)
+    }
+
+    pub fn name(&self) -> XCapResult<String> {
+        let monitor_info_ex_w = get_monitor_info_ex_w(self.h_monitor)?;
+        let name = get_monitor_name(monitor_info_ex_w)
+            .unwrap_or(format!("Unknown Monitor {}", self.h_monitor.0 as u32));
+        Ok(name)
+    }
+
+    pub fn x(&self) -> XCapResult<i32> {
+        let dev_mode_w = get_dev_mode_w(self.h_monitor)?;
+        let dm_position = unsafe { dev_mode_w.Anonymous1.Anonymous2.dmPosition };
+
+        Ok(dm_position.x)
+    }
+
+    pub fn y(&self) -> XCapResult<i32> {
+        let dev_mode_w = get_dev_mode_w(self.h_monitor)?;
+        let dm_position = unsafe { dev_mode_w.Anonymous1.Anonymous2.dmPosition };
+
+        Ok(dm_position.y)
+    }
+
+    pub fn width(&self) -> XCapResult<u32> {
+        let dev_mode_w = get_dev_mode_w(self.h_monitor)?;
+        Ok(dev_mode_w.dmPelsWidth)
+    }
+
+    pub fn height(&self) -> XCapResult<u32> {
+        let dev_mode_w = get_dev_mode_w(self.h_monitor)?;
+        Ok(dev_mode_w.dmPelsHeight)
+    }
+
+    pub fn rotation(&self) -> XCapResult<f32> {
+        let dev_mode_w = get_dev_mode_w(self.h_monitor)?;
+        let dm_display_orientation =
+            unsafe { dev_mode_w.Anonymous1.Anonymous2.dmDisplayOrientation };
+        let rotation = match dm_display_orientation {
+            DMDO_90 => 90.0,
+            DMDO_180 => 180.0,
+            DMDO_270 => 270.0,
+            DMDO_DEFAULT => 0.0,
+            _ => 0.0,
+        };
+        Ok(rotation)
+    }
+
+    pub fn scale_factor(&self) -> XCapResult<f32> {
+        get_scale_factor(self.h_monitor)
+    }
+
+    pub fn frequency(&self) -> XCapResult<f32> {
+        let dev_mode_w = get_dev_mode_w(self.h_monitor)?;
+        Ok(dev_mode_w.dmDisplayFrequency as f32)
+    }
+
+    pub fn is_primary(&self) -> XCapResult<bool> {
+        let monitor_info_ex_w = get_monitor_info_ex_w(self.h_monitor)?;
+        Ok(monitor_info_ex_w.monitorInfo.dwFlags == MONITORINFOF_PRIMARY)
+    }
+
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
-        capture_monitor(self.x, self.y, self.width as i32, self.height as i32)
+        let x = self.x()?;
+        let y = self.y()?;
+        let width = self.width()?;
+        let height = self.height()?;
+
+        capture_monitor(x, y, width as i32, height as i32)
     }
 
     pub fn video_recorder(&self) -> XCapResult<ImplVideoRecorder> {
