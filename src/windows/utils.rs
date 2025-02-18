@@ -13,13 +13,14 @@ use windows::{
             DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME,
             QDC_ONLY_ACTIVE_PATHS,
         },
-        Foundation::{CloseHandle, FreeLibrary, GetLastError, HANDLE, HMODULE},
+        Foundation::{CloseHandle, FreeLibrary, GetLastError, HANDLE, HMODULE, HWND},
         Graphics::Gdi::MONITORINFOEXW,
         System::{
             LibraryLoader::{GetProcAddress, LoadLibraryW},
             Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ},
             Threading::{OpenProcess, PROCESS_ACCESS_RIGHTS},
         },
+        UI::WindowsAndMessaging::{GetWindowInfo, WINDOWINFO},
     },
 };
 
@@ -239,4 +240,17 @@ pub(super) fn get_monitor_name(monitor_info_ex_w: MONITORINFOEXW) -> XCapResult<
 
         Err(XCapError::new("Get monitor name failed"))
     }
+}
+
+pub fn get_window_info(hwnd: HWND) -> XCapResult<WINDOWINFO> {
+    let mut window_info = WINDOWINFO {
+        cbSize: mem::size_of::<WINDOWINFO>() as u32,
+        ..WINDOWINFO::default()
+    };
+
+    unsafe {
+        GetWindowInfo(hwnd, &mut window_info)?;
+    };
+
+    Ok(window_info)
 }
