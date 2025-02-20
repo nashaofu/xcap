@@ -369,13 +369,15 @@ impl ImplWindow {
             Box::from_raw(hwnds_mut_ptr)
         };
 
-        for (i, &hwnd) in hwnds.iter().enumerate() {
+        let mut z = impl_windows.len() as i32 - 1;
+        for &hwnd in hwnds {
             if self.hwnd == hwnd {
-                return Ok((hwnds.len() - i) as i32);
+                break;
             }
+            z -= 1;
         }
 
-        Ok(0)
+        Ok(z)
     }
 
     pub fn width(&self) -> XCapResult<u32> {

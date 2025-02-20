@@ -15,7 +15,7 @@ use std::{
 
 use crate::error::{XCapError, XCapResult};
 
-use super::{impl_monitor::ImplMonitor, utils::png_to_rgba_image};
+use super::utils::png_to_rgba_image;
 
 #[derive(Debug)]
 struct OrgFreedesktopPortalRequestResponse {
@@ -159,7 +159,10 @@ fn org_freedesktop_portal_screenshot(
         return Err(XCapError::new("Screenshot failed or canceled"));
     }
 
-    let filename = percent_decode(path.as_bytes()).decode_utf8()?.to_string();
+    let filename = percent_decode(path.as_bytes())
+        .decode_utf8()
+        .map_err(XCapError::new)?
+        .to_string();
     let rgba_image = png_to_rgba_image(&filename, x, y, width, height)?;
 
     fs::remove_file(&filename)?;
@@ -169,12 +172,7 @@ fn org_freedesktop_portal_screenshot(
 
 static DBUS_LOCK: Mutex<()> = Mutex::new(());
 
-pub fn wayland_capture(impl_monitor: &ImplMonitor) -> XCapResult<RgbaImage> {
-    let x = ((impl_monitor.x as f32) * impl_monitor.scale_factor) as i32;
-    let y = ((impl_monitor.y as f32) * impl_monitor.scale_factor) as i32;
-    let width = ((impl_monitor.width as f32) * impl_monitor.scale_factor) as i32;
-    let height = ((impl_monitor.height as f32) * impl_monitor.scale_factor) as i32;
-
+pub fn wayland_capture(x: i32, y: i32, width: i32, height: i32) -> XCapResult<RgbaImage> {
     let lock = DBUS_LOCK.lock();
 
     let conn = Connection::new_session()?;

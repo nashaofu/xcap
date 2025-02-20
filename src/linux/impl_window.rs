@@ -6,31 +6,23 @@ use xcb::{
         TranslateCoordinates, Window, ATOM_ATOM, ATOM_CARDINAL, ATOM_NONE, ATOM_STRING,
         ATOM_WM_CLASS, ATOM_WM_NAME,
     },
-    Connection, Xid,
+    Xid,
 };
 
-use crate::error::{XCapError, XCapResult};
+use crate::{
+    error::{XCapError, XCapResult},
+    platform::utils::get_xcb_connection_and_index,
+};
 
-use super::{capture::capture_window, impl_monitor::ImplMonitor, utils::Rect};
+use super::{capture::capture_window, impl_monitor::ImplMonitor};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImplWindow {
     pub window: Window,
-    pub id: u32,
-    pub title: String,
-    pub app_name: String,
-    pub pid: u32,
-    pub current_monitor: ImplMonitor,
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-    pub width: u32,
-    pub height: u32,
-    pub is_minimized: bool,
-    pub is_maximized: bool,
 }
 
-fn get_atom(conn: &Connection, name: &str) -> XCapResult<Atom> {
+fn get_atom(name: &str) -> XCapResult<Atom> {
+    let (conn, _) = get_xcb_connection_and_index()?;
     let atom_cookie = conn.send_request(&InternAtom {
         only_if_exists: true,
         name: name.as_bytes(),
@@ -46,13 +38,14 @@ fn get_atom(conn: &Connection, name: &str) -> XCapResult<Atom> {
 }
 
 fn get_window_property(
-    conn: &Connection,
     window: Window,
     property: Atom,
     r#type: Atom,
     long_offset: u32,
     long_length: u32,
 ) -> XCapResult<GetPropertyReply> {
+    let (conn, _) = get_xcb_connection_and_index()?;
+
     let window_property_cookie = conn.send_request(&GetProperty {
         delete: false,
         window,
@@ -67,10 +60,10 @@ fn get_window_property(
     Ok(window_property_reply)
 }
 
-pub fn get_window_pid(conn: &Connection, window: &Window) -> XCapResult<u32> {
-    let wm_pid_atom = get_atom(conn, "_NET_WM_PID")?;
+pub fn get_window_pid(window: &Window) -> XCapResult<u32> {
+    let wm_pid_atom = get_atom("_NET_WM_PID")?;
 
-    let reply = get_window_property(conn, *window, wm_pid_atom, ATOM_CARDINAL, 0, 4)?;
+    let reply = get_window_property(*window, wm_pid_atom, ATOM_CARDINAL, 0, 4)?;
     let value = reply.value::<u32>();
 
     value
@@ -79,163 +72,89 @@ pub fn get_window_pid(conn: &Connection, window: &Window) -> XCapResult<u32> {
         .copied()
 }
 
-fn get_active_window_id() -> Option<u32> {
-    let (conn, _) = Connection::connect(None).ok()?;
-    let active_window_atom = get_atom(&conn, "_NET_ACTIVE_WINDOW").ok()?;
+fn get_active_window_id() -> XCapResult<u32> {
+    let (conn, _) = get_xcb_connection_and_index()?;
+    let active_window_atom = get_atom("_NET_ACTIVE_WINDOW")?;
     let setup = conn.get_setup();
 
     for screen in setup.roots() {
         let root_window = screen.root();
         let active_window_id =
-            get_window_property(&conn, root_window, active_window_atom, ATOM_NONE, 0, 4).ok()?;
+            get_window_property(root_window, active_window_atom, ATOM_NONE, 0, 4)?;
         if let Some(&active_window_id) = active_window_id.value::<u32>().first() {
-            return Some(active_window_id);
+            return Ok(active_window_id);
         }
     }
 
-    None
+    Err(XCapError::new("Get active window id failed"))
+}
+
+fn get_position_and_size(window: &Window) -> XCapResult<(i32, i32, u32, u32)> {
+    let (conn, _) = get_xcb_connection_and_index()?;
+    let get_geometry_cookie = conn.send_request(&GetGeometry {
+        drawable: Drawable::Window(*window),
+    });
+    let get_geometry_reply = conn.wait_for_reply(get_geometry_cookie)?;
+
+    let translate_coordinates_cookie = conn.send_request(&TranslateCoordinates {
+        dst_window: get_geometry_reply.root(),
+        src_window: *window,
+        src_x: get_geometry_reply.x(),
+        src_y: get_geometry_reply.y(),
+    });
+    let translate_coordinates_reply = conn.wait_for_reply(translate_coordinates_cookie)?;
+
+    Ok((
+        (translate_coordinates_reply.dst_x() - get_geometry_reply.x()) as i32,
+        (translate_coordinates_reply.dst_y() - get_geometry_reply.y()) as i32,
+        get_geometry_reply.width() as u32,
+        get_geometry_reply.height() as u32,
+    ))
+}
+
+fn get_window_state(window: &Window) -> XCapResult<(bool, bool)> {
+    // https://specifications.freedesktop.org/wm-spec/1.3/ar01s05.html
+    let wm_state_atom = get_atom("_NET_WM_STATE")?;
+    let wm_state_hidden_atom = get_atom("_NET_WM_STATE_HIDDEN")?;
+    let wm_state_maximized_vert_atom = get_atom("_NET_WM_STATE_MAXIMIZED_VERT")?;
+    let wm_state_maximized_horz_atom = get_atom("_NET_WM_STATE_MAXIMIZED_HORZ")?;
+
+    let wm_state_reply = get_window_property(*window, wm_state_atom, ATOM_ATOM, 0, 12)?;
+    let wm_state = wm_state_reply.value::<Atom>();
+
+    let is_minimized = wm_state.iter().any(|&state| state == wm_state_hidden_atom);
+
+    let is_maximized_vert = wm_state
+        .iter()
+        .any(|&state| state == wm_state_maximized_vert_atom);
+
+    let is_maximized_horz = wm_state
+        .iter()
+        .any(|&state| state == wm_state_maximized_horz_atom);
+
+    Ok((
+        is_minimized,
+        !is_minimized && is_maximized_vert && is_maximized_horz,
+    ))
 }
 
 impl ImplWindow {
-    fn new(
-        conn: &Connection,
-        window: &Window,
-        pid: u32,
-        z: i32,
-        impl_monitors: &Vec<ImplMonitor>,
-    ) -> XCapResult<ImplWindow> {
-        let title = {
-            let get_title_reply =
-                get_window_property(conn, *window, ATOM_WM_NAME, ATOM_STRING, 0, 1024)?;
-            str::from_utf8(get_title_reply.value())?.to_string()
-        };
-
-        let app_name = {
-            let get_class_reply =
-                get_window_property(conn, *window, ATOM_WM_CLASS, ATOM_STRING, 0, 1024)?;
-
-            let class = str::from_utf8(get_class_reply.value())?;
-
-            class
-                .split('\u{0}')
-                .find(|str| !str.is_empty())
-                .unwrap_or("")
-                .to_string()
-        };
-
-        let (x, y, width, height) = {
-            let get_geometry_cookie = conn.send_request(&GetGeometry {
-                drawable: Drawable::Window(*window),
-            });
-            let get_geometry_reply = conn.wait_for_reply(get_geometry_cookie)?;
-
-            let translate_coordinates_cookie = conn.send_request(&TranslateCoordinates {
-                dst_window: get_geometry_reply.root(),
-                src_window: *window,
-                src_x: get_geometry_reply.x(),
-                src_y: get_geometry_reply.y(),
-            });
-            let translate_coordinates_reply = conn.wait_for_reply(translate_coordinates_cookie)?;
-
-            (
-                (translate_coordinates_reply.dst_x() - get_geometry_reply.x()) as i32,
-                (translate_coordinates_reply.dst_y() - get_geometry_reply.y()) as i32,
-                get_geometry_reply.width() as u32,
-                get_geometry_reply.height() as u32,
-            )
-        };
-
-        let current_monitor = {
-            let mut max_area = 0;
-            let mut find_result = impl_monitors
-                .first()
-                .ok_or(XCapError::new("Get screen info failed"))?;
-
-            let window_rect = Rect::new(x, y, width, height);
-
-            // window与哪一个monitor交集最大就属于那个monitor
-            for impl_monitor in impl_monitors {
-                let monitor_rect = Rect::new(
-                    impl_monitor.x,
-                    impl_monitor.y,
-                    impl_monitor.width,
-                    impl_monitor.height,
-                );
-
-                // 获取最大的面积
-                let area = window_rect.overlap_area(monitor_rect);
-                if area > max_area {
-                    max_area = area;
-                    find_result = impl_monitor;
-                }
-            }
-
-            find_result.to_owned()
-        };
-
-        let (is_minimized, is_maximized) = {
-            // https://specifications.freedesktop.org/wm-spec/1.3/ar01s05.html
-            let wm_state_atom = get_atom(conn, "_NET_WM_STATE")?;
-            let wm_state_hidden_atom = get_atom(conn, "_NET_WM_STATE_HIDDEN")?;
-            let wm_state_maximized_vert_atom = get_atom(conn, "_NET_WM_STATE_MAXIMIZED_VERT")?;
-            let wm_state_maximized_horz_atom = get_atom(conn, "_NET_WM_STATE_MAXIMIZED_HORZ")?;
-
-            let wm_state_reply =
-                get_window_property(conn, *window, wm_state_atom, ATOM_ATOM, 0, 12)?;
-            let wm_state = wm_state_reply.value::<Atom>();
-
-            let is_minimized = wm_state.iter().any(|&state| state == wm_state_hidden_atom);
-
-            let is_maximized_vert = wm_state
-                .iter()
-                .any(|&state| state == wm_state_maximized_vert_atom);
-
-            let is_maximized_horz = wm_state
-                .iter()
-                .any(|&state| state == wm_state_maximized_horz_atom);
-
-            (
-                is_minimized,
-                !is_minimized && is_maximized_vert && is_maximized_horz,
-            )
-        };
-
-        Ok(ImplWindow {
-            window: *window,
-            id: window.resource_id(),
-            title,
-            app_name,
-            pid,
-            current_monitor,
-            x,
-            y,
-            z,
-            width,
-            height,
-            is_minimized,
-            is_maximized,
-        })
-    }
-
-    pub fn is_focused(&self) -> bool {
-        let active_window_id = get_active_window_id();
-
-        active_window_id.eq(&Some(self.pid))
+    fn new(window: Window) -> ImplWindow {
+        ImplWindow { window }
     }
 
     pub fn all() -> XCapResult<Vec<ImplWindow>> {
-        let (conn, _) = Connection::connect(None)?;
+        let (conn, _) = get_xcb_connection_and_index()?;
+
         let setup = conn.get_setup();
 
         // https://github.com/rust-x-bindings/rust-xcb/blob/main/examples/get_all_windows.rs
         // https://specifications.freedesktop.org/wm-spec/1.5/ar01s03.html#id-1.4.4
         // list all windows by stacking order
-        let client_list_atom = get_atom(&conn, "_NET_CLIENT_LIST_STACKING")?;
+        let client_list_atom = get_atom("_NET_CLIENT_LIST_STACKING")?;
 
         let mut impl_windows = Vec::new();
-        let impl_monitors = ImplMonitor::all()?;
 
-        let mut z = -1;
         for screen in setup.roots() {
             let root_window = screen.root();
 
@@ -248,42 +167,19 @@ impl ImplWindow {
             };
 
             if query_pointer_reply.same_screen() {
-                let list_window_reply = match get_window_property(
-                    &conn,
-                    root_window,
-                    client_list_atom,
-                    ATOM_NONE,
-                    0,
-                    1024,
-                ) {
-                    Ok(list_window_reply) => list_window_reply,
-                    _ => continue,
-                };
-
-                for client in list_window_reply.value::<Window>() {
-                    z += 1;
-                    let pid = match get_window_pid(&conn, client) {
-                        Ok(pid) => pid,
-                        err => {
-                            log::error!("{:?}", err);
-                            continue;
-                        }
+                let list_window_reply =
+                    match get_window_property(root_window, client_list_atom, ATOM_NONE, 0, 1024) {
+                        Ok(list_window_reply) => list_window_reply,
+                        _ => continue,
                     };
 
-                    if let Ok(impl_window) = ImplWindow::new(&conn, client, pid, z, &impl_monitors)
-                    {
-                        impl_windows.push(impl_window);
-                    } else {
-                        log::error!(
-                            "ImplWindow::new(&conn, {:?}, {:?}) failed",
-                            client,
-                            &impl_monitors
-                        );
-                    }
+                for &window in list_window_reply.value::<Window>() {
+                    impl_windows.push(ImplWindow::new(window));
                 }
             }
         }
 
+        // 按照z轴顺序排序，z值越大，窗口越靠前
         impl_windows.reverse();
 
         Ok(impl_windows)
@@ -291,6 +187,129 @@ impl ImplWindow {
 }
 
 impl ImplWindow {
+    pub fn id(&self) -> XCapResult<u32> {
+        Ok(self.window.resource_id())
+    }
+
+    pub fn pid(&self) -> XCapResult<u32> {
+        get_window_pid(&self.window)
+    }
+
+    pub fn app_name(&self) -> XCapResult<String> {
+        let get_class_reply =
+            get_window_property(self.window, ATOM_WM_CLASS, ATOM_STRING, 0, 1024)?;
+
+        let wm_class = String::from_utf8(get_class_reply.value().to_vec())?;
+
+        let app_name = wm_class
+            .split('\u{0}')
+            .find(|str| !str.is_empty())
+            .unwrap_or("")
+            .to_string();
+
+        Ok(app_name)
+    }
+
+    pub fn title(&self) -> XCapResult<String> {
+        let get_title_reply = get_window_property(self.window, ATOM_WM_NAME, ATOM_STRING, 0, 1024)?;
+
+        let title = String::from_utf8(get_title_reply.value().to_vec())?;
+
+        Ok(title)
+    }
+
+    pub fn current_monitor(&self) -> XCapResult<ImplMonitor> {
+        let impl_monitors = ImplMonitor::all()?;
+        let mut find_result = impl_monitors
+            .first()
+            .ok_or(XCapError::new("Get screen info failed"))?
+            .to_owned();
+
+        let (x, y, width, height) = get_position_and_size(&self.window)?;
+
+        let mut max_area = 0;
+        // window与哪一个monitor交集最大就属于那个monitor
+        for impl_monitor in impl_monitors {
+            let monitor_x = impl_monitor.x()?;
+            let monitor_y = impl_monitor.y()?;
+            let monitor_width = impl_monitor.width()?;
+            let monitor_height = impl_monitor.height()?;
+
+            let left = x.max(monitor_x);
+            let top = y.max(monitor_x);
+            let right = (x + width as i32).min(monitor_x + monitor_width as i32);
+            let bottom = (y + height as i32).min(monitor_y + monitor_height as i32);
+
+            // 与0比较，如果小于0则表示两个矩形无交集
+            let width = (right - left).max(0);
+            let height = (bottom - top).max(0);
+
+            let overlap_area = width * height;
+            // 获取最大的面积
+            if overlap_area > max_area {
+                max_area = overlap_area;
+                find_result = impl_monitor;
+            }
+        }
+
+        Ok(find_result)
+    }
+
+    pub fn x(&self) -> XCapResult<i32> {
+        let (x, _, _, _) = get_position_and_size(&self.window)?;
+
+        Ok(x)
+    }
+
+    pub fn y(&self) -> XCapResult<i32> {
+        let (_, y, _, _) = get_position_and_size(&self.window)?;
+
+        Ok(y)
+    }
+
+    pub fn z(&self) -> XCapResult<i32> {
+        let impl_windows = ImplWindow::all()?;
+        let mut z = impl_windows.len() as i32 - 1;
+        for impl_window in impl_windows {
+            if impl_window.window == self.window {
+                break;
+            }
+            z -= 1;
+        }
+
+        Ok(z)
+    }
+
+    pub fn width(&self) -> XCapResult<u32> {
+        let (_, _, width, _) = get_position_and_size(&self.window)?;
+
+        Ok(width)
+    }
+
+    pub fn height(&self) -> XCapResult<u32> {
+        let (_, _, _, height) = get_position_and_size(&self.window)?;
+
+        Ok(height)
+    }
+
+    pub fn is_minimized(&self) -> XCapResult<bool> {
+        let (is_minimized, _) = get_window_state(&self.window)?;
+
+        Ok(is_minimized)
+    }
+
+    pub fn is_maximized(&self) -> XCapResult<bool> {
+        let (is_minimized, _) = get_window_state(&self.window)?;
+
+        Ok(is_minimized)
+    }
+
+    pub fn is_focused(&self) -> XCapResult<bool> {
+        let active_window_id = get_active_window_id()?;
+
+        Ok(active_window_id == self.id()?)
+    }
+
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         capture_window(self)
     }

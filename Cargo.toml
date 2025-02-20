@@ -50,6 +50,7 @@ windows = { version = "0.59", features = [
 
 [target.'cfg(target_os="linux")'.dependencies]
 dbus = "0.9"
+lazy_static = "1.5"
 percent-encoding = "2.3"
 xcb = { version = "1.5", features = ["randr"] }
 

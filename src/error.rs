@@ -20,7 +20,7 @@ pub enum XCapError {
     ImageImageError(#[from] image::ImageError),
     #[cfg(target_os = "linux")]
     #[error(transparent)]
-    StdStrUtf8Error(#[from] std::str::Utf8Error),
+    StdStringFromUtf8Error(#[from] std::string::FromUtf8Error),
     #[cfg(target_os = "linux")]
     #[error(transparent)]
     DbusError(#[from] dbus::Error),
@@ -48,13 +48,6 @@ impl XCapError {
         XCapError::Error(err.to_string())
     }
 }
-
-// #[cfg(target_os = "macos")]
-// impl From<core_graphics::display::CGError> for XCapError {
-//     fn from(value: core_graphics::display::CGError) -> Self {
-//         XCapError::CoreGraphicsDisplayCGError(value)
-//     }
-// }
 
 pub type XCapResult<T> = Result<T, XCapError>;
 
