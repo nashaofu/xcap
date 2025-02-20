@@ -87,7 +87,7 @@ pub fn capture_monitor(x: i32, y: i32, width: i32, height: i32) -> XCapResult<Rg
         let scope_guard_h_bitmap = guard(
             CreateCompatibleBitmap(*scope_guard_hdc_desktop_window, width, height),
             |val| {
-                if DeleteObject(val.into()).as_bool() {
+                if DeleteObject(val.into()).as_bool().eq(&false) {
                     log::error!("DeleteObject {:?} failed", val);
                 }
             },
@@ -162,7 +162,7 @@ pub fn capture_window(
         let scope_guard_h_bitmap = guard(
             CreateCompatibleBitmap(*scope_guard_hdc_window, width, height),
             |val| {
-                if DeleteObject(val.into()).as_bool() {
+                if DeleteObject(val.into()).as_bool().eq(&false) {
                     log::error!("DeleteObject {:?} failed", val);
                 }
             },
