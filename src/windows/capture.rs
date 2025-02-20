@@ -63,6 +63,14 @@ fn to_rgba_image(
     bgra_to_rgba_image(width as u32, height as u32, buffer)
 }
 
+fn delete_bitmap_object(val: HBITMAP) {
+    let succeed = unsafe { DeleteObject(val.into()).as_bool() };
+
+    if !succeed {
+        log::error!("DeleteObject {:?} failed", val);
+    }
+}
+
 #[allow(unused)]
 pub fn capture_monitor(x: i32, y: i32, width: i32, height: i32) -> XCapResult<RgbaImage> {
     unsafe {
@@ -86,11 +94,7 @@ pub fn capture_monitor(x: i32, y: i32, width: i32, height: i32) -> XCapResult<Rg
 
         let scope_guard_h_bitmap = guard(
             CreateCompatibleBitmap(*scope_guard_hdc_desktop_window, width, height),
-            |val| {
-                if DeleteObject(val.into()).as_bool() {
-                    log::error!("DeleteObject {:?} failed", val);
-                }
-            },
+            delete_bitmap_object,
         );
 
         // 使用SelectObject函数将这个位图选择到DC中
@@ -161,11 +165,7 @@ pub fn capture_window(
         });
         let scope_guard_h_bitmap = guard(
             CreateCompatibleBitmap(*scope_guard_hdc_window, width, height),
-            |val| {
-                if DeleteObject(val.into()).as_bool() {
-                    log::error!("DeleteObject {:?} failed", val);
-                }
-            },
+            delete_bitmap_object,
         );
 
         let previous_object = SelectObject(*scope_guard_hdc_mem, (*scope_guard_h_bitmap).into());
