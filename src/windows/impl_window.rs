@@ -6,7 +6,7 @@ use widestring::U16CString;
 use windows::{
     core::{HSTRING, PCWSTR},
     Win32::{
-        Foundation::{BOOL, HANDLE, HWND, LPARAM, MAX_PATH, RECT, TRUE},
+        Foundation::{GetLastError, BOOL, HANDLE, HWND, LPARAM, MAX_PATH, RECT, TRUE, WPARAM},
         Graphics::{
             Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS},
             Gdi::{IsRectEmpty, MonitorFromWindow, MONITOR_DEFAULTTONEAREST},
@@ -14,14 +14,13 @@ use windows::{
         Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW},
         System::{
             ProcessStatus::{GetModuleBaseNameW, GetModuleFileNameExW},
-            Threading::{
-                GetCurrentProcess, GetCurrentProcessId, PROCESS_QUERY_LIMITED_INFORMATION,
-            },
+            Threading::{GetCurrentProcess, PROCESS_QUERY_LIMITED_INFORMATION},
         },
         UI::WindowsAndMessaging::{
             EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowInfo, GetWindowLongPtrW,
-            GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
-            IsWindowVisible, IsZoomed, GWL_EXSTYLE, WINDOWINFO, WINDOW_EX_STYLE, WS_EX_TOOLWINDOW,
+            GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, IsZoomed,
+            SendMessageTimeoutW, GWL_EXSTYLE, SMTO_NORMAL, WINDOWINFO, WINDOW_EX_STYLE, WM_GETTEXT,
+            WM_GETTEXTLENGTH, WS_EX_TOOLWINDOW,
         },
     },
 };
@@ -102,30 +101,15 @@ fn is_valid_window(hwnd: HWND) -> bool {
         }
 
         let gwl_ex_style = WINDOW_EX_STYLE(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32);
-        let title = get_window_title(hwnd).unwrap_or_default();
 
         // 过滤掉具有 WS_EX_TOOLWINDOW 样式的窗口
         if gwl_ex_style.contains(WS_EX_TOOLWINDOW) {
             // windows 任务栏可以捕获
-            if class_name.cmp(&String::from("Shell_TrayWnd")) != Ordering::Equal && title.is_empty()
+            if class_name.cmp(&String::from("Shell_TrayWnd")) != Ordering::Equal
+                && get_window_title(hwnd).map_or(true, |title| title.is_empty())
             {
                 return false;
             }
-        }
-
-        // GetWindowText* are potentially blocking operations if `hwnd` is
-        // owned by the current process. The APIs will send messages to the window's
-        // message loop, and if the message loop is waiting on this operation we will
-        // enter a deadlock.
-        // https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowtexta#remarks
-        //
-        // To help consumers avoid this, there is a DesktopCaptureOption to ignore
-        // windows owned by the current process. Consumers should either ensure that
-        // the thread running their message loop never waits on this operation, or use
-        // the option to exclude these windows from the source list.
-        let lp_dw_process_id = get_window_pid(hwnd);
-        if lp_dw_process_id == GetCurrentProcessId() {
-            return false;
         }
 
         // Skip Program Manager window.
@@ -178,10 +162,36 @@ unsafe extern "system" fn enum_windows_proc(hwnd: HWND, state: LPARAM) -> BOOL {
 }
 
 fn get_window_title(hwnd: HWND) -> XCapResult<String> {
+    const TIMEOUT_MS: u32 = 500;
+    // suggested by https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowtexta#remarks
     unsafe {
-        let text_length = GetWindowTextLengthW(hwnd);
-        let mut wide_buffer = vec![0u16; (text_length + 1) as usize];
-        GetWindowTextW(hwnd, &mut wide_buffer);
+        let mut text_length = 0usize;
+        if SendMessageTimeoutW(
+            hwnd,
+            WM_GETTEXTLENGTH,
+            WPARAM::default(),
+            LPARAM::default(),
+            SMTO_NORMAL,
+            TIMEOUT_MS,
+            Some((&mut text_length) as _),
+        )
+        .0 == 0
+        {
+            return Err(crate::XCapError::Error(format!(
+                "GetTitle error: {:?}",
+                GetLastError()
+            )));
+        }
+        let mut wide_buffer = vec![0u16; text_length + 1];
+        SendMessageTimeoutW(
+            hwnd,
+            WM_GETTEXT,
+            WPARAM(wide_buffer.capacity()),
+            LPARAM(wide_buffer.as_mut_ptr() as _),
+            SMTO_NORMAL,
+            TIMEOUT_MS,
+            None,
+        );
         let window_title = U16CString::from_vec_truncate(wide_buffer).to_string()?;
 
         Ok(window_title)
