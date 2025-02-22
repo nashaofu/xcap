@@ -269,12 +269,12 @@ impl ImplWindow {
 
     pub fn z(&self) -> XCapResult<i32> {
         let impl_windows = ImplWindow::all()?;
-        let mut z = impl_windows.len() as i32 - 1;
+        let mut z = impl_windows.len() as i32;
         for impl_window in impl_windows {
+            z -= 1;
             if impl_window.window == self.window {
                 break;
             }
-            z -= 1;
         }
 
         Ok(z)

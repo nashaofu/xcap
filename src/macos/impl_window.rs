@@ -285,6 +285,7 @@ impl ImplWindow {
             let mut z = windows_count as i32;
 
             for i in 0..windows_count {
+                z -= 1;
                 let window_cf_dictionary_ref =
                     CFArrayGetValueAtIndex(&cf_array, i) as *const CFDictionary;
 
@@ -302,7 +303,6 @@ impl ImplWindow {
                 if window_id == self.window_id {
                     break;
                 }
-                z -= 1;
             }
 
             Ok(z)

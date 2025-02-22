@@ -369,12 +369,12 @@ impl ImplWindow {
             Box::from_raw(hwnds_mut_ptr)
         };
 
-        let mut z = hwnds.len() as i32 - 1;
+        let mut z = hwnds.len() as i32;
         for &hwnd in hwnds.iter() {
+            z -= 1;
             if self.hwnd == hwnd {
                 break;
             }
-            z -= 1;
         }
 
         Ok(z)
