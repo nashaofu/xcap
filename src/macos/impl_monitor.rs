@@ -1,7 +1,7 @@
 use image::RgbaImage;
 use objc2::MainThreadMarker;
 use objc2_app_kit::NSScreen;
-use objc2_core_foundation::{CGPoint, CGRect};
+use objc2_core_foundation::CGPoint;
 use objc2_core_graphics::{
     CGDirectDisplayID, CGDisplayBounds, CGDisplayCopyDisplayMode, CGDisplayIsActive,
     CGDisplayIsMain, CGDisplayModeGetPixelWidth, CGDisplayModeGetRefreshRate, CGDisplayRotation,
@@ -16,16 +16,6 @@ use super::{capture::capture, impl_video_recorder::ImplVideoRecorder};
 #[derive(Debug, Clone)]
 pub(crate) struct ImplMonitor {
     pub cg_direct_display_id: CGDirectDisplayID,
-    pub id: u32,
-    pub name: String,
-    pub x: i32,
-    pub y: i32,
-    pub width: u32,
-    pub height: u32,
-    pub rotation: f32,
-    pub scale_factor: f32,
-    pub frequency: f32,
-    pub is_primary: bool,
 }
 
 fn get_display_friendly_name(display_id: CGDirectDisplayID) -> XCapResult<String> {
@@ -53,31 +43,9 @@ fn get_display_friendly_name(display_id: CGDirectDisplayID) -> XCapResult<String
 }
 
 impl ImplMonitor {
-    pub(super) fn new(id: CGDirectDisplayID) -> XCapResult<ImplMonitor> {
-        unsafe {
-            let CGRect { origin, size } = CGDisplayBounds(id);
-
-            let rotation = CGDisplayRotation(id) as f32;
-
-            let display_mode = CGDisplayCopyDisplayMode(id);
-            let pixel_width = CGDisplayModeGetPixelWidth(display_mode.as_deref());
-            let scale_factor = pixel_width as f32 / size.width as f32;
-            let frequency = CGDisplayModeGetRefreshRate(display_mode.as_deref()) as f32;
-            let is_primary = CGDisplayIsMain(id);
-
-            Ok(ImplMonitor {
-                cg_direct_display_id: id,
-                id,
-                name: get_display_friendly_name(id).unwrap_or(format!("Unknown Monitor {}", id)),
-                x: origin.x as i32,
-                y: origin.y as i32,
-                width: size.width as u32,
-                height: size.height as u32,
-                rotation,
-                scale_factor,
-                frequency,
-                is_primary,
-            })
+    pub fn new(cg_direct_display_id: CGDirectDisplayID) -> ImplMonitor {
+        ImplMonitor {
+            cg_direct_display_id,
         }
     }
     pub fn all() -> XCapResult<Vec<ImplMonitor>> {
@@ -105,14 +73,7 @@ impl ImplMonitor {
         let mut impl_monitors = Vec::with_capacity(active_displays.len());
 
         for display in active_displays {
-            // 运行过程中，如果遇到显示器插拔，可能会导致调用报错
-            // 对于报错的情况，就把报错的情况给排除掉
-            // https://github.com/nashaofu/xcap/issues/118
-            if let Ok(impl_monitor) = ImplMonitor::new(display) {
-                impl_monitors.push(impl_monitor);
-            } else {
-                log::error!("ImplMonitor::new({}) failed", display);
-            }
+            impl_monitors.push(ImplMonitor::new(display));
         }
 
         Ok(impl_monitors)
@@ -152,8 +113,7 @@ impl ImplMonitor {
             if unsafe { !CGDisplayIsActive(display_id) } {
                 return Err(XCapError::new("Monitor is not active"));
             }
-            println!("display_id: {}", display_id);
-            ImplMonitor::new(display_id)
+            Ok(ImplMonitor::new(display_id))
         } else {
             Err(XCapError::new("Monitor not found"))
         }
@@ -161,6 +121,70 @@ impl ImplMonitor {
 }
 
 impl ImplMonitor {
+    pub fn id(&self) -> XCapResult<u32> {
+        Ok(self.cg_direct_display_id)
+    }
+
+    pub fn name(&self) -> XCapResult<String> {
+        let name = get_display_friendly_name(self.cg_direct_display_id)
+            .unwrap_or(format!("Unknown Monitor {}", self.cg_direct_display_id));
+
+        Ok(name)
+    }
+
+    pub fn x(&self) -> XCapResult<i32> {
+        let rect = unsafe { CGDisplayBounds(self.cg_direct_display_id) };
+
+        Ok(rect.origin.x as i32)
+    }
+
+    pub fn y(&self) -> XCapResult<i32> {
+        let cg_rect = unsafe { CGDisplayBounds(self.cg_direct_display_id) };
+
+        Ok(cg_rect.origin.y as i32)
+    }
+
+    pub fn width(&self) -> XCapResult<u32> {
+        let cg_rect = unsafe { CGDisplayBounds(self.cg_direct_display_id) };
+
+        Ok(cg_rect.size.width as u32)
+    }
+
+    pub fn height(&self) -> XCapResult<u32> {
+        let cg_rect = unsafe { CGDisplayBounds(self.cg_direct_display_id) };
+
+        Ok(cg_rect.size.height as u32)
+    }
+
+    pub fn rotation(&self) -> XCapResult<f32> {
+        let rotation = unsafe { CGDisplayRotation(self.cg_direct_display_id) };
+
+        Ok(rotation as f32)
+    }
+
+    pub fn scale_factor(&self) -> XCapResult<f32> {
+        let display_mode = unsafe { CGDisplayCopyDisplayMode(self.cg_direct_display_id) };
+        let pixel_width = unsafe { CGDisplayModeGetPixelWidth(display_mode.as_deref()) };
+        let width = self.width()?;
+
+        Ok(pixel_width as f32 / width as f32)
+    }
+
+    pub fn frequency(&self) -> XCapResult<f32> {
+        let frequency = unsafe {
+            let display_mode = CGDisplayCopyDisplayMode(self.cg_direct_display_id);
+            CGDisplayModeGetRefreshRate(display_mode.as_deref())
+        };
+
+        Ok(frequency as f32)
+    }
+
+    pub fn is_primary(&self) -> XCapResult<bool> {
+        let is_primary = unsafe { CGDisplayIsMain(self.cg_direct_display_id) };
+
+        Ok(is_primary)
+    }
+
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         let cg_rect = unsafe { CGDisplayBounds(self.cg_direct_display_id) };
 
