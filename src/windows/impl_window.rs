@@ -1,5 +1,5 @@
 use core::slice;
-use std::{cmp::Ordering, ffi::c_void, mem, ptr};
+use std::{ffi::c_void, mem, ptr};
 
 use image::RgbaImage;
 use widestring::U16CString;
@@ -88,13 +88,13 @@ fn is_valid_window(hwnd: HWND) -> bool {
         }
 
         let gwl_ex_style = WINDOW_EX_STYLE(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32);
-        let title = get_window_title(hwnd).unwrap_or_default();
 
         // 过滤掉具有 WS_EX_TOOLWINDOW 样式的窗口
         if gwl_ex_style.contains(WS_EX_TOOLWINDOW) {
+            let title = get_window_title(hwnd).unwrap_or_default();
+
             // windows 任务栏可以捕获
-            if class_name.cmp(&String::from("Shell_TrayWnd")) != Ordering::Equal && title.is_empty()
-            {
+            if class_name.ne(&"Shell_TrayWnd") && title.is_empty() {
                 return false;
             }
         }
@@ -115,13 +115,13 @@ fn is_valid_window(hwnd: HWND) -> bool {
         }
 
         // Skip Program Manager window.
-        if class_name.cmp(&String::from("Progman")) == Ordering::Equal {
+        if class_name.eq("Progman") {
             return false;
         }
         // Skip Start button window on Windows Vista, Windows 7.
         // On Windows 8, Windows 8.1, Windows 10 Start button is not a top level
         // window, so it will not be examined here.
-        if class_name.cmp(&String::from("Button")) == Ordering::Equal {
+        if class_name.eq("Button") {
             return false;
         }
 
