@@ -28,31 +28,34 @@ XCap 是一个使用 Rust 编写的跨平台的屏幕捕获库，它支持 Linux
 -   屏幕截图
 
 ```rust
+use fs_extra::dir;
 use std::time::Instant;
 use xcap::Monitor;
 
-fn normalized(filename: &str) -> String {
-    filename
-        .replace("|", "")
-        .replace("\\", "")
-        .replace(":", "")
-        .replace("/", "")
+fn normalized(filename: String) -> String {
+    filename.replace(['|', '\\', ':', '/'], "")
 }
 
 fn main() {
     let start = Instant::now();
     let monitors = Monitor::all().unwrap();
 
+    dir::create_all("target/monitors", true).unwrap();
+
     for monitor in monitors {
         let image = monitor.capture_image().unwrap();
 
         image
-            .save(format!("target/monitor-{}.png", normalized(monitor.name())))
+            .save(format!(
+                "target/monitors/monitor-{}.png",
+                normalized(monitor.name().unwrap())
+            ))
             .unwrap();
     }
 
     println!("运行耗时: {:?}", start.elapsed());
 }
+
 ```
 
 -   屏幕录制
@@ -94,42 +97,48 @@ fn main() {
 -   窗口截图
 
 ```rust
+use fs_extra::dir;
 use std::time::Instant;
 use xcap::Window;
 
 fn normalized(filename: &str) -> String {
-    filename
-        .replace("|", "")
-        .replace("\\", "")
-        .replace(":", "")
-        .replace("/", "")
+    filename.replace(['|', '\\', ':', '/'], "")
 }
 
 fn main() {
     let start = Instant::now();
     let windows = Window::all().unwrap();
 
-    let mut i = 0;
+    dir::create_all("target/windows", true).unwrap();
 
+    let mut i = 0;
     for window in windows {
         // 最小化的窗口不能截屏
-        if window.is_minimized() {
+        if window.is_minimized().unwrap() {
             continue;
         }
 
         println!(
             "Window: {:?} {:?} {:?}",
-            window.title(),
-            (window.x(), window.y(), window.width(), window.height()),
-            (window.is_minimized(), window.is_maximized())
+            window.title().unwrap(),
+            (
+                window.x().unwrap(),
+                window.y().unwrap(),
+                window.width().unwrap(),
+                window.height().unwrap()
+            ),
+            (
+                window.is_minimized().unwrap(),
+                window.is_maximized().unwrap()
+            )
         );
 
         let image = window.capture_image().unwrap();
         image
             .save(format!(
-                "target/window-{}-{}.png",
+                "target/windows/window-{}-{}.png",
                 i,
-                normalized(window.title())
+                normalized(&window.title().unwrap())
             ))
             .unwrap();
 
@@ -138,6 +147,7 @@ fn main() {
 
     println!("运行耗时: {:?}", start.elapsed());
 }
+
 ```
 
 更多例子可以在 [examples](./examples) 目录中找到。
