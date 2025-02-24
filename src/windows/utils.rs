@@ -69,13 +69,6 @@ pub(super) fn get_os_major_version() -> u8 {
     }
 }
 
-pub(super) fn log_last_error<T: ToString>(label: T) {
-    unsafe {
-        let err = GetLastError();
-        log::error!("{} error: {:?}", label.to_string(), err);
-    }
-}
-
 pub(super) fn bgra_to_rgba(mut buffer: Vec<u8>) -> Vec<u8> {
     let is_old_version = get_os_major_version() < 8;
     for src in buffer.chunks_exact_mut(4) {

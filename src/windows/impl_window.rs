@@ -6,7 +6,7 @@ use widestring::U16CString;
 use windows::{
     core::{HSTRING, PCWSTR},
     Win32::{
-        Foundation::{BOOL, HANDLE, HWND, LPARAM, MAX_PATH, RECT, TRUE},
+        Foundation::{GetLastError, BOOL, HANDLE, HWND, LPARAM, MAX_PATH, RECT, TRUE},
         Graphics::{
             Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS},
             Gdi::{IsRectEmpty, MonitorFromWindow, MONITOR_DEFAULTTONEAREST},
@@ -26,7 +26,7 @@ use windows::{
     },
 };
 
-use crate::{error::XCapResult, platform::utils::log_last_error};
+use crate::error::XCapResult;
 
 use super::{
     capture::capture_window,
@@ -193,7 +193,11 @@ fn get_module_basename(handle: HANDLE) -> XCapResult<String> {
         let result = GetModuleBaseNameW(handle, None, &mut module_base_name_w);
 
         if result == 0 {
-            log_last_error("GetModuleBaseNameW");
+            log::error!(
+                "GetModuleBaseNameW({:?}) failed: {:?}",
+                handle,
+                GetLastError()
+            );
 
             GetModuleFileNameExW(Some(handle), None, &mut module_base_name_w);
         }
@@ -217,7 +221,7 @@ fn get_app_name(pid: u32) -> XCapResult<String> {
         let scope_guard_handle = match open_process(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
             Ok(box_handle) => box_handle,
             Err(err) => {
-                log::error!("{}", err);
+                log::error!("open_process failed: {}", err);
                 return Ok(String::new());
             }
         };
@@ -229,7 +233,11 @@ fn get_app_name(pid: u32) -> XCapResult<String> {
 
         let file_version_info_size_w = GetFileVersionInfoSizeW(pcw_filename, None);
         if file_version_info_size_w == 0 {
-            log_last_error("GetFileVersionInfoSizeW");
+            log::error!(
+                "GetFileVersionInfoSizeW({:?}) failed: {:?}",
+                pcw_filename,
+                GetLastError()
+            );
 
             return get_module_basename(*scope_guard_handle);
         }

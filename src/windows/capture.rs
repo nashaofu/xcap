@@ -3,7 +3,7 @@ use std::{ffi::c_void, mem};
 use image::{DynamicImage, RgbaImage};
 use scopeguard::guard;
 use windows::Win32::{
-    Foundation::HWND,
+    Foundation::{GetLastError, HWND},
     Graphics::{
         Dwm::DwmIsCompositionEnabled,
         Gdi::{
@@ -64,10 +64,12 @@ fn to_rgba_image(
 }
 
 fn delete_bitmap_object(val: HBITMAP) {
-    let succeed = unsafe { DeleteObject(val.into()).as_bool() };
+    unsafe {
+        let succeed = DeleteObject(val.into()).as_bool();
 
-    if !succeed {
-        log::error!("DeleteObject {:?} failed", val);
+        if !succeed {
+            log::error!("DeleteObject({:?}) failed: {:?}", val, GetLastError());
+        }
     }
 }
 
@@ -77,7 +79,7 @@ pub fn capture_monitor(x: i32, y: i32, width: i32, height: i32) -> XCapResult<Rg
         let hwnd = GetDesktopWindow();
         let scope_guard_hdc_desktop_window = guard(GetWindowDC(Some(hwnd)), |val| {
             if ReleaseDC(Some(hwnd), val) != 1 {
-                log::error!("ReleaseDC {:?} failed", val)
+                log::error!("ReleaseDC({:?}) failed: {:?}", val, GetLastError());
             }
         });
 
@@ -87,7 +89,7 @@ pub fn capture_monitor(x: i32, y: i32, width: i32, height: i32) -> XCapResult<Rg
             CreateCompatibleDC(Some(*scope_guard_hdc_desktop_window)),
             |val| {
                 if !DeleteDC(val).as_bool() {
-                    log::error!("DeleteDC {:?} failed", val)
+                    log::error!("DeleteDC({:?}) failed: {:?}", val, GetLastError());
                 }
             },
         );
@@ -130,7 +132,7 @@ pub fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaImage> {
 
         let scope_guard_hdc_window = guard(GetWindowDC(Some(hwnd)), |val| {
             if ReleaseDC(Some(hwnd), val) != 1 {
-                log::error!("ReleaseDC {:?} failed", val)
+                log::error!("ReleaseDC({:?}) failed: {:?}", val, GetLastError());
             }
         });
 
@@ -157,7 +159,7 @@ pub fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaImage> {
         // https://learn.microsoft.com/zh-cn/windows/win32/api/wingdi/nf-wingdi-createcompatibledc
         let scope_guard_hdc_mem = guard(CreateCompatibleDC(Some(*scope_guard_hdc_window)), |val| {
             if !DeleteDC(val).as_bool() {
-                log::error!("DeleteDC {:?} failed", val)
+                log::error!("DeleteDC({:?}) failed: {:?}", val, GetLastError());
             }
         });
         let scope_guard_h_bitmap = guard(
