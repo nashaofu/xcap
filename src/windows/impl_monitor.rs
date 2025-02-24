@@ -5,7 +5,7 @@ use scopeguard::guard;
 use windows::{
     core::{s, w, HRESULT, PCWSTR},
     Win32::{
-        Foundation::{BOOL, LPARAM, POINT, RECT, TRUE},
+        Foundation::{GetLastError, BOOL, LPARAM, POINT, RECT, TRUE},
         Graphics::Gdi::{
             CreateDCW, DeleteDC, EnumDisplayMonitors, EnumDisplaySettingsW, GetDeviceCaps,
             GetMonitorInfoW, MonitorFromPoint, DESKTOPHORZRES, DEVMODEW, DMDO_180, DMDO_270,
@@ -114,7 +114,7 @@ fn get_scale_factor(h_monitor: HMONITOR) -> XCapResult<f32> {
     let scale_factor = match get_hi_dpi_scale_factor(h_monitor) {
         Ok(val) => val,
         Err(err) => {
-            log::info!("{}", err);
+            log::info!("get_hi_dpi_scale_factor failed: {}", err);
             let monitor_info_ex_w = get_monitor_info_ex_w(h_monitor)?;
             // https://learn.microsoft.com/zh-cn/windows/win32/api/wingdi/nf-wingdi-getdevicecaps
             unsafe {
@@ -127,7 +127,7 @@ fn get_scale_factor(h_monitor: HMONITOR) -> XCapResult<f32> {
                     ),
                     |val| {
                         if !DeleteDC(val).as_bool() {
-                            log::error!("DeleteDC {:?} failed", val)
+                            log::error!("DeleteDC({:?}) failed: {:?}", val, GetLastError());
                         }
                     },
                 );
