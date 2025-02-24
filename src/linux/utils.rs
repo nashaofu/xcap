@@ -1,38 +1,59 @@
 use image::{open, RgbaImage};
+use lazy_static::lazy_static;
+use xcb::{
+    randr::{GetMonitors, MonitorInfoBuf, Output},
+    x::ScreenBuf,
+    ConnResult, Connection,
+};
 
-use crate::error::XCapResult;
+use crate::{error::XCapResult, XCapError};
 
-pub(super) struct Rect {
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
+lazy_static! {
+    static ref XCB_CONNECTION_AND_INDEX: ConnResult<(Connection, i32)> =
+        xcb::Connection::connect(None);
 }
 
-impl Rect {
-    // 计算两个矩形的交集面积
-    pub(super) fn new(x: i32, y: i32, width: u32, height: u32) -> Rect {
-        Rect {
-            x,
-            y,
-            width,
-            height,
+pub fn get_xcb_connection_and_index() -> XCapResult<&'static (Connection, i32)> {
+    XCB_CONNECTION_AND_INDEX
+        .as_ref()
+        .map_err(|err| XCapError::new(err))
+}
+
+pub fn get_current_screen_buf() -> XCapResult<ScreenBuf> {
+    let (conn, index) = get_xcb_connection_and_index()?;
+
+    let setup = conn.get_setup();
+
+    let screen = setup
+        .roots()
+        .nth(*index as usize)
+        .ok_or_else(|| XCapError::new("Not found screen"))?;
+
+    Ok(screen.to_owned())
+}
+
+pub fn get_monitor_info_buf(output: Output) -> XCapResult<MonitorInfoBuf> {
+    let (conn, _) = get_xcb_connection_and_index()?;
+
+    let screen_buf = get_current_screen_buf()?;
+
+    let get_monitors_cookie = conn.send_request(&GetMonitors {
+        window: screen_buf.root(),
+        get_active: true,
+    });
+
+    let get_monitors_reply = conn.wait_for_reply(get_monitors_cookie)?;
+
+    let monitor_info_iterator = get_monitors_reply.monitors();
+
+    for monitor_info in monitor_info_iterator {
+        for &item in monitor_info.outputs() {
+            if item == output {
+                return Ok(monitor_info.to_owned());
+            }
         }
     }
-
-    // 计算两个矩形的交集面积
-    pub(super) fn overlap_area(&self, other_rect: Rect) -> i32 {
-        let left = self.x.max(other_rect.x);
-        let top = self.y.max(other_rect.y);
-        let right = (self.x + self.width as i32).min(other_rect.x + other_rect.width as i32);
-        let bottom = (self.y + self.height as i32).min(other_rect.y + other_rect.height as i32);
-
-        // 与0比较，如果小于0则表示两个矩形无交集
-        let width = (right - left).max(0);
-        let height = (bottom - top).max(0);
-
-        width * height
-    }
+    Err(XCapError::new("Not found monitor"))
 }
 
 pub(super) fn png_to_rgba_image(

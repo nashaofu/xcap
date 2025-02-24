@@ -7,16 +7,16 @@ fn main() {
     let windows = Window::all().unwrap();
 
     loop {
-        windows.iter().filter(|w| w.is_focused()).for_each(|focused| {
+        windows.iter().filter(|w| w.is_focused().unwrap()).for_each(|focused| {
             println!(
                 "Focused Window:\n id: {}\n title: {}\n app_name: {}\n monitor: {:?}\n position: {:?}\n size {:?}\n state {:?}\n",
-                focused.id(),
-                focused.title(),
-                focused.app_name(),
-                focused.current_monitor().name(),
-                (focused.x(), focused.y(), focused.z()),
-                (focused.width(), focused.height()),
-                (focused.is_minimized(), focused.is_maximized(), focused.is_focused())
+                focused.id().unwrap(),
+                focused.title().unwrap(),
+                focused.app_name().unwrap(),
+                focused.current_monitor().unwrap().name().unwrap(),
+                (focused.x().unwrap(), focused.y().unwrap(), focused.z().unwrap()),
+                (focused.width().unwrap(), focused.height().unwrap()),
+                (focused.is_minimized().unwrap(), focused.is_maximized().unwrap(), focused.is_focused().unwrap())
             );
         });
 

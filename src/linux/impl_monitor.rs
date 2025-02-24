@@ -1,37 +1,28 @@
 use image::RgbaImage;
-use std::str;
 use xcb::{
     randr::{
         GetCrtcInfo, GetMonitors, GetOutputInfo, GetScreenResources, Mode, ModeFlag, ModeInfo,
-        MonitorInfo, MonitorInfoBuf, Output, Rotation,
+        Output, Rotation,
     },
-    x::{GetProperty, Screen, ScreenBuf, ATOM_RESOURCE_MANAGER, ATOM_STRING, CURRENT_TIME},
-    Connection, Xid,
+    x::{GetProperty, ATOM_RESOURCE_MANAGER, ATOM_STRING, CURRENT_TIME},
+    Xid,
 };
 
 use crate::error::{XCapError, XCapResult};
 
-use super::{capture::capture_monitor, impl_video_recorder::ImplVideoRecorder};
+use super::{
+    capture::capture_monitor,
+    impl_video_recorder::ImplVideoRecorder,
+    utils::{get_current_screen_buf, get_monitor_info_buf, get_xcb_connection_and_index},
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImplMonitor {
-    pub screen_buf: ScreenBuf,
-    #[allow(unused)]
-    pub monitor_info_buf: MonitorInfoBuf,
-    pub id: u32,
-    pub name: String,
-    pub x: i32,
-    pub y: i32,
-    pub width: u32,
-    pub height: u32,
-    pub rotation: f32,
-    pub scale_factor: f32,
-    pub frequency: f32,
-    pub is_primary: bool,
+    pub output: Output,
 }
 
 // per https://gitlab.freedesktop.org/xorg/app/xrandr/-/blob/master/xrandr.c#L576
-fn get_current_frequency(mode_infos: &[ModeInfo], mode: Mode) -> f32 {
+fn get_current_frequency(mode_infos: Vec<ModeInfo>, mode: Mode) -> f32 {
     let mode_info = match mode_infos.iter().find(|m| m.id == mode.resource_id()) {
         Some(mode_info) => mode_info,
         None => return 0.0,
@@ -55,12 +46,16 @@ fn get_current_frequency(mode_infos: &[ModeInfo], mode: Mode) -> f32 {
     }
 }
 
-fn get_scale_factor(conn: &Connection, screen: &Screen) -> XCapResult<f32> {
+fn get_scale_factor() -> XCapResult<f32> {
+    let (conn, _) = get_xcb_connection_and_index()?;
+
+    let screen_buf = get_current_screen_buf()?;
+
     let xft_dpi_prefix = "Xft.dpi:\t";
 
     let get_property_cookie = conn.send_request(&GetProperty {
         delete: false,
-        window: screen.root(),
+        window: screen_buf.root(),
         property: ATOM_RESOURCE_MANAGER,
         r#type: ATOM_STRING,
         long_offset: 0,
@@ -69,7 +64,7 @@ fn get_scale_factor(conn: &Connection, screen: &Screen) -> XCapResult<f32> {
 
     let get_property_reply = conn.wait_for_reply(get_property_cookie)?;
 
-    let resource_manager = str::from_utf8(get_property_reply.value())?;
+    let resource_manager = String::from_utf8(get_property_reply.value().to_vec())?;
 
     let xft_dpi = resource_manager
         .split('\n')
@@ -83,11 +78,8 @@ fn get_scale_factor(conn: &Connection, screen: &Screen) -> XCapResult<f32> {
     Ok(dpi / 96.0)
 }
 
-fn get_rotation_frequency(
-    conn: &Connection,
-    mode_infos: &[ModeInfo],
-    output: &Output,
-) -> XCapResult<(f32, f32)> {
+fn get_rotation_frequency(mode_infos: Vec<ModeInfo>, output: &Output) -> XCapResult<(f32, f32)> {
+    let (conn, _) = get_xcb_connection_and_index()?;
     let get_output_info_cookie = conn.send_request(&GetOutputInfo {
         output: *output,
         config_timestamp: 0,
@@ -117,52 +109,34 @@ fn get_rotation_frequency(
     Ok((rotation, frequency))
 }
 
-impl ImplMonitor {
-    fn new(
-        conn: &Connection,
-        screen: &Screen,
-        monitor_info: &MonitorInfo,
-        output: &Output,
-        rotation: f32,
-        scale_factor: f32,
-        frequency: f32,
-    ) -> XCapResult<ImplMonitor> {
-        let get_output_info_cookie = conn.send_request(&GetOutputInfo {
-            output: *output,
-            config_timestamp: CURRENT_TIME,
-        });
-        let get_output_info_reply = conn.wait_for_reply(get_output_info_cookie)?;
+fn get_mode_infos() -> XCapResult<Vec<ModeInfo>> {
+    let (conn, _) = get_xcb_connection_and_index()?;
 
-        Ok(ImplMonitor {
-            screen_buf: screen.to_owned(),
-            monitor_info_buf: monitor_info.to_owned(),
-            id: output.resource_id(),
-            name: str::from_utf8(get_output_info_reply.name())?.to_string(),
-            x: ((monitor_info.x() as f32) / scale_factor) as i32,
-            y: ((monitor_info.y() as f32) / scale_factor) as i32,
-            width: ((monitor_info.width() as f32) / scale_factor) as u32,
-            height: ((monitor_info.height() as f32) / scale_factor) as u32,
-            rotation,
-            scale_factor,
-            frequency,
-            is_primary: monitor_info.primary(),
-        })
+    let screen_buf = get_current_screen_buf()?;
+
+    let get_screen_resources_cookie = conn.send_request(&GetScreenResources {
+        window: screen_buf.root(),
+    });
+
+    let get_screen_resources_reply = conn.wait_for_reply(get_screen_resources_cookie)?;
+
+    let mode_infos = get_screen_resources_reply.modes().to_vec();
+
+    Ok(mode_infos)
+}
+
+impl ImplMonitor {
+    fn new(output: Output) -> ImplMonitor {
+        ImplMonitor { output }
     }
 
     pub fn all() -> XCapResult<Vec<ImplMonitor>> {
-        let (conn, index) = Connection::connect(None)?;
+        let (conn, _) = get_xcb_connection_and_index()?;
 
-        let setup = conn.get_setup();
-
-        let screen = setup
-            .roots()
-            .nth(index as usize)
-            .ok_or_else(|| XCapError::new("Not found screen"))?;
-
-        let scale_factor = get_scale_factor(&conn, screen).unwrap_or(1.0);
+        let screen_buf = get_current_screen_buf()?;
 
         let get_monitors_cookie = conn.send_request(&GetMonitors {
-            window: screen.root(),
+            window: screen_buf.root(),
             get_active: true,
         });
 
@@ -170,45 +144,11 @@ impl ImplMonitor {
 
         let monitor_info_iterator = get_monitors_reply.monitors();
 
-        let get_screen_resources_cookie = conn.send_request(&GetScreenResources {
-            window: screen.root(),
-        });
-
-        let get_screen_resources_reply = conn.wait_for_reply(get_screen_resources_cookie)?;
-
-        let mode_infos = get_screen_resources_reply.modes();
-
         let mut impl_monitors = Vec::new();
 
         for monitor_info in monitor_info_iterator {
-            let output = match monitor_info.outputs().first() {
-                Some(output) => output,
-                _ => continue,
-            };
-
-            let (rotation, frequency) =
-                get_rotation_frequency(&conn, mode_infos, output).unwrap_or((0.0, 0.0));
-
-            if let Ok(impl_monitor) = ImplMonitor::new(
-                &conn,
-                screen,
-                monitor_info,
-                output,
-                rotation,
-                scale_factor,
-                frequency,
-            ) {
-                impl_monitors.push(impl_monitor);
-            } else {
-                log::error!(
-                    "ImplMonitor::new(&conn, {:?}, {:?}, {:?}, {}, {}, {}) failed",
-                    screen,
-                    monitor_info,
-                    output,
-                    rotation,
-                    scale_factor,
-                    frequency
-                );
+            for &output in monitor_info.outputs() {
+                impl_monitors.push(ImplMonitor::new(output));
             }
         }
 
@@ -216,23 +156,111 @@ impl ImplMonitor {
     }
 
     pub fn from_point(x: i32, y: i32) -> XCapResult<ImplMonitor> {
-        let impl_monitors = ImplMonitor::all()?;
+        let (conn, _) = get_xcb_connection_and_index()?;
 
-        let impl_monitor = impl_monitors
-            .iter()
-            .find(|impl_monitor| {
-                x >= impl_monitor.x
-                    && x < impl_monitor.x + impl_monitor.width as i32
-                    && y >= impl_monitor.y
-                    && y < impl_monitor.y + impl_monitor.height as i32
-            })
-            .ok_or_else(|| XCapError::new("Get screen info failed"))?;
+        let screen_buf = get_current_screen_buf()?;
 
-        Ok(impl_monitor.clone())
+        let scale_factor = get_scale_factor().unwrap_or(1.0);
+
+        let get_monitors_cookie = conn.send_request(&GetMonitors {
+            window: screen_buf.root(),
+            get_active: true,
+        });
+
+        let get_monitors_reply = conn.wait_for_reply(get_monitors_cookie)?;
+
+        let monitor_info_iterator = get_monitors_reply.monitors();
+
+        let x = (x as f32 * scale_factor) as i32;
+        let y = (y as f32 * scale_factor) as i32;
+
+        for monitor_info in monitor_info_iterator {
+            let left = monitor_info.x() as i32;
+            let right = monitor_info.x() as i32 + monitor_info.width() as i32;
+            let top = monitor_info.y() as i32;
+            let bottom = monitor_info.y() as i32 + monitor_info.height() as i32;
+
+            if x >= left && x < right && y >= top && y < bottom {
+                if let Some(&output) = monitor_info.outputs().first() {
+                    return Ok(ImplMonitor::new(output));
+                }
+            }
+        }
+
+        Err(XCapError::new("Not found monitor"))
     }
 }
 
 impl ImplMonitor {
+    pub fn id(&self) -> XCapResult<u32> {
+        Ok(self.output.resource_id())
+    }
+
+    pub fn name(&self) -> XCapResult<String> {
+        let (conn, _) = get_xcb_connection_and_index()?;
+        let get_output_info_cookie = conn.send_request(&GetOutputInfo {
+            output: self.output,
+            config_timestamp: CURRENT_TIME,
+        });
+        let get_output_info_reply = conn.wait_for_reply(get_output_info_cookie)?;
+
+        let name = String::from_utf8(get_output_info_reply.name().to_vec())?;
+        Ok(name)
+    }
+
+    pub fn x(&self) -> XCapResult<i32> {
+        let x = get_monitor_info_buf(self.output)?.x();
+        let scale_factor = self.scale_factor()?;
+
+        Ok(((x as f32) / scale_factor) as i32)
+    }
+
+    pub fn y(&self) -> XCapResult<i32> {
+        let y = get_monitor_info_buf(self.output)?.y();
+        let scale_factor = self.scale_factor()?;
+
+        Ok(((y as f32) / scale_factor) as i32)
+    }
+
+    pub fn width(&self) -> XCapResult<u32> {
+        let width = get_monitor_info_buf(self.output)?.width();
+        let scale_factor = self.scale_factor()?;
+
+        Ok(((width as f32) / scale_factor) as u32)
+    }
+
+    pub fn height(&self) -> XCapResult<u32> {
+        let height = get_monitor_info_buf(self.output)?.height();
+        let scale_factor = self.scale_factor()?;
+
+        Ok(((height as f32) / scale_factor) as u32)
+    }
+
+    pub fn rotation(&self) -> XCapResult<f32> {
+        let mode_infos = get_mode_infos()?;
+        let (rotation, _) = get_rotation_frequency(mode_infos, &self.output).unwrap_or((0.0, 0.0));
+
+        Ok(rotation)
+    }
+
+    pub fn scale_factor(&self) -> XCapResult<f32> {
+        let scale_factor = get_scale_factor().unwrap_or(1.0);
+
+        Ok(scale_factor)
+    }
+
+    pub fn frequency(&self) -> XCapResult<f32> {
+        let mode_infos = get_mode_infos()?;
+        let (_, frequency) = get_rotation_frequency(mode_infos, &self.output).unwrap_or((0.0, 0.0));
+        Ok(frequency)
+    }
+
+    pub fn is_primary(&self) -> XCapResult<bool> {
+        let primary = get_monitor_info_buf(self.output)?.primary();
+
+        Ok(primary)
+    }
+
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         capture_monitor(self)
     }

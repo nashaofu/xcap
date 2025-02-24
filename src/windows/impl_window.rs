@@ -1,5 +1,5 @@
 use core::slice;
-use std::{cmp::Ordering, ffi::c_void, mem, ptr};
+use std::{ffi::c_void, mem, ptr};
 
 use image::RgbaImage;
 use widestring::U16CString;
@@ -19,9 +19,9 @@ use windows::{
             },
         },
         UI::WindowsAndMessaging::{
-            EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowInfo, GetWindowLongPtrW,
+            EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowLongPtrW,
             GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
-            IsWindowVisible, IsZoomed, GWL_EXSTYLE, WINDOWINFO, WINDOW_EX_STYLE, WS_EX_TOOLWINDOW,
+            IsWindowVisible, IsZoomed, GWL_EXSTYLE, WINDOW_EX_STYLE, WS_EX_TOOLWINDOW,
         },
     },
 };
@@ -31,26 +31,12 @@ use crate::{error::XCapResult, platform::utils::log_last_error};
 use super::{
     capture::capture_window,
     impl_monitor::ImplMonitor,
-    utils::{get_process_is_dpi_awareness, open_process},
+    utils::{get_process_is_dpi_awareness, get_window_info, open_process},
 };
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImplWindow {
     pub hwnd: HWND,
-    #[allow(unused)]
-    pub window_info: WINDOWINFO,
-    pub id: u32,
-    pub title: String,
-    pub app_name: String,
-    pub pid: u32,
-    pub current_monitor: ImplMonitor,
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-    pub width: u32,
-    pub height: u32,
-    pub is_minimized: bool,
-    pub is_maximized: bool,
 }
 
 fn is_window_cloaked(hwnd: HWND) -> bool {
@@ -102,13 +88,13 @@ fn is_valid_window(hwnd: HWND) -> bool {
         }
 
         let gwl_ex_style = WINDOW_EX_STYLE(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32);
-        let title = get_window_title(hwnd).unwrap_or_default();
 
         // 过滤掉具有 WS_EX_TOOLWINDOW 样式的窗口
         if gwl_ex_style.contains(WS_EX_TOOLWINDOW) {
+            let title = get_window_title(hwnd).unwrap_or_default();
+
             // windows 任务栏可以捕获
-            if class_name.cmp(&String::from("Shell_TrayWnd")) != Ordering::Equal && title.is_empty()
-            {
+            if class_name.ne(&"Shell_TrayWnd") && title.is_empty() {
                 return false;
             }
         }
@@ -129,13 +115,13 @@ fn is_valid_window(hwnd: HWND) -> bool {
         }
 
         // Skip Program Manager window.
-        if class_name.cmp(&String::from("Progman")) == Ordering::Equal {
+        if class_name.eq("Progman") {
             return false;
         }
         // Skip Start button window on Windows Vista, Windows 7.
         // On Windows 8, Windows 8.1, Windows 10 Start button is not a top level
         // window, so it will not be examined here.
-        if class_name.cmp(&String::from("Button")) == Ordering::Equal {
+        if class_name.eq("Button") {
             return false;
         }
 
@@ -165,14 +151,20 @@ fn is_valid_window(hwnd: HWND) -> bool {
     true
 }
 
-unsafe extern "system" fn enum_windows_proc(hwnd: HWND, state: LPARAM) -> BOOL {
-    let state = Box::leak(Box::from_raw(state.0 as *mut (Vec<(HWND, i32)>, i32)));
+unsafe extern "system" fn enum_valid_windows(hwnd: HWND, state: LPARAM) -> BOOL {
+    let state = Box::leak(Box::from_raw(state.0 as *mut Vec<HWND>));
 
     if is_valid_window(hwnd) {
-        state.0.push((hwnd, state.1));
+        state.push(hwnd);
     }
 
-    state.1 += 1;
+    TRUE
+}
+
+unsafe extern "system" fn enum_all_windows(hwnd: HWND, state: LPARAM) -> BOOL {
+    let state = Box::leak(Box::from_raw(state.0 as *mut Vec<HWND>));
+
+    state.push(hwnd);
 
     TRUE
 }
@@ -312,68 +304,22 @@ fn get_app_name(pid: u32) -> XCapResult<String> {
 }
 
 impl ImplWindow {
-    fn new(hwnd: HWND, z: i32) -> XCapResult<ImplWindow> {
-        unsafe {
-            let mut window_info = WINDOWINFO {
-                cbSize: mem::size_of::<WINDOWINFO>() as u32,
-                ..WINDOWINFO::default()
-            };
-
-            GetWindowInfo(hwnd, &mut window_info)?;
-
-            let title = get_window_title(hwnd)?;
-            let pid = get_window_pid(hwnd);
-            let app_name = get_app_name(pid)?;
-
-            let h_monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-            let rc_client = window_info.rcClient;
-            let is_minimized = IsIconic(hwnd).as_bool();
-            let is_maximized = IsZoomed(hwnd).as_bool();
-
-            Ok(ImplWindow {
-                hwnd,
-                window_info,
-                id: hwnd.0 as u32,
-                title,
-                app_name,
-                pid,
-                current_monitor: ImplMonitor::new(h_monitor)?,
-                x: rc_client.left,
-                y: rc_client.top,
-                z,
-                width: (rc_client.right - rc_client.left) as u32,
-                height: (rc_client.bottom - rc_client.top) as u32,
-                is_minimized,
-                is_maximized,
-            })
-        }
-    }
-
-    pub fn is_focused(&self) -> bool {
-        unsafe { GetForegroundWindow() == self.hwnd }
+    fn new(hwnd: HWND) -> ImplWindow {
+        ImplWindow { hwnd }
     }
 
     pub fn all() -> XCapResult<Vec<ImplWindow>> {
-        // (HWND, i32) 表示当前窗口以及层级，既（窗口，层级 z），i32 表示 max_z_order，既最大的窗口的 z 顺序
-        // 窗口当前层级为 max_z_order - z
-        let hwnds_mut_ptr: *mut (Vec<(HWND, i32)>, i32) = Box::into_raw(Box::default());
+        let hwnds_mut_ptr: *mut Vec<HWND> = Box::into_raw(Box::default());
 
         let hwnds = unsafe {
-            // EnumWindows 函数按照 Z 顺序遍历顶层窗口，从最顶层的窗口开始，依次向下遍历。
-            EnumWindows(Some(enum_windows_proc), LPARAM(hwnds_mut_ptr as isize))?;
+            EnumWindows(Some(enum_valid_windows), LPARAM(hwnds_mut_ptr as isize))?;
             Box::from_raw(hwnds_mut_ptr)
         };
 
         let mut impl_windows = Vec::new();
 
-        let max_z_order = hwnds.1;
-
-        for &(hwnd, z) in hwnds.0.iter() {
-            if let Ok(impl_window) = ImplWindow::new(hwnd, max_z_order - z) {
-                impl_windows.push(impl_window);
-            } else {
-                log::error!("ImplWindow::new({:?}) failed", hwnd);
-            }
+        for &hwnd in hwnds.iter() {
+            impl_windows.push(ImplWindow::new(hwnd));
         }
 
         Ok(impl_windows)
@@ -381,10 +327,86 @@ impl ImplWindow {
 }
 
 impl ImplWindow {
+    pub fn id(&self) -> XCapResult<u32> {
+        Ok(self.hwnd.0 as u32)
+    }
+
+    pub fn pid(&self) -> XCapResult<u32> {
+        let pid = get_window_pid(self.hwnd);
+        Ok(pid)
+    }
+
+    pub fn app_name(&self) -> XCapResult<String> {
+        get_app_name(self.pid()?)
+    }
+
+    pub fn title(&self) -> XCapResult<String> {
+        get_window_title(self.hwnd)
+    }
+
+    pub fn current_monitor(&self) -> XCapResult<ImplMonitor> {
+        let h_monitor = unsafe { MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST) };
+
+        Ok(ImplMonitor::new(h_monitor))
+    }
+
+    pub fn x(&self) -> XCapResult<i32> {
+        let window_info = get_window_info(self.hwnd)?;
+        Ok(window_info.rcClient.left)
+    }
+
+    pub fn y(&self) -> XCapResult<i32> {
+        let window_info = get_window_info(self.hwnd)?;
+        Ok(window_info.rcClient.top)
+    }
+
+    pub fn z(&self) -> XCapResult<i32> {
+        let hwnds_mut_ptr: *mut Vec<HWND> = Box::into_raw(Box::default());
+
+        let hwnds = unsafe {
+            // EnumWindows 函数按照 Z 顺序遍历顶层窗口，从最顶层的窗口开始，依次向下遍历。
+            EnumWindows(Some(enum_all_windows), LPARAM(hwnds_mut_ptr as isize))?;
+            Box::from_raw(hwnds_mut_ptr)
+        };
+
+        let mut z = hwnds.len() as i32;
+        for &hwnd in hwnds.iter() {
+            z -= 1;
+            if self.hwnd == hwnd {
+                break;
+            }
+        }
+
+        Ok(z)
+    }
+
+    pub fn width(&self) -> XCapResult<u32> {
+        let window_info = get_window_info(self.hwnd)?;
+        Ok((window_info.rcClient.right - window_info.rcClient.left) as u32)
+    }
+
+    pub fn height(&self) -> XCapResult<u32> {
+        let window_info = get_window_info(self.hwnd)?;
+        Ok((window_info.rcClient.bottom - window_info.rcClient.top) as u32)
+    }
+
+    pub fn is_minimized(&self) -> XCapResult<bool> {
+        unsafe { Ok(IsIconic(self.hwnd).as_bool()) }
+    }
+
+    pub fn is_maximized(&self) -> XCapResult<bool> {
+        unsafe { Ok(IsZoomed(self.hwnd).as_bool()) }
+    }
+
+    pub fn is_focused(&self) -> XCapResult<bool> {
+        unsafe { Ok(GetForegroundWindow() == self.hwnd) }
+    }
+
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         // 在win10之后，不同窗口有不同的dpi，所以可能存在截图不全或者截图有较大空白，实际窗口没有填充满图片
         // 如果窗口不感知dpi，那么就不需要缩放，如果当前进程感知dpi，那么也不需要缩放
-        let scope_guard_handle = open_process(PROCESS_QUERY_LIMITED_INFORMATION, false, self.pid)?;
+        let scope_guard_handle =
+            open_process(PROCESS_QUERY_LIMITED_INFORMATION, false, self.pid()?)?;
         let window_is_dpi_awareness = get_process_is_dpi_awareness(*scope_guard_handle)?;
         let current_process_is_dpi_awareness =
             unsafe { get_process_is_dpi_awareness(GetCurrentProcess())? };
@@ -394,9 +416,9 @@ impl ImplWindow {
         } else if current_process_is_dpi_awareness {
             1.0
         } else {
-            self.current_monitor.scale_factor
+            self.current_monitor()?.scale_factor()?
         };
 
-        capture_window(self.hwnd, scale_factor, &self.window_info)
+        capture_window(self.hwnd, scale_factor)
     }
 }

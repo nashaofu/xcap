@@ -13,12 +13,12 @@ use windows::Win32::{
         },
     },
     Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS},
-    UI::WindowsAndMessaging::{GetDesktopWindow, WINDOWINFO},
+    UI::WindowsAndMessaging::GetDesktopWindow,
 };
 
 use crate::error::{XCapError, XCapResult};
 
-use super::utils::{bgra_to_rgba_image, get_os_major_version};
+use super::utils::{bgra_to_rgba_image, get_os_major_version, get_window_info};
 
 fn to_rgba_image(
     hdc_mem: HDC,
@@ -120,11 +120,8 @@ pub fn capture_monitor(x: i32, y: i32, width: i32, height: i32) -> XCapResult<Rg
 }
 
 #[allow(unused)]
-pub fn capture_window(
-    hwnd: HWND,
-    scale_factor: f32,
-    window_info: &WINDOWINFO,
-) -> XCapResult<RgbaImage> {
+pub fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaImage> {
+    let window_info = get_window_info(hwnd)?;
     unsafe {
         let rc_window = window_info.rcWindow;
 

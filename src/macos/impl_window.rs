@@ -4,14 +4,13 @@ use image::RgbaImage;
 use objc2_app_kit::NSWorkspace;
 use objc2_core_foundation::{
     CFArrayGetCount, CFArrayGetValueAtIndex, CFBoolean, CFBooleanGetValue, CFDictionary,
-    CFDictionaryGetValue, CFNumber, CFNumberGetValue, CFNumberType, CFString, CGPoint, CGRect,
-    CGSize,
+    CFDictionaryCreateCopy, CFDictionaryGetValue, CFNumber, CFNumberGetValue, CFNumberType,
+    CFRetained, CFString, CGPoint, CGRect,
 };
 use objc2_core_graphics::{
     CGDisplayBounds, CGMainDisplayID, CGRectContainsPoint, CGRectIntersectsRect,
     CGRectMakeWithDictionaryRepresentation, CGWindowListCopyWindowInfo, CGWindowListOption,
 };
-use objc2_foundation::{NSNumber, NSString};
 
 use crate::{error::XCapResult, XCapError};
 
@@ -19,18 +18,7 @@ use super::{capture::capture, impl_monitor::ImplMonitor};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImplWindow {
-    pub id: u32,
-    pub title: String,
-    pub app_name: String,
-    pub pid: u32,
-    pub current_monitor: ImplMonitor,
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-    pub width: u32,
-    pub height: u32,
-    pub is_minimized: bool,
-    pub is_maximized: bool,
+    pub window_id: u32,
 }
 
 unsafe impl Send for ImplWindow {}
@@ -110,84 +98,73 @@ fn get_window_cg_rect(window_cf_dictionary: &CFDictionary) -> XCapResult<CGRect>
     }
 }
 
-impl ImplWindow {
-    pub fn new(
-        window_cf_dictionary: &CFDictionary,
-        impl_monitors: &[ImplMonitor],
-        window_name: String,
-        window_owner_name: String,
-        z: i32,
-    ) -> XCapResult<ImplWindow> {
-        let id = get_cf_number_i32_value(window_cf_dictionary, "kCGWindowNumber")? as u32;
-        let pid = get_cf_number_i32_value(window_cf_dictionary, "kCGWindowOwnerPID")?;
+fn get_window_id(window_cf_dictionary: &CFDictionary) -> XCapResult<u32> {
+    let window_name = get_cf_string_value(window_cf_dictionary, "kCGWindowName")?;
 
-        let cg_rect = get_window_cg_rect(window_cf_dictionary)?;
+    let window_owner_name = get_cf_string_value(window_cf_dictionary, "kCGWindowOwnerName")?;
 
-        let primary_monitor = ImplMonitor::new(unsafe { CGMainDisplayID() })?;
-
-        let (is_maximized, current_monitor) = {
-            // 获取窗口中心点的坐标
-            let window_center_x = cg_rect.origin.x + cg_rect.size.width / 2.0;
-            let window_center_y = cg_rect.origin.y + cg_rect.size.height / 2.0;
-            let cg_point = CGPoint {
-                x: window_center_x,
-                y: window_center_y,
-            };
-
-            let impl_monitor = impl_monitors
-                .iter()
-                .find(|impl_monitor| unsafe {
-                    let display_bounds = CGDisplayBounds(impl_monitor.cg_direct_display_id);
-                    CGRectContainsPoint(display_bounds, cg_point)
-                        || CGRectIntersectsRect(display_bounds, cg_rect)
-                })
-                .unwrap_or(&primary_monitor);
-
-            (
-                cg_rect.size.width as u32 >= impl_monitor.width
-                    && cg_rect.size.height as u32 >= impl_monitor.height,
-                impl_monitor,
-            )
-        };
-
-        let is_minimized =
-            !get_cf_bool_value(window_cf_dictionary, "kCGWindowIsOnscreen")? && !is_maximized;
-
-        Ok(ImplWindow {
-            id,
-            title: window_name,
-            app_name: window_owner_name,
-            pid: pid as u32,
-            current_monitor: current_monitor.clone(),
-            x: cg_rect.origin.x as i32,
-            y: cg_rect.origin.y as i32,
-            z,
-            width: cg_rect.size.width as u32,
-            height: cg_rect.size.height as u32,
-            is_minimized,
-            is_maximized,
-        })
+    if window_name.eq("StatusIndicator") && window_owner_name.eq("Window Server") {
+        return Err(XCapError::new("Window is StatusIndicator"));
     }
 
-    pub fn is_focused(&self) -> bool {
-        let focused_app_pid = unsafe {
-            let workspace = NSWorkspace::sharedWorkspace();
-            let pid_key = NSString::from_str("NSApplicationProcessIdentifier");
-            workspace
-                .activeApplication()
-                .and_then(|dictionary| dictionary.valueForKey(&pid_key))
-                .and_then(|pid| pid.downcast::<NSNumber>().ok())
-                .map(|pid| pid.intValue())
+    let window_sharing_state =
+        get_cf_number_i32_value(window_cf_dictionary, "kCGWindowSharingState")?;
+
+    if window_sharing_state == 0 {
+        return Err(XCapError::new("Window sharing state is 0"));
+    }
+
+    let window_id = get_cf_number_i32_value(window_cf_dictionary, "kCGWindowNumber")?;
+
+    Ok(window_id as u32)
+}
+
+pub fn get_window_cf_dictionary(window_id: u32) -> XCapResult<CFRetained<CFDictionary>> {
+    unsafe {
+        // CGWindowListCopyWindowInfo 返回窗口顺序为从顶层到最底层
+        // 即在前面的窗口在数组前面
+        let cf_array = match CGWindowListCopyWindowInfo(
+            CGWindowListOption::OptionOnScreenOnly | CGWindowListOption::ExcludeDesktopElements,
+            0,
+        ) {
+            Some(cf_array) => cf_array,
+            None => return Err(XCapError::new("Get window info failed")),
         };
 
-        focused_app_pid.eq(&Some(self.pid as i32))
+        let windows_count = CFArrayGetCount(&cf_array);
+
+        for i in 0..windows_count {
+            let window_cf_dictionary_ref =
+                CFArrayGetValueAtIndex(&cf_array, i) as *const CFDictionary;
+
+            if window_cf_dictionary_ref.is_null() {
+                continue;
+            }
+            let window_cf_dictionary = &*window_cf_dictionary_ref;
+
+            let current_window_id = match get_window_id(window_cf_dictionary) {
+                Ok(val) => val,
+                Err(_) => continue,
+            };
+
+            if current_window_id == window_id {
+                let s = CFDictionaryCreateCopy(None, Some(window_cf_dictionary)).unwrap();
+                return Ok(s);
+            }
+        }
+
+        Err(XCapError::new("Window not found"))
+    }
+}
+
+impl ImplWindow {
+    pub fn new(window_id: u32) -> ImplWindow {
+        ImplWindow { window_id }
     }
 
     pub fn all() -> XCapResult<Vec<ImplWindow>> {
         unsafe {
-            let impl_monitors = ImplMonitor::all()?;
-
-            let mut impl_windows = Vec::new();
+            let mut impl_window = Vec::new();
 
             // CGWindowListCopyWindowInfo 返回窗口顺序为从顶层到最底层
             // 即在前面的窗口在数组前面
@@ -196,12 +173,12 @@ impl ImplWindow {
                 0,
             ) {
                 Some(cf_array) => cf_array,
-                None => return Ok(impl_windows),
+                None => return Ok(impl_window),
             };
 
-            let num_windows = CFArrayGetCount(&cf_array);
+            let windows_count = CFArrayGetCount(&cf_array);
 
-            for i in 0..num_windows {
+            for i in 0..windows_count {
                 let window_cf_dictionary_ref =
                     CFArrayGetValueAtIndex(&cf_array, i) as *const CFDictionary;
 
@@ -211,64 +188,192 @@ impl ImplWindow {
 
                 let window_cf_dictionary = &*window_cf_dictionary_ref;
 
-                let window_name = match get_cf_string_value(window_cf_dictionary, "kCGWindowName") {
-                    Ok(window_name) => window_name,
-                    _ => continue,
+                let window_id = match get_window_id(window_cf_dictionary) {
+                    Ok(window_id) => window_id,
+                    Err(_) => continue,
                 };
 
-                let window_owner_name =
-                    match get_cf_string_value(window_cf_dictionary, "kCGWindowOwnerName") {
-                        Ok(window_owner_name) => window_owner_name,
-                        _ => continue,
-                    };
-
-                if window_name.eq("StatusIndicator") && window_owner_name.eq("Window Server") {
-                    continue;
-                }
-
-                let window_sharing_state =
-                    match get_cf_number_i32_value(window_cf_dictionary, "kCGWindowSharingState") {
-                        Ok(window_sharing_state) => window_sharing_state as u32,
-                        _ => continue,
-                    };
-
-                if window_sharing_state == 0 {
-                    continue;
-                }
-
-                if let Ok(impl_window) = ImplWindow::new(
-                    window_cf_dictionary,
-                    &impl_monitors,
-                    window_name.clone(),
-                    window_owner_name.clone(),
-                    num_windows as i32 - i as i32 - 1,
-                ) {
-                    impl_windows.push(impl_window);
-                } else {
-                    log::error!(
-                        "ImplWindow::new({:?}, {:?}, {:?}, {:?}) failed",
-                        window_cf_dictionary,
-                        &impl_monitors,
-                        &window_name,
-                        &window_owner_name
-                    );
-                }
+                impl_window.push(ImplWindow::new(window_id));
             }
 
-            Ok(impl_windows)
+            Ok(impl_window)
         }
     }
 }
 
 impl ImplWindow {
+    pub fn id(&self) -> XCapResult<u32> {
+        Ok(self.window_id)
+    }
+
+    pub fn pid(&self) -> XCapResult<u32> {
+        let window_cf_dictionary = get_window_cf_dictionary(self.window_id)?;
+
+        let pid = get_cf_number_i32_value(window_cf_dictionary.as_ref(), "kCGWindowOwnerPID")?;
+
+        Ok(pid as u32)
+    }
+
+    pub fn app_name(&self) -> XCapResult<String> {
+        let window_cf_dictionary = get_window_cf_dictionary(self.window_id)?;
+
+        get_cf_string_value(window_cf_dictionary.as_ref(), "kCGWindowOwnerName")
+    }
+
+    pub fn title(&self) -> XCapResult<String> {
+        let window_cf_dictionary = get_window_cf_dictionary(self.window_id)?;
+
+        get_cf_string_value(window_cf_dictionary.as_ref(), "kCGWindowName")
+    }
+
+    pub fn current_monitor(&self) -> XCapResult<ImplMonitor> {
+        let window_cf_dictionary = get_window_cf_dictionary(self.window_id)?;
+        let cg_rect = get_window_cg_rect(window_cf_dictionary.as_ref())?;
+
+        // 获取窗口中心点的坐标
+        let window_center_x = cg_rect.origin.x + cg_rect.size.width / 2.0;
+        let window_center_y = cg_rect.origin.y + cg_rect.size.height / 2.0;
+        let cg_point = CGPoint {
+            x: window_center_x,
+            y: window_center_y,
+        };
+
+        let impl_monitors = ImplMonitor::all()?;
+        let primary_monitor = ImplMonitor::new(unsafe { CGMainDisplayID() });
+
+        let impl_monitor = impl_monitors
+            .iter()
+            .find(|impl_monitor| unsafe {
+                let display_bounds = CGDisplayBounds(impl_monitor.cg_direct_display_id);
+                CGRectContainsPoint(display_bounds, cg_point)
+                    || CGRectIntersectsRect(display_bounds, cg_rect)
+            })
+            .unwrap_or(&primary_monitor);
+
+        Ok(impl_monitor.to_owned())
+    }
+
+    pub fn x(&self) -> XCapResult<i32> {
+        let window_cf_dictionary = get_window_cf_dictionary(self.window_id)?;
+
+        let cg_rect = get_window_cg_rect(window_cf_dictionary.as_ref())?;
+
+        Ok(cg_rect.origin.x as i32)
+    }
+
+    pub fn y(&self) -> XCapResult<i32> {
+        let window_cf_dictionary = get_window_cf_dictionary(self.window_id)?;
+
+        let cg_rect = get_window_cg_rect(window_cf_dictionary.as_ref())?;
+
+        Ok(cg_rect.origin.y as i32)
+    }
+
+    pub fn z(&self) -> XCapResult<i32> {
+        unsafe {
+            // CGWindowListCopyWindowInfo 返回窗口顺序为从顶层到最底层
+            // 即在前面的窗口在数组前面
+            let cf_array = match CGWindowListCopyWindowInfo(
+                CGWindowListOption::OptionOnScreenOnly | CGWindowListOption::ExcludeDesktopElements,
+                0,
+            ) {
+                Some(cf_array) => cf_array,
+                None => return Err(XCapError::new("Get window list failed")),
+            };
+
+            let windows_count = CFArrayGetCount(&cf_array);
+            let mut z = windows_count as i32;
+
+            for i in 0..windows_count {
+                z -= 1;
+                let window_cf_dictionary_ref =
+                    CFArrayGetValueAtIndex(&cf_array, i) as *const CFDictionary;
+
+                if window_cf_dictionary_ref.is_null() {
+                    continue;
+                }
+
+                let window_cf_dictionary = &*window_cf_dictionary_ref;
+
+                let window_id = match get_window_id(window_cf_dictionary) {
+                    Ok(window_id) => window_id,
+                    Err(_) => continue,
+                };
+
+                if window_id == self.window_id {
+                    break;
+                }
+            }
+
+            Ok(z)
+        }
+    }
+
+    pub fn width(&self) -> XCapResult<u32> {
+        let window_cf_dictionary = get_window_cf_dictionary(self.window_id)?;
+
+        let cg_rect = get_window_cg_rect(window_cf_dictionary.as_ref())?;
+
+        Ok(cg_rect.size.width as u32)
+    }
+
+    pub fn height(&self) -> XCapResult<u32> {
+        let window_cf_dictionary = get_window_cf_dictionary(self.window_id)?;
+
+        let cg_rect = get_window_cg_rect(window_cf_dictionary.as_ref())?;
+
+        Ok(cg_rect.size.height as u32)
+    }
+
+    pub fn is_minimized(&self) -> XCapResult<bool> {
+        let window_cf_dictionary = get_window_cf_dictionary(self.window_id)?;
+        let is_on_screen = get_cf_bool_value(window_cf_dictionary.as_ref(), "kCGWindowIsOnscreen")?;
+        let is_maximized = self.is_maximized()?;
+
+        Ok(!is_on_screen && !is_maximized)
+    }
+
+    pub fn is_maximized(&self) -> XCapResult<bool> {
+        let window_cf_dictionary = get_window_cf_dictionary(self.window_id)?;
+
+        let cg_rect = get_window_cg_rect(window_cf_dictionary.as_ref())?;
+        let impl_monitor = self.current_monitor()?;
+        let impl_monitor_width = impl_monitor.width()?;
+        let impl_monitor_height = impl_monitor.height()?;
+
+        let is_maximized = {
+            cg_rect.size.width as u32 >= impl_monitor_width
+                && cg_rect.size.height as u32 >= impl_monitor_height
+        };
+
+        Ok(is_maximized)
+    }
+
+    pub fn is_focused(&self) -> XCapResult<bool> {
+        unsafe {
+            let workspace = NSWorkspace::sharedWorkspace();
+            let apps = workspace.runningApplications();
+            let pid = self.pid()? as i32;
+
+            for app in apps {
+                if app.isActive() && app.processIdentifier() == pid {
+                    return Ok(true);
+                }
+            }
+        }
+
+        Ok(false)
+    }
+
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
+        let window_cf_dictionary = get_window_cf_dictionary(self.window_id)?;
+
+        let cg_rect = get_window_cg_rect(window_cf_dictionary.as_ref())?;
+
         capture(
-            CGRect::new(
-                CGPoint::new(self.x as f64, self.y as f64),
-                CGSize::new(self.width as f64, self.height as f64),
-            ),
+            cg_rect,
             CGWindowListOption::OptionIncludingWindow,
-            self.id,
+            self.window_id,
         )
     }
 }

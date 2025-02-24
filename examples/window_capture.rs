@@ -15,15 +15,23 @@ fn main() {
     let mut i = 0;
     for window in windows {
         // 最小化的窗口不能截屏
-        if window.is_minimized() {
+        if window.is_minimized().unwrap() {
             continue;
         }
 
         println!(
             "Window: {:?} {:?} {:?}",
-            window.title(),
-            (window.x(), window.y(), window.width(), window.height()),
-            (window.is_minimized(), window.is_maximized())
+            window.title().unwrap(),
+            (
+                window.x().unwrap(),
+                window.y().unwrap(),
+                window.width().unwrap(),
+                window.height().unwrap()
+            ),
+            (
+                window.is_minimized().unwrap(),
+                window.is_maximized().unwrap()
+            )
         );
 
         let image = window.capture_image().unwrap();
@@ -31,7 +39,7 @@ fn main() {
             .save(format!(
                 "target/windows/window-{}-{}.png",
                 i,
-                normalized(window.title())
+                normalized(&window.title().unwrap())
             ))
             .unwrap();
 

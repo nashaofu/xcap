@@ -1,6 +1,6 @@
 [package]
 name = "xcap"
-version = "0.3.3"
+version = "0.4.0"
 edition = "2021"
 description = "XCap is a cross-platform screen capture library written in Rust. It supports Linux (X11, Wayland), MacOS, and Windows. XCap supports screenshot and video recording (WIP)."
 license = "Apache-2.0"
@@ -50,6 +50,7 @@ windows = { version = "0.59", features = [
 
 [target.'cfg(target_os="linux")'.dependencies]
 dbus = "0.9"
+lazy_static = "1.5"
 percent-encoding = "2.3"
 xcb = { version = "1.5", features = ["randr"] }
 
