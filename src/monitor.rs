@@ -1,6 +1,10 @@
+use std::sync::mpsc::Receiver;
+
 use image::RgbaImage;
 
-use crate::{error::XCapResult, platform::impl_monitor::ImplMonitor, VideoRecorder};
+use crate::{
+    error::XCapResult, platform::impl_monitor::ImplMonitor, video_recorder::Frame, VideoRecorder,
+};
 
 #[derive(Debug, Clone)]
 pub struct Monitor {
@@ -79,9 +83,9 @@ impl Monitor {
         self.impl_monitor.capture_image()
     }
 
-    pub fn video_recorder(&self) -> XCapResult<VideoRecorder> {
-        let impl_video_recorder = self.impl_monitor.video_recorder()?;
+    pub fn video_recorder(&self) -> XCapResult<(VideoRecorder, Receiver<Frame>)> {
+        let (impl_video_recorder, sx) = self.impl_monitor.video_recorder()?;
 
-        Ok(VideoRecorder::new(impl_video_recorder))
+        Ok((VideoRecorder::new(impl_video_recorder), sx))
     }
 }

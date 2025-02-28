@@ -1,15 +1,20 @@
+use std::sync::mpsc::Receiver;
+
 use image::RgbaImage;
 use objc2::MainThreadMarker;
 use objc2_app_kit::NSScreen;
 use objc2_core_foundation::CGPoint;
 use objc2_core_graphics::{
     CGDirectDisplayID, CGDisplayBounds, CGDisplayCopyDisplayMode, CGDisplayIsActive,
-    CGDisplayIsMain, CGDisplayModeGetPixelWidth, CGDisplayModeGetRefreshRate, CGDisplayRotation,
-    CGError, CGGetActiveDisplayList, CGGetDisplaysWithPoint, CGWindowListOption,
+    CGDisplayIsBuiltin, CGDisplayIsMain, CGDisplayModeGetPixelWidth, CGDisplayModeGetRefreshRate,
+    CGDisplayRotation, CGError, CGGetActiveDisplayList, CGGetDisplaysWithPoint, CGWindowListOption,
 };
 use objc2_foundation::{NSNumber, NSString};
 
-use crate::error::{XCapError, XCapResult};
+use crate::{
+    error::{XCapError, XCapResult},
+    video_recorder::Frame,
+};
 
 use super::{capture::capture, impl_video_recorder::ImplVideoRecorder};
 
@@ -185,13 +190,19 @@ impl ImplMonitor {
         Ok(is_primary)
     }
 
+    pub fn is_builtin(&self) -> XCapResult<bool> {
+        let is_builtin = unsafe { CGDisplayIsBuiltin(self.cg_direct_display_id) };
+
+        Ok(is_builtin)
+    }
+
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         let cg_rect = unsafe { CGDisplayBounds(self.cg_direct_display_id) };
 
         capture(cg_rect, CGWindowListOption::OptionAll, 0)
     }
 
-    pub fn video_recorder(&self) -> XCapResult<ImplVideoRecorder> {
-        ImplVideoRecorder::new()
+    pub fn video_recorder(&self) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {
+        ImplVideoRecorder::new(self.cg_direct_display_id)
     }
 }
