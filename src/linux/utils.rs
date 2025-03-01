@@ -2,8 +2,8 @@ use image::{open, RgbaImage};
 use lazy_static::lazy_static;
 use xcb::{
     randr::{GetMonitors, MonitorInfoBuf, Output},
-    x::ScreenBuf,
-    ConnResult, Connection,
+    x::{Atom, InternAtom, ScreenBuf},
+    ConnResult, Connection, Xid,
 };
 
 use crate::{error::XCapResult, XCapError};
@@ -54,6 +54,22 @@ pub fn get_monitor_info_buf(output: Output) -> XCapResult<MonitorInfoBuf> {
         }
     }
     Err(XCapError::new("Not found monitor"))
+}
+
+pub fn get_atom(name: &str) -> XCapResult<Atom> {
+    let (conn, _) = get_xcb_connection_and_index()?;
+    let atom_cookie = conn.send_request(&InternAtom {
+        only_if_exists: true,
+        name: name.as_bytes(),
+    });
+    let atom_reply = conn.wait_for_reply(atom_cookie)?;
+    let atom = atom_reply.atom();
+
+    if atom.is_none() {
+        return Err(XCapError::new(format!("{} not supported", name)));
+    }
+
+    Ok(atom)
 }
 
 pub(super) fn png_to_rgba_image(

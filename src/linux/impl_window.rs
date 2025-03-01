@@ -1,40 +1,24 @@
 use image::RgbaImage;
-use std::str;
 use xcb::{
     x::{
-        Atom, Drawable, GetGeometry, GetProperty, GetPropertyReply, InternAtom, QueryPointer,
+        Atom, Drawable, GetGeometry, GetProperty, GetPropertyReply, QueryPointer,
         TranslateCoordinates, Window, ATOM_ATOM, ATOM_CARDINAL, ATOM_NONE, ATOM_STRING,
         ATOM_WM_CLASS, ATOM_WM_NAME,
     },
     Xid,
 };
 
-use crate::{
-    error::{XCapError, XCapResult},
-    platform::utils::get_xcb_connection_and_index,
-};
+use crate::error::{XCapError, XCapResult};
 
-use super::{capture::capture_window, impl_monitor::ImplMonitor};
+use super::{
+    capture::capture_window,
+    impl_monitor::ImplMonitor,
+    utils::{get_atom, get_xcb_connection_and_index},
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ImplWindow {
     pub window: Window,
-}
-
-fn get_atom(name: &str) -> XCapResult<Atom> {
-    let (conn, _) = get_xcb_connection_and_index()?;
-    let atom_cookie = conn.send_request(&InternAtom {
-        only_if_exists: true,
-        name: name.as_bytes(),
-    });
-    let atom_reply = conn.wait_for_reply(atom_cookie)?;
-    let atom = atom_reply.atom();
-
-    if atom.is_none() {
-        return Err(XCapError::new(format!("{} not supported", name)));
-    }
-
-    Ok(atom)
 }
 
 fn get_window_property(

@@ -70,12 +70,6 @@ impl VideoRecorder {
 }
 
 impl VideoRecorder {
-    pub fn on_frame<F>(&self, on_frame: F) -> XCapResult<()>
-    where
-        F: Fn(Frame) -> XCapResult<()> + Send + 'static,
-    {
-        self.impl_video_recorder.on_frame(on_frame)
-    }
     pub fn start(&self) -> XCapResult<()> {
         self.impl_video_recorder.start()
     }

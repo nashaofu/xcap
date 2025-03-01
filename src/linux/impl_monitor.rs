@@ -1,19 +1,24 @@
+use std::{ffi::CStr, sync::mpsc::Receiver};
+
 use image::RgbaImage;
 use xcb::{
     randr::{
-        GetCrtcInfo, GetMonitors, GetOutputInfo, GetScreenResources, Mode, ModeFlag, ModeInfo,
-        Output, Rotation,
+        GetCrtcInfo, GetMonitors, GetOutputInfo, GetOutputProperty, GetScreenResources, Mode,
+        ModeFlag, ModeInfo, Output, Rotation,
     },
-    x::{GetProperty, ATOM_RESOURCE_MANAGER, ATOM_STRING, CURRENT_TIME},
+    x::{GetProperty, ATOM_ANY, ATOM_RESOURCE_MANAGER, ATOM_STRING, CURRENT_TIME},
     Xid,
 };
 
-use crate::error::{XCapError, XCapResult};
+use crate::{
+    error::{XCapError, XCapResult},
+    video_recorder::Frame,
+};
 
 use super::{
     capture::capture_monitor,
     impl_video_recorder::ImplVideoRecorder,
-    utils::{get_current_screen_buf, get_monitor_info_buf, get_xcb_connection_and_index},
+    utils::{get_atom, get_current_screen_buf, get_monitor_info_buf, get_xcb_connection_and_index},
 };
 
 #[derive(Debug, Clone)]
@@ -82,14 +87,14 @@ fn get_rotation_frequency(mode_infos: Vec<ModeInfo>, output: &Output) -> XCapRes
     let (conn, _) = get_xcb_connection_and_index()?;
     let get_output_info_cookie = conn.send_request(&GetOutputInfo {
         output: *output,
-        config_timestamp: 0,
+        config_timestamp: CURRENT_TIME,
     });
 
     let get_output_info_reply = conn.wait_for_reply(get_output_info_cookie)?;
 
     let get_crtc_info_cookie = conn.send_request(&GetCrtcInfo {
         crtc: get_output_info_reply.crtc(),
-        config_timestamp: 0,
+        config_timestamp: CURRENT_TIME,
     });
 
     let get_crtc_info_reply = conn.wait_for_reply(get_crtc_info_cookie)?;
@@ -123,6 +128,50 @@ fn get_mode_infos() -> XCapResult<Vec<ModeInfo>> {
     let mode_infos = get_screen_resources_reply.modes().to_vec();
 
     Ok(mode_infos)
+}
+
+fn get_output_edid(output: Output) -> XCapResult<Vec<u8>> {
+    let (conn, _) = get_xcb_connection_and_index()?;
+    let atom = get_atom("EDID")?;
+
+    let get_output_property_cookie = conn.send_request(&GetOutputProperty {
+        output,
+        property: atom,
+        r#type: ATOM_ANY,
+        long_offset: 0,
+        long_length: 128,
+        delete: false,
+        pending: false,
+    });
+    let get_output_property_reply = conn.wait_for_reply(get_output_property_cookie)?;
+
+    let edid = get_output_property_reply.data::<u8>().to_vec();
+
+    Ok(edid)
+}
+
+fn is_builtin_edid(edid: &[u8]) -> bool {
+    const DESCRIPTOR_OFFSET: usize = 0x36;
+
+    // 遍历 EDID 描述符块
+    for i in 0..4 {
+        let offset = DESCRIPTOR_OFFSET + i * 18;
+        if offset + 5 >= edid.len() {
+            break;
+        }
+
+        // 检查描述符类型 (0xFC 为显示器名称)
+        if edid[offset] == 0xFC {
+            let text = &edid[offset + 5..offset + 18];
+            if let Ok(name) = CStr::from_bytes_until_nul(text) {
+                if name.to_string_lossy().contains("Internal") {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
 }
 
 impl ImplMonitor {
@@ -261,11 +310,23 @@ impl ImplMonitor {
         Ok(primary)
     }
 
+    pub fn is_builtin(&self) -> XCapResult<bool> {
+        let name = self.name()?;
+
+        if name.starts_with("eDP") || name.starts_with("LVDS") {
+            return Ok(true);
+        }
+
+        let edid = get_output_edid(self.output)?;
+
+        Ok(is_builtin_edid(&edid))
+    }
+
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         capture_monitor(self)
     }
 
-    pub fn video_recorder(&self) -> XCapResult<ImplVideoRecorder> {
+    pub fn video_recorder(&self) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {
         ImplVideoRecorder::new()
     }
 }

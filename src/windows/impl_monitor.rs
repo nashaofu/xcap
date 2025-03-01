@@ -1,10 +1,12 @@
-use std::{mem, ptr};
+use std::{mem, ptr, sync::mpsc::Receiver};
 
 use image::RgbaImage;
 use scopeguard::guard;
+use widestring::U16CString;
 use windows::{
     core::{s, w, HRESULT, PCWSTR},
     Win32::{
+        Devices::Display::DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL,
         Foundation::{GetLastError, BOOL, LPARAM, POINT, RECT, TRUE},
         Graphics::Gdi::{
             CreateDCW, DeleteDC, EnumDisplayMonitors, EnumDisplaySettingsW, GetDeviceCaps,
@@ -17,12 +19,15 @@ use windows::{
     },
 };
 
-use crate::error::{XCapError, XCapResult};
+use crate::{
+    error::{XCapError, XCapResult},
+    video_recorder::Frame,
+};
 
 use super::{
     capture::capture_monitor,
     impl_video_recorder::ImplVideoRecorder,
-    utils::{get_monitor_name, get_process_is_dpi_awareness, load_library},
+    utils::{get_monitor_config, get_process_is_dpi_awareness, load_library},
 };
 
 // A 函数与 W 函数区别
@@ -190,8 +195,19 @@ impl ImplMonitor {
 
     pub fn name(&self) -> XCapResult<String> {
         let monitor_info_ex_w = get_monitor_info_ex_w(self.h_monitor)?;
-        let name = get_monitor_name(monitor_info_ex_w)
-            .unwrap_or(format!("Unknown Monitor {}", self.h_monitor.0 as u32));
+
+        let config_default_name = format!("Unknown Monitor {}", self.h_monitor.0 as u32);
+        let config = match get_monitor_config(monitor_info_ex_w) {
+            Ok(config) => config,
+            Err(_) => return Ok(config_default_name),
+        };
+
+        let name = U16CString::from_vec_truncate(config.monitorFriendlyDeviceName).to_string()?;
+
+        if name.is_empty() {
+            return Ok(config_default_name);
+        }
+
         Ok(name)
     }
 
@@ -247,6 +263,13 @@ impl ImplMonitor {
         Ok(monitor_info_ex_w.monitorInfo.dwFlags == MONITORINFOF_PRIMARY)
     }
 
+    pub fn is_builtin(&self) -> XCapResult<bool> {
+        let monitor_info_ex_w = get_monitor_info_ex_w(self.h_monitor)?;
+        let config = get_monitor_config(monitor_info_ex_w)?;
+
+        Ok(config.outputTechnology == DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL)
+    }
+
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         let x = self.x()?;
         let y = self.y()?;
@@ -256,7 +279,7 @@ impl ImplMonitor {
         capture_monitor(x, y, width as i32, height as i32)
     }
 
-    pub fn video_recorder(&self) -> XCapResult<ImplVideoRecorder> {
+    pub fn video_recorder(&self) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {
         ImplVideoRecorder::new(self.h_monitor)
     }
 }

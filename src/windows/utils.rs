@@ -164,7 +164,9 @@ pub(super) fn open_process(
     }
 }
 
-pub(super) fn get_monitor_name(monitor_info_ex_w: MONITORINFOEXW) -> XCapResult<String> {
+pub(super) fn get_monitor_config(
+    monitor_info_ex_w: MONITORINFOEXW,
+) -> XCapResult<DISPLAYCONFIG_TARGET_DEVICE_NAME> {
     unsafe {
         let mut number_of_paths = 0;
         let mut number_of_modes = 0;
@@ -221,14 +223,7 @@ pub(super) fn get_monitor_name(monitor_info_ex_w: MONITORINFOEXW) -> XCapResult<
                 continue;
             }
 
-            let name =
-                U16CString::from_vec_truncate(target.monitorFriendlyDeviceName).to_string()?;
-
-            if name.is_empty() {
-                return Err(XCapError::new("Monitor name is empty"));
-            }
-
-            return Ok(name);
+            return Ok(target);
         }
 
         Err(XCapError::new("Get monitor name failed"))

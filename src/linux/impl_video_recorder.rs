@@ -1,12 +1,14 @@
 #![allow(unused)]
 
+use std::sync::mpsc::Receiver;
+
 use crate::{video_recorder::Frame, XCapResult};
 
 #[derive(Debug, Clone)]
 pub struct ImplVideoRecorder {}
 
 impl ImplVideoRecorder {
-    pub fn new() -> XCapResult<Self> {
+    pub fn new() -> XCapResult<(Self, Receiver<Frame>)> {
         unimplemented!()
     }
 

@@ -1,19 +1,18 @@
-use std::{sync::Arc, thread, time::Duration};
+use std::{thread, time::Duration};
 use xcap::Monitor;
 
 fn main() {
     let monitor = Monitor::from_point(100, 100).unwrap();
 
-    let video_recorder = Arc::new(monitor.video_recorder().unwrap());
+    let (video_recorder, sx) = monitor.video_recorder().unwrap();
 
-    let video_recorder_clone = video_recorder.clone();
-    thread::spawn(move || {
-        video_recorder_clone
-            .on_frame(|frame| {
+    thread::spawn(move || loop {
+        match sx.recv() {
+            Ok(frame) => {
                 println!("frame: {:?}", frame.width);
-                Ok(())
-            })
-            .unwrap();
+            }
+            _ => continue,
+        }
     });
 
     println!("start");
