@@ -1,4 +1,4 @@
-use std::{mem, ptr};
+use std::{mem, ptr, sync::mpsc::Receiver};
 
 use image::RgbaImage;
 use scopeguard::guard;
@@ -17,7 +17,10 @@ use windows::{
     },
 };
 
-use crate::error::{XCapError, XCapResult};
+use crate::{
+    error::{XCapError, XCapResult},
+    video_recorder::Frame,
+};
 
 use super::{
     capture::capture_monitor,
@@ -256,7 +259,7 @@ impl ImplMonitor {
         capture_monitor(x, y, width as i32, height as i32)
     }
 
-    pub fn video_recorder(&self) -> XCapResult<ImplVideoRecorder> {
+    pub fn video_recorder(&self) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {
         ImplVideoRecorder::new(self.h_monitor)
     }
 }

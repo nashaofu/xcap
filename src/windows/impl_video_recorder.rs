@@ -1,4 +1,11 @@
-use std::{slice, sync::Arc};
+use std::{
+    slice,
+    sync::{
+        mpsc::{sync_channel, Receiver, SyncSender},
+        Arc,
+    },
+    thread,
+};
 
 use windows::{
     core::Interface,
@@ -81,10 +88,11 @@ pub struct ImplVideoRecorder {
     d3d_context: ID3D11DeviceContext,
     duplication: IDXGIOutputDuplication,
     recorder_waker: Arc<RecorderWaker>,
+    tx: SyncSender<Frame>,
 }
 
 impl ImplVideoRecorder {
-    pub fn new(h_monitor: HMONITOR) -> XCapResult<Self> {
+    pub fn new(h_monitor: HMONITOR) -> XCapResult<(Self, Receiver<Frame>)> {
         unsafe {
             let mut d3d_device = None;
             D3D11CreateDevice(
@@ -115,55 +123,63 @@ impl ImplVideoRecorder {
                 let duplication = output1.DuplicateOutput(&dxgi_device)?;
 
                 if output_desc.Monitor == h_monitor {
-                    return Ok(Self {
+                    let (tx, sx) = sync_channel(0);
+                    let s = Self {
                         d3d_device,
                         d3d_context,
                         duplication,
                         recorder_waker: Arc::new(RecorderWaker::new()),
-                    });
+                        tx,
+                    };
+                    s.on_frame()?;
+                    return Ok((s, sx));
                 }
             }
         }
     }
 
-    pub fn on_frame<F>(&self, on_frame: F) -> XCapResult<()>
-    where
-        F: Fn(Frame) -> XCapResult<()> + Send + 'static,
-    {
+    pub fn on_frame(&self) -> XCapResult<()> {
         let duplication = self.duplication.clone();
         let d3d_device = self.d3d_device.clone();
         let d3d_context = self.d3d_context.clone();
         let recorder_waker = self.recorder_waker.clone();
+        let tx = self.tx.clone();
 
-        loop {
-            recorder_waker.wait()?;
+        thread::spawn(move || {
+            loop {
+                recorder_waker.wait()?;
 
-            let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
-            let mut resource: Option<IDXGIResource> = None;
+                let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
+                let mut resource: Option<IDXGIResource> = None;
 
-            unsafe {
-                if let Err(err) = duplication.AcquireNextFrame(200, &mut frame_info, &mut resource)
-                {
-                    // 尝试释放当前帧，不然不能获取到下一帧数据
-                    let _ = duplication.ReleaseFrame();
-                    if err.code() != DXGI_ERROR_WAIT_TIMEOUT {
-                        break Err::<(), XCapError>(XCapError::new("DXGI_ERROR_UNSUPPORTED"));
+                unsafe {
+                    if let Err(err) =
+                        duplication.AcquireNextFrame(200, &mut frame_info, &mut resource)
+                    {
+                        // 尝试释放当前帧，不然不能获取到下一帧数据
+                        let _ = duplication.ReleaseFrame();
+                        if err.code() != DXGI_ERROR_WAIT_TIMEOUT {
+                            break Err::<(), XCapError>(XCapError::new("DXGI_ERROR_UNSUPPORTED"));
+                        }
+                    } else {
+                        // 如何确定 AcquireNextFrame 执行成功
+                        if frame_info.LastPresentTime != 0 {
+                            let resource =
+                                resource.ok_or(XCapError::new("AcquireNextFrame failed"))?;
+                            let source_texture = resource.cast::<ID3D11Texture2D>()?;
+                            let frame =
+                                texture_to_frame(&d3d_device, &d3d_context, source_texture)?;
+                            let _ = tx.send(frame);
+                        }
+
+                        // 最后释放帧，不然获取不到当前帧的数据
+                        duplication.ReleaseFrame()?;
                     }
-                } else {
-                    // 如何确定 AcquireNextFrame 执行成功
-                    if frame_info.LastPresentTime != 0 {
-                        let resource = resource.ok_or(XCapError::new("AcquireNextFrame failed"))?;
-                        let source_texture = resource.cast::<ID3D11Texture2D>()?;
-                        let frame = texture_to_frame(&d3d_device, &d3d_context, source_texture)?;
-
-                        on_frame(frame)?;
-                    }
-
-                    // 最后释放帧，不然获取不到当前帧的数据
-                    duplication.ReleaseFrame()?;
                 }
             }
-        }
+        });
+
+        Ok(())
     }
     pub fn start(&self) -> XCapResult<()> {
         self.recorder_waker.wake()?;
