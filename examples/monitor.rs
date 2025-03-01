@@ -17,7 +17,8 @@ fn main() {
                 monitor.rotation().unwrap(),
                 monitor.scale_factor().unwrap(),
                 monitor.frequency().unwrap(),
-                monitor.is_primary().unwrap()
+                monitor.is_primary().unwrap(),
+                monitor.is_builtin().unwrap()
             )
         );
     }

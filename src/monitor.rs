@@ -75,6 +75,11 @@ impl Monitor {
     pub fn is_primary(&self) -> XCapResult<bool> {
         self.impl_monitor.is_primary()
     }
+
+    /// Whether the screen is builtin
+    pub fn is_builtin(&self) -> XCapResult<bool> {
+        self.impl_monitor.is_builtin()
+    }
 }
 
 impl Monitor {
