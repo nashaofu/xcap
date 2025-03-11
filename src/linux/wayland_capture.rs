@@ -187,14 +187,11 @@ fn wlroots_screenshot(
     };
     let rgba_image = wayshot_connection.screenshot(capture_region, false)?;
     let width = rgba_image.width();
-    let height = rgba_image.width();
+    let height = rgba_image.height();
 
     // libwayshot returns image 0.24 RgbaImage
     // we need image 0.25 RgbaImage
-    let image_bytes = rgba_image.into_raw();
-
-    let image = image::RgbaImage::from_raw(width, height, image_bytes)
-        .expect("Conversion of PNG -> Raw -> PNG does not fail");
+    let image = image::RgbaImage::from_raw(width, height, rgba_image.into_raw()).unwrap();
 
     Ok(image)
 }
