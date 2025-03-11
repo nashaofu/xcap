@@ -30,6 +30,9 @@ pub enum XCapError {
     #[cfg(target_os = "linux")]
     #[error(transparent)]
     StdTimeSystemTimeError(#[from] std::time::SystemTimeError),
+    #[cfg(target_os = "linux")]
+    #[error(transparent)]
+    LibwayshotError(#[from] libwayshot::Error),
 
     #[cfg(target_os = "macos")]
     #[error("Objc2CoreGraphicsCGError {:?}", 0)]
