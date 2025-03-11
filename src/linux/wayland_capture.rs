@@ -194,7 +194,7 @@ fn wlroots_screenshot(
         rgba_image.height(),
         rgba_image.into_raw(),
     )
-    .unwrap();
+    .expect("Conversion of PNG -> Raw -> PNG does not fail");
 
     Ok(image)
 }
