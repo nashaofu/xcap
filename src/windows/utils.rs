@@ -242,3 +242,133 @@ pub fn get_window_info(hwnd: HWND) -> XCapResult<WINDOWINFO> {
 
     Ok(window_info)
 }
+
+#[cfg(test)]
+mod tests {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::Graphics::Gdi::{
+        EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromPoint, DEVMODEW, ENUM_CURRENT_SETTINGS,
+        MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
+    };
+    use windows::Win32::System::Threading::{
+        GetCurrentProcessId, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::GetDesktopWindow;
+
+    use super::*;
+
+    /// 特别说明
+    /// 以下测试均以 windows11 作为测试环境
+    #[test]
+    fn test_get_build_number() {
+        let build = get_build_number();
+        println!("build {}", build);
+        assert!(build == 26100, "build number should be 26100");
+    }
+
+    #[test]
+    fn test_get_os_major_version() {
+        let version = get_os_major_version();
+        assert!(version == 11, "os major version should be 11");
+    }
+
+    #[test]
+    fn test_bgra_to_rgba() {
+        let input = vec![0, 1, 2, 255, 4, 5, 6, 255];
+        let output = bgra_to_rgba(input);
+        assert_eq!(output, vec![2, 1, 0, 255, 6, 5, 4, 255]);
+    }
+
+    #[test]
+    fn test_bgra_to_rgba_image() {
+        let width = 2;
+        let height = 1;
+        let buffer = vec![0, 1, 2, 255, 4, 5, 6, 255];
+        let result = bgra_to_rgba_image(width, height, buffer);
+
+        assert!(result.is_ok());
+
+        let image = result.unwrap();
+        assert_eq!(image.width(), width);
+        assert_eq!(image.height(), height);
+    }
+
+    #[test]
+    fn test_get_process_is_dpi_awareness() {
+        // // Modify the program's DPI awareness. You can set the value to PROCESS_DPI_UNAWARE or PROCESS_PER_MONITOR_DPI_AWARE for testing.
+        // SetProcessDpiAwareness(PROCESS_DPI_UNAWARE).unwrap();
+
+        // let process = GetCurrentProcess();
+        // let is_dpi_awareness = get_process_is_dpi_awareness(process).unwrap();
+
+        // assert!(!is_dpi_awareness);
+    }
+    #[test]
+    fn test_load_library() {
+        let scope_guard_hmodule = load_library(w!("Shcore.dll")).unwrap();
+
+        assert!(!scope_guard_hmodule.is_invalid());
+    }
+
+    #[test]
+    fn test_open_process() {
+        unsafe {
+            let process_id = GetCurrentProcessId();
+            let scope_guard_handle =
+                open_process(PROCESS_QUERY_LIMITED_INFORMATION, true, process_id).unwrap();
+
+            assert!(!scope_guard_handle.is_invalid());
+        }
+    }
+
+    unsafe fn get_monitor_info_ex_w() -> MONITORINFOEXW {
+        let point = POINT { x: 0, y: 0 };
+        let h_monitor = MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY);
+        let mut monitor_info_ex_w = MONITORINFOEXW::default();
+        monitor_info_ex_w.monitorInfo.cbSize = mem::size_of::<MONITORINFOEXW>() as u32;
+        let monitor_info_ex_w_ptr =
+            &mut monitor_info_ex_w as *mut MONITORINFOEXW as *mut MONITORINFO;
+
+        // https://learn.microsoft.com/zh-cn/windows/win32/api/winuser/nf-winuser-getmonitorinfoa
+        GetMonitorInfoW(h_monitor, monitor_info_ex_w_ptr)
+            .ok()
+            .unwrap();
+
+        monitor_info_ex_w
+    }
+
+    #[test]
+    fn test_get_monitor_config() {
+        unsafe {
+            let monitor_info_ex_w = get_monitor_info_ex_w();
+            // 获取显示器配置信息
+            let monitor_config = get_monitor_config(monitor_info_ex_w).unwrap();
+
+            assert!(!monitor_config.monitorFriendlyDeviceName.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_get_window_info() {
+        unsafe {
+            let monitor_info_ex_w = get_monitor_info_ex_w();
+            let mut dev_mode_w = DEVMODEW {
+                dmSize: mem::size_of::<DEVMODEW>() as u16,
+                ..DEVMODEW::default()
+            };
+            EnumDisplaySettingsW(
+                PCWSTR(monitor_info_ex_w.szDevice.as_ptr()),
+                ENUM_CURRENT_SETTINGS,
+                &mut dev_mode_w,
+            )
+            .ok()
+            .unwrap();
+
+            let hwnd = GetDesktopWindow();
+            let window_info = get_window_info(hwnd).unwrap();
+            let width = (window_info.rcWindow.right - window_info.rcWindow.left) as u32;
+
+            assert!(width == dev_mode_w.dmPelsWidth);
+        }
+    }
+}
