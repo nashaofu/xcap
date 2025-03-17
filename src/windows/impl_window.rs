@@ -4,9 +4,9 @@ use std::{ffi::c_void, mem, ptr};
 use image::RgbaImage;
 use widestring::U16CString;
 use windows::{
-    core::{HSTRING, PCWSTR},
+    core::{BOOL, HSTRING, PCWSTR},
     Win32::{
-        Foundation::{GetLastError, BOOL, HANDLE, HWND, LPARAM, MAX_PATH, RECT, TRUE},
+        Foundation::{GetLastError, HANDLE, HWND, LPARAM, MAX_PATH, RECT, TRUE},
         Graphics::{
             Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS},
             Gdi::{IsRectEmpty, MonitorFromWindow, MONITOR_DEFAULTTONEAREST},

@@ -4,10 +4,10 @@ use image::RgbaImage;
 use scopeguard::guard;
 use widestring::U16CString;
 use windows::{
-    core::{s, w, HRESULT, PCWSTR},
+    core::{s, w, BOOL, HRESULT, PCWSTR},
     Win32::{
         Devices::Display::DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL,
-        Foundation::{GetLastError, BOOL, LPARAM, POINT, RECT, TRUE},
+        Foundation::{GetLastError, LPARAM, POINT, RECT, TRUE},
         Graphics::Gdi::{
             CreateDCW, DeleteDC, EnumDisplayMonitors, EnumDisplaySettingsW, GetDeviceCaps,
             GetMonitorInfoW, MonitorFromPoint, DESKTOPHORZRES, DEVMODEW, DMDO_180, DMDO_270,
