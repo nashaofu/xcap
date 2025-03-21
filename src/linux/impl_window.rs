@@ -185,9 +185,11 @@ impl ImplWindow {
 
         let wm_class = String::from_utf8(get_class_reply.value().to_vec())?;
 
+        // WM_CLASS contains two strings: instance name and class name
+        // We want the class name (second string)
         let app_name = wm_class
             .split('\u{0}')
-            .find(|str| !str.is_empty())
+            .nth(1) // Take the second string (class name)
             .unwrap_or("")
             .to_string();
 
@@ -195,9 +197,38 @@ impl ImplWindow {
     }
 
     pub fn title(&self) -> XCapResult<String> {
-        let get_title_reply = get_window_property(self.window, ATOM_WM_NAME, ATOM_STRING, 0, 1024)?;
-
+        // First try _NET_WM_NAME with UTF8_STRING type
+        let net_wm_name_atom = get_atom("_NET_WM_NAME")?;
+        let utf8_string_atom = get_atom("UTF8_STRING")?;
+        let get_title_reply =
+            get_window_property(self.window, net_wm_name_atom, utf8_string_atom, 0, 1024)?;
         let title = String::from_utf8(get_title_reply.value().to_vec())?;
+
+        // If _NET_WM_NAME is empty, fall back to WM_NAME with COMPOUND_TEXT type
+        if title.is_empty() {
+            let compound_text_atom = get_atom("COMPOUND_TEXT")?;
+            let get_title_reply =
+                get_window_property(self.window, ATOM_WM_NAME, compound_text_atom, 0, 1024)?;
+            let title = String::from_utf8(get_title_reply.value().to_vec())?;
+
+            // If both are empty, try to get the parent window
+            if title.is_empty() {
+                let (conn, _) = get_xcb_connection_and_index()?;
+                let query_tree_cookie = conn.send_request(&xcb::x::QueryTree {
+                    window: self.window,
+                });
+                if let Ok(query_tree_reply) = conn.wait_for_reply(query_tree_cookie) {
+                    let parent = query_tree_reply.parent();
+                    if parent.resource_id() != 0 {
+                        // Try to get title from parent window
+                        let parent_window = ImplWindow::new(parent);
+                        return parent_window.title();
+                    }
+                }
+            }
+
+            return Ok(title);
+        }
 
         Ok(title)
     }
