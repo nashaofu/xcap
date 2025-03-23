@@ -19,7 +19,7 @@ fn get_pixel8_rgba(
     let pixel = if bit_order == ImageOrder::LsbFirst {
         bytes[index]
     } else {
-        bytes[index] & 7 << 4 | bytes[index] >> 4
+        bytes[index] & (7 << 4) | (bytes[index] >> 4)
     };
 
     let r = (pixel >> 6) as f32 / 3.0 * 255.0;
@@ -40,9 +40,9 @@ fn get_pixel16_rgba(
     let index = ((y * width + x) * bits_per_pixel / 8) as usize;
 
     let pixel = if bit_order == ImageOrder::LsbFirst {
-        bytes[index] as u16 | (bytes[index + 1] as u16) << 8
+        bytes[index] as u16 | ((bytes[index + 1] as u16) << 8)
     } else {
-        (bytes[index] as u16) << 8 | bytes[index + 1] as u16
+        ((bytes[index] as u16) << 8) | bytes[index + 1] as u16
     };
 
     let r = (pixel >> 11) as f32 / 31.0 * 255.0;

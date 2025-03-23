@@ -23,7 +23,7 @@ pub enum XCapError {
     StdStringFromUtf8Error(#[from] std::string::FromUtf8Error),
     #[cfg(target_os = "linux")]
     #[error(transparent)]
-    DbusError(#[from] dbus::Error),
+    ZbusError(#[from] zbus::Error),
     #[cfg(target_os = "linux")]
     #[error(transparent)]
     StdIOError(#[from] std::io::Error),
@@ -33,6 +33,15 @@ pub enum XCapError {
     #[cfg(target_os = "linux")]
     #[error(transparent)]
     LibwayshotError(#[from] libwayshot::Error),
+    #[cfg(target_os = "linux")]
+    #[error(transparent)]
+    UrlParseError(#[from] url::ParseError),
+    #[cfg(target_os = "linux")]
+    #[error(transparent)]
+    ZbusZvariantError(#[from] zbus::zvariant::Error),
+    #[cfg(target_os = "linux")]
+    #[error(transparent)]
+    PipewireError(#[from] pipewire::Error),
 
     #[cfg(target_os = "macos")]
     #[error("Objc2CoreGraphicsCGError {:?}", 0)]
