@@ -172,12 +172,40 @@ fn org_freedesktop_portal_screenshot(
 
 static DBUS_LOCK: Mutex<()> = Mutex::new(());
 
+fn wlroots_screenshot(
+    x_coordinate: i32,
+    y_coordinate: i32,
+    width: i32,
+    height: i32,
+) -> XCapResult<RgbaImage> {
+    let wayshot_connection = libwayshot::WayshotConnection::new()?;
+    let capture_region = libwayshot::CaptureRegion {
+        x_coordinate,
+        y_coordinate,
+        width,
+        height,
+    };
+    let rgba_image = wayshot_connection.screenshot(capture_region, false)?;
+
+    // libwayshot returns image 0.24 RgbaImage
+    // we need image 0.25 RgbaImage
+    let image = image::RgbaImage::from_raw(
+        rgba_image.width(),
+        rgba_image.height(),
+        rgba_image.into_raw(),
+    )
+    .expect("Conversion of PNG -> Raw -> PNG does not fail");
+
+    Ok(image)
+}
+
 pub fn wayland_capture(x: i32, y: i32, width: i32, height: i32) -> XCapResult<RgbaImage> {
     let lock = DBUS_LOCK.lock();
 
     let conn = Connection::new_session()?;
     let res = org_gnome_shell_screenshot(&conn, x, y, width, height)
-        .or_else(|_| org_freedesktop_portal_screenshot(&conn, x, y, width, height));
+        .or_else(|_| org_freedesktop_portal_screenshot(&conn, x, y, width, height))
+        .or_else(|_| wlroots_screenshot(x, y, width, height));
 
     drop(lock);
 

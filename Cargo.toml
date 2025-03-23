@@ -57,6 +57,7 @@ dbus = "0.9"
 lazy_static = "1.5"
 percent-encoding = "2.3"
 xcb = { version = "1.5", features = ["randr"] }
+libwayshot = "0.3"
 
 [dev-dependencies]
 fs_extra = "1.3"
