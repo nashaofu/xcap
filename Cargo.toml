@@ -1,6 +1,6 @@
 [package]
 name = "xcap"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 description = "XCap is a cross-platform screen capture library written in Rust. It supports Linux (X11, Wayland), MacOS, and Windows. XCap supports screenshot and video recording (WIP)."
 license = "Apache-2.0"
@@ -33,8 +33,8 @@ objc2-core-media = "0.3"
 objc2-core-video = "0.3"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-widestring = "1.1"
-windows = { version = "0.59", features = [
+widestring = "1.2"
+windows = { version = "0.60", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Dwm",
@@ -61,3 +61,4 @@ libwayshot = "0.3"
 
 [dev-dependencies]
 fs_extra = "1.3"
+windows = { version = "0.60", features = ["Win32_UI_HiDpi"] }

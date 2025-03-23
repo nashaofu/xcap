@@ -215,3 +215,31 @@ pub fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaImage> {
             .to_rgba8())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows::Win32::UI::WindowsAndMessaging::GetDesktopWindow;
+
+    #[test]
+    fn test_capture_monitor() {
+        let result = capture_monitor(0, 0, 100, 100);
+        assert!(result.is_ok());
+        let image = result.unwrap();
+        assert_eq!(image.width(), 100);
+        assert_eq!(image.height(), 100);
+    }
+
+    #[test]
+    fn test_capture_window() {
+        unsafe {
+            let hwnd = GetDesktopWindow();
+            let result = capture_window(hwnd, 1.0);
+            assert!(result.is_ok());
+
+            let image = result.unwrap();
+            assert!(image.width() > 0);
+            assert!(image.height() > 0);
+        }
+    }
+}
