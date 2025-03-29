@@ -62,7 +62,7 @@ impl ImplVideoRecorder {
                     let frame = Frame::new(width, height, raw);
                     if let Err(e) = sender.send(frame) {
                         eprintln!("Failed to send frame: {:?}", e);
-                        break Err(XCapError::new(&format!("Failed to send frame: {}", e)));
+                        break Err(XCapError::new(format!("Failed to send frame: {}", e)));
                     }
                 }
                 Err(e) => {

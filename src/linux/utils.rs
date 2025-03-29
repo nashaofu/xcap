@@ -23,9 +23,7 @@ lazy_static! {
 }
 
 pub fn get_xcb_connection_and_index() -> XCapResult<&'static (XcbConnection, i32)> {
-    XCB_CONNECTION_AND_INDEX
-        .as_ref()
-        .map_err(|err| XCapError::new(err))
+    XCB_CONNECTION_AND_INDEX.as_ref().map_err(XCapError::new)
 }
 
 pub fn get_current_screen_buf() -> XCapResult<ScreenBuf> {
