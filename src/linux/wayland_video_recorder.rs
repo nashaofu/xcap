@@ -239,7 +239,6 @@ impl WaylandVideoRecorder {
 
                     if let Err(err) = user_data.format.parse(param) {
                         log::error!("Failed to parse format: {:?}", err);
-                        return;
                     }
                 })
                 .process(move |stream, user_data| {
@@ -347,7 +346,7 @@ impl WaylandVideoRecorder {
             );
             let values =
                 PodSerializer::serialize(Cursor::new(Vec::new()), &pod::Value::Object(obj))
-                    .map_err(|err| XCapError::new(err))?
+                    .map_err(XCapError::new)?
                     .0
                     .into_inner();
 

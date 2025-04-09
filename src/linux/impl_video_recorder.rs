@@ -17,10 +17,10 @@ impl ImplVideoRecorder {
     pub fn new(monitor: ImplMonitor) -> XCapResult<(Self, Receiver<Frame>)> {
         if wayland_detect() {
             let (recorder, receiver) = WaylandVideoRecorder::new(monitor)?;
-            return Ok((ImplVideoRecorder::Wayland(recorder), receiver));
+            Ok((ImplVideoRecorder::Wayland(recorder), receiver))
         } else {
             let (recorder, receiver) = XorgVideoRecorder::new(monitor)?;
-            return Ok((ImplVideoRecorder::Xorg(recorder), receiver));
+            Ok((ImplVideoRecorder::Xorg(recorder), receiver))
         }
     }
 

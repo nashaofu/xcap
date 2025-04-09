@@ -1,4 +1,7 @@
-use std::{env::var_os, path::{Path, PathBuf}};
+use std::{
+    env::var_os,
+    path::{Path, PathBuf},
+};
 
 use image::{open, RgbaImage};
 use lazy_static::lazy_static;
