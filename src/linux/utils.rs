@@ -1,5 +1,5 @@
 use std::{
-    env::var_os,
+    env::{self, var_os},
     path::{Path, PathBuf},
 };
 
@@ -22,8 +22,10 @@ use zbus::{
 use crate::{error::XCapResult, XCapError};
 
 lazy_static! {
-    static ref XCB_CONNECTION_AND_INDEX: ConnResult<(XcbConnection, i32)> =
-        XcbConnection::connect(None);
+    static ref XCB_CONNECTION_AND_INDEX: ConnResult<(XcbConnection, i32)> = {
+        let display_name = env::var("DISPLAY").unwrap_or("DISPLAY:1".to_string());
+        XcbConnection::connect(Some(display_name.as_str()))
+    };
     static ref ZBUS_CONNECTION: ZBusResult<ZBusConnection> = ZBusConnection::session();
 }
 
