@@ -1,29 +1,14 @@
 use image::RgbaImage;
-use std::env::var_os;
 
 use crate::error::XCapResult;
 
 use super::{
     impl_monitor::ImplMonitor,
     impl_window::ImplWindow,
-    utils::{get_current_screen_buf, get_monitor_info_buf},
+    utils::{get_current_screen_buf, get_monitor_info_buf, wayland_detect},
     wayland_capture::wayland_capture,
     xorg_capture::xorg_capture,
 };
-
-fn wayland_detect() -> bool {
-    let xdg_session_type = var_os("XDG_SESSION_TYPE")
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-
-    let wayland_display = var_os("WAYLAND_DISPLAY")
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-
-    xdg_session_type.eq("wayland") || wayland_display.to_lowercase().contains("wayland")
-}
 
 pub fn capture_monitor(impl_monitor: &ImplMonitor) -> XCapResult<RgbaImage> {
     let monitor_info_buf = get_monitor_info_buf(impl_monitor.output)?;

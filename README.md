@@ -16,7 +16,7 @@ XCap is a cross-platform screen capture library written in Rust. It supports Lin
 | ---------------- | ---------- | -------------- | ----- | ---------------------- |
 | Screen Capture   | ✅         | ⛔             | ✅    | ✅                     |
 | Window Capture   | ✅         | ⛔             | ✅    | ✅                     |
-| Screen Recording | 🛠️         | 🛠️             | ✅    | ✅                     |
+| Screen Recording | ✅         | ⛔             | ✅    | ✅                     |
 | Window Recording | 🛠️         | 🛠️             | 🛠️    | 🛠️                     |
 
 -   ✅: Feature available
