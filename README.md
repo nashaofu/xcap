@@ -58,6 +58,32 @@ fn main() {
 
 ```
 
+-   Region Capture
+
+```rust
+use std::fs::File;
+use std::io::Write;
+use xcap::Monitor;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Get the primary monitor
+    let monitors = Monitor::all()?;
+    let primary_monitor = monitors
+        .into_iter()
+        .find(|m| m.is_primary().unwrap_or(false))
+        .expect("No primary monitor found");
+    
+    // Capture a specific region of the monitor (400x300 at position 100, 100)
+    let image = primary_monitor.capture_region(100, 100, 400, 300)?;
+    
+    // Save the captured region
+    let mut file = File::create("monitor_region.png")?;
+    image.save_with_format(&mut file, image::ImageFormat::Png)?;
+    
+    Ok(())
+}
+```
+
 -   Screen Record
 
 ```rust

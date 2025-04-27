@@ -202,6 +202,43 @@ impl ImplMonitor {
         capture(cg_rect, CGWindowListOption::OptionAll, 0)
     }
 
+    pub fn capture_region(&self, x: i32, y: i32, width: u32, height: u32) -> XCapResult<RgbaImage> {
+        // Validate region bounds
+        let monitor_x = self.x()?;
+        let monitor_y = self.y()?;
+        let monitor_width = self.width()?;
+        let monitor_height = self.height()?;
+
+        if x < 0
+            || y < 0
+            || width > monitor_width
+            || height > monitor_height
+            || x as u32 + width > monitor_width
+            || y as u32 + height > monitor_height
+        {
+            return Err(XCapError::InvalidCaptureRegion(format!(
+                "Region ({}, {}, {}, {}) is outside monitor bounds ({}, {}, {}, {})",
+                x, y, width, height, monitor_x, monitor_y, monitor_width, monitor_height
+            )));
+        }
+
+        // Create a CGRect for the region to capture
+        unsafe {
+            let cg_rect = objc2_core_foundation::CGRect {
+                origin: objc2_core_foundation::CGPoint {
+                    x: (monitor_x + x) as f64,
+                    y: (monitor_y + y) as f64,
+                },
+                size: objc2_core_foundation::CGSize {
+                    width: width as f64,
+                    height: height as f64,
+                },
+            };
+
+            capture(cg_rect, CGWindowListOption::OptionAll, 0)
+        }
+    }
+
     pub fn video_recorder(&self) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {
         ImplVideoRecorder::new(self.cg_direct_display_id)
     }

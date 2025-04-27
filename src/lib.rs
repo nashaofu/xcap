@@ -23,6 +23,3 @@ pub use window::Window;
 
 pub use video_recorder::Frame;
 pub use video_recorder::VideoRecorder;
-
-pub use platform::utils::get_current_screen_buf;
-pub use platform::xorg_capture::xorg_capture;

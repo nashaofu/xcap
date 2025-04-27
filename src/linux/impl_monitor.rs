@@ -16,7 +16,7 @@ use crate::{
 };
 
 use super::{
-    capture::capture_monitor,
+    capture::{capture_monitor, capture_region},
     impl_video_recorder::ImplVideoRecorder,
     utils::{
         get_atom, get_current_screen_buf, get_monitor_info_buf, get_xcb_connection_and_index,
@@ -344,6 +344,10 @@ impl ImplMonitor {
 
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         capture_monitor(self)
+    }
+
+    pub fn capture_region(&self, x: i32, y: i32, width: u32, height: u32) -> XCapResult<RgbaImage> {
+        capture_region(self, x, y, width, height)
     }
 
     pub fn video_recorder(&self) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {
