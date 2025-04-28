@@ -347,6 +347,24 @@ impl ImplMonitor {
     }
 
     pub fn capture_region(&self, x: i32, y: i32, width: u32, height: u32) -> XCapResult<RgbaImage> {
+        // Validate region bounds
+        let monitor_x = self.x()?;
+        let monitor_y = self.y()?;
+        let monitor_width = self.width()?;
+        let monitor_height = self.height()?;
+
+        if x < 0
+            || y < 0
+            || width > monitor_width
+            || height > monitor_height
+            || x as u32 + width > monitor_width
+            || y as u32 + height > monitor_height
+        {
+            return Err(XCapError::InvalidCaptureRegion(format!(
+                "Region ({}, {}, {}, {}) is outside monitor bounds ({}, {}, {}, {})",
+                x, y, width, height, monitor_x, monitor_y, monitor_width, monitor_height
+            )));
+        }
         capture_region(self, x, y, width, height)
     }
 
