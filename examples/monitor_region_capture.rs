@@ -10,35 +10,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let monitors = Monitor::all()?;
     dir::create_all("target/monitors", true).unwrap();
 
-    let monitor = monitors
-        .into_iter()
-        .find(|m| m.is_primary().unwrap_or(false))
-        .expect("No primary monitor found");
-
-    let monitor_width = monitor.width()?;
-    let monitor_height = monitor.height()?;
-
+    // Define the region dimensions to capture from each monitor
     let region_width = 400u32;
     let region_height = 300u32;
 
-    let x = ((monitor_width as i32) - (region_width as i32)) / 2;
-    let y = ((monitor_height as i32) - (region_height as i32)) / 2;
-    let start = Instant::now();
+    // Track total time for all captures
+    let total_start = Instant::now();
 
-    let image = monitor.capture_region(x, y, region_width, region_height)?;
+    println!("Capturing regions from {} monitors...", monitors.len());
+
+    // Iterate through all available monitors
+    for monitor in monitors {
+        // Calculate center of the monitor for region capture
+        let x = 0i32;
+        let y = 0i32;
+
+        // Capture the region
+        let start = Instant::now();
+        let image = monitor.capture_region(x, y, region_width, region_height)?;
+
+        // Get monitor name for the filename
+        let monitor_name = monitor
+            .name()
+            .unwrap_or_else(|_| format!("unknown-{}", monitor.id().unwrap_or(0)));
+        let is_primary = monitor.is_primary().unwrap_or(false);
+        let primary_indicator = if is_primary { "-primary" } else { "" };
+
+        println!(
+            "Monitor '{}'{}: Time to capture region of size {}x{}: {:?}",
+            monitor_name,
+            primary_indicator,
+            image.width(),
+            image.height(),
+            start.elapsed()
+        );
+
+        // Save the image
+        let filename = format!(
+            "target/monitors/monitor-{}{}-region.png",
+            normalized(monitor_name),
+            primary_indicator
+        );
+
+        image.save(&filename).unwrap();
+        println!("Saved to {}", filename);
+    }
+
     println!(
-        "Time to record region of size {}x{}: {:?}",
-        image.width(),
-        image.height(),
-        start.elapsed()
+        "Total time to capture all regions: {:?}",
+        total_start.elapsed()
     );
-
-    image
-        .save(format!(
-            "target/monitors/monitor-{}-region.png",
-            normalized(monitor.name().unwrap())
-        ))
-        .unwrap();
 
     Ok(())
 }
