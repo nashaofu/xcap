@@ -153,24 +153,24 @@ fn main() {
 
 ## Linux 系统要求
 
-在 Linux 上，需要安装 `libxcb`, `libxrandr`与 `dbus`.
+在 Linux 上，需要安装下面这些依赖才能正常编译。
 
 Debian/Ubuntu:
 
 ```sh
-apt-get install libxcb1 libxrandr2 libdbus-1-3
+apt-get install pkg-config libclang-dev libxcb1-dev libxrandr-dev libdbus-1-dev libpipewire-0.3-dev
 ```
 
 Alpine:
 
 ```sh
-apk add libxcb libxrandr dbus
+apk add pkgconf llvm19-dev clang19-dev libxcb-dev libxrandr-dev dbus-dev pipewire-dev
 ```
 
 ArchLinux:
 
 ```sh
-pacman -S libxcb libxrandr dbus
+pacman -S base-devel clang libxcb libxrandr dbus libpipewire
 ```
 
 ## License

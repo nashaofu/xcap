@@ -153,24 +153,24 @@ More examples in [examples](./examples)
 
 ## Linux System Requirements
 
-On Linux, you need to install `libxcb`, `libxrandr`, and `dbus`.
+On Linux, the following dependencies need to be installed to compile properly.
 
 Debian/Ubuntu:
 
 ```sh
-apt-get install libxcb1 libxrandr2 libdbus-1-3
+apt-get install pkg-config libclang-dev libxcb1-dev libxrandr-dev libdbus-1-dev libpipewire-0.3-dev
 ```
 
 Alpine:
 
 ```sh
-apk add libxcb libxrandr dbus
+apk add pkgconf llvm19-dev clang19-dev libxcb-dev libxrandr-dev dbus-dev pipewire-dev
 ```
 
 ArchLinux:
 
 ```sh
-pacman -S libxcb libxrandr dbus
+pacman -S base-devel clang libxcb libxrandr dbus libpipewire
 ```
 
 ## License
