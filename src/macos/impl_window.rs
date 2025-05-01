@@ -3,9 +3,7 @@ use std::ffi::c_void;
 use image::RgbaImage;
 use objc2_app_kit::NSWorkspace;
 use objc2_core_foundation::{
-    CFArrayGetCount, CFArrayGetValueAtIndex, CFBoolean, CFBooleanGetValue, CFDictionary,
-    CFDictionaryCreateCopy, CFDictionaryGetValue, CFNumber, CFNumberGetValue, CFNumberType,
-    CFRetained, CFString, CGPoint, CGRect,
+    CFBoolean, CFDictionary, CFNumber, CFNumberType, CFRetained, CFString, CGPoint, CGRect,
 };
 use objc2_core_graphics::{
     CGDisplayBounds, CGMainDisplayID, CGRectContainsPoint, CGRectIntersectsRect,
@@ -32,7 +30,7 @@ fn get_cf_dictionary_get_value(
         let cf_dictionary_key = CFString::from_str(key);
         let cf_dictionary_key_ref = cf_dictionary_key.as_ref() as *const CFString;
 
-        let value = CFDictionaryGetValue(cf_dictionary, cf_dictionary_key_ref.cast());
+        let value = cf_dictionary.value(cf_dictionary_key_ref.cast());
 
         if value.is_null() {
             return Err(XCapError::new(format!(
@@ -50,11 +48,8 @@ fn get_cf_number_i32_value(cf_dictionary: &CFDictionary, key: &str) -> XCapResul
         let cf_number = get_cf_dictionary_get_value(cf_dictionary, key)? as *const CFNumber;
 
         let mut value: i32 = 0;
-        let is_success = CFNumberGetValue(
-            &*cf_number,
-            CFNumberType::IntType,
-            &mut value as *mut _ as *mut c_void,
-        );
+        let is_success =
+            (*cf_number).value(CFNumberType::IntType, &mut value as *mut _ as *mut c_void);
 
         if !is_success {
             return Err(XCapError::new(format!(
@@ -76,7 +71,7 @@ fn get_cf_string_value(cf_dictionary: &CFDictionary, key: &str) -> XCapResult<St
 fn get_cf_bool_value(cf_dictionary: &CFDictionary, key: &str) -> XCapResult<bool> {
     let value_ref = get_cf_dictionary_get_value(cf_dictionary, key)? as *const CFBoolean;
 
-    Ok(unsafe { CFBooleanGetValue(&*value_ref) })
+    Ok(unsafe { (*value_ref).value() })
 }
 
 fn get_window_cg_rect(window_cf_dictionary: &CFDictionary) -> XCapResult<CGRect> {
@@ -132,11 +127,10 @@ pub fn get_window_cf_dictionary(window_id: u32) -> XCapResult<CFRetained<CFDicti
             None => return Err(XCapError::new("Get window info failed")),
         };
 
-        let windows_count = CFArrayGetCount(&cf_array);
+        let windows_count = cf_array.count();
 
         for i in 0..windows_count {
-            let window_cf_dictionary_ref =
-                CFArrayGetValueAtIndex(&cf_array, i) as *const CFDictionary;
+            let window_cf_dictionary_ref = cf_array.value_at_index(i) as *const CFDictionary;
 
             if window_cf_dictionary_ref.is_null() {
                 continue;
@@ -149,7 +143,7 @@ pub fn get_window_cf_dictionary(window_id: u32) -> XCapResult<CFRetained<CFDicti
             };
 
             if current_window_id == window_id {
-                let s = CFDictionaryCreateCopy(None, Some(window_cf_dictionary)).unwrap();
+                let s = CFDictionary::new_copy(None, Some(window_cf_dictionary)).unwrap();
                 return Ok(s);
             }
         }
@@ -177,11 +171,10 @@ impl ImplWindow {
                 None => return Ok(impl_window),
             };
 
-            let windows_count = CFArrayGetCount(&cf_array);
+            let windows_count = cf_array.count();
 
             for i in 0..windows_count {
-                let window_cf_dictionary_ref =
-                    CFArrayGetValueAtIndex(&cf_array, i) as *const CFDictionary;
+                let window_cf_dictionary_ref = cf_array.value_at_index(i) as *const CFDictionary;
 
                 if window_cf_dictionary_ref.is_null() {
                     continue;
@@ -282,13 +275,12 @@ impl ImplWindow {
                 None => return Err(XCapError::new("Get window list failed")),
             };
 
-            let windows_count = CFArrayGetCount(&cf_array);
+            let windows_count = cf_array.count();
             let mut z = windows_count as i32;
 
             for i in 0..windows_count {
                 z -= 1;
-                let window_cf_dictionary_ref =
-                    CFArrayGetValueAtIndex(&cf_array, i) as *const CFDictionary;
+                let window_cf_dictionary_ref = cf_array.value_at_index(i) as *const CFDictionary;
 
                 if window_cf_dictionary_ref.is_null() {
                     continue;
@@ -370,7 +362,7 @@ impl ImplWindow {
                 return Ok(true);
             }
 
-            return Ok(false);
+            Ok(false)
         }
     }
 

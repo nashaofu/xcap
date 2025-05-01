@@ -3,7 +3,7 @@ use std::{
     sync::mpsc::{sync_channel, Receiver, SyncSender},
 };
 
-use dispatch2::{Queue, QueueAttribute};
+use dispatch2::{DispatchQueue, DispatchQueueAttr};
 use objc2::{
     define_class, msg_send, rc::Retained, runtime::ProtocolObject, AllocAnyThread, DefinedClass,
 };
@@ -12,7 +12,7 @@ use objc2_av_foundation::{
     AVCaptureVideoDataOutput, AVCaptureVideoDataOutputSampleBufferDelegate,
 };
 use objc2_core_graphics::CGDirectDisplayID;
-use objc2_core_media::{CMSampleBuffer, CMSampleBufferGetImageBuffer};
+use objc2_core_media::CMSampleBuffer;
 use objc2_core_video::{
     kCVPixelBufferPixelFormatTypeKey, kCVPixelFormatType_32BGRA, CVPixelBufferGetBaseAddress,
     CVPixelBufferGetBytesPerRow, CVPixelBufferGetDataSize, CVPixelBufferGetHeight,
@@ -37,7 +37,7 @@ impl DataOutputSampleBufferDelegateVars {
         _connection: &AVCaptureConnection,
     ) {
         unsafe {
-            let pixel_buffer = match CMSampleBufferGetImageBuffer(sample_buffer) {
+            let pixel_buffer = match CMSampleBuffer::image_buffer(sample_buffer) {
                 Some(pixel_buffer) => pixel_buffer,
                 None => return,
             };
@@ -170,9 +170,13 @@ impl ImplVideoRecorder {
                 dyn AVCaptureVideoDataOutputSampleBufferDelegate,
             >::from_ref(&*delegate);
 
-            let queue = Queue::new("DataOutputSampleBufferDelegate", QueueAttribute::Serial);
+            let queue =
+                DispatchQueue::new("DataOutputSampleBufferDelegate", DispatchQueueAttr::SERIAL);
 
-            let _: () = msg_send![&output, setSampleBufferDelegate: sample_buffer_delegate, queue: queue.as_raw()];
+            let queue: &DispatchQueue = queue.as_ref();
+
+            let _: () =
+                msg_send![&output, setSampleBufferDelegate: sample_buffer_delegate, queue: queue];
 
             Ok((
                 ImplVideoRecorder {

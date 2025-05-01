@@ -1,8 +1,8 @@
 use image::RgbaImage;
 use objc2_core_foundation::CGRect;
 use objc2_core_graphics::{
-    CGDataProviderCopyData, CGImageGetBytesPerRow, CGImageGetDataProvider, CGImageGetHeight,
-    CGImageGetWidth, CGWindowID, CGWindowImageOption, CGWindowListCreateImage, CGWindowListOption,
+    CGDataProvider, CGImage, CGWindowID, CGWindowImageOption, CGWindowListCreateImage,
+    CGWindowListOption,
 };
 
 use crate::error::{XCapError, XCapResult};
@@ -20,13 +20,15 @@ pub fn capture(
             CGWindowImageOption::Default,
         );
 
-        let width = CGImageGetWidth(cg_image.as_deref());
-        let height = CGImageGetHeight(cg_image.as_deref());
-        let data_provider = CGImageGetDataProvider(cg_image.as_deref());
-        let data = CGDataProviderCopyData(data_provider.as_deref())
+        let width = CGImage::width(cg_image.as_deref());
+        let height = CGImage::height(cg_image.as_deref());
+        let data_provider = CGImage::data_provider(cg_image.as_deref());
+
+        let data = CGDataProvider::data(data_provider.as_deref())
             .ok_or_else(|| XCapError::new("Failed to copy data"))?
             .to_vec();
-        let bytes_per_row = CGImageGetBytesPerRow(cg_image.as_deref());
+
+        let bytes_per_row = CGImage::bytes_per_row(cg_image.as_deref());
 
         // Some platforms e.g. MacOS can have extra bytes at the end of each row.
         // See
