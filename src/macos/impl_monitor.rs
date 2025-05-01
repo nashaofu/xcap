@@ -6,8 +6,8 @@ use objc2_app_kit::NSScreen;
 use objc2_core_foundation::CGPoint;
 use objc2_core_graphics::{
     CGDirectDisplayID, CGDisplayBounds, CGDisplayCopyDisplayMode, CGDisplayIsActive,
-    CGDisplayIsBuiltin, CGDisplayIsMain, CGDisplayModeGetPixelWidth, CGDisplayModeGetRefreshRate,
-    CGDisplayRotation, CGError, CGGetActiveDisplayList, CGGetDisplaysWithPoint, CGWindowListOption,
+    CGDisplayIsBuiltin, CGDisplayIsMain, CGDisplayMode, CGDisplayRotation, CGError,
+    CGGetActiveDisplayList, CGGetDisplaysWithPoint, CGWindowListOption,
 };
 use objc2_foundation::{NSNumber, NSString};
 
@@ -169,7 +169,7 @@ impl ImplMonitor {
 
     pub fn scale_factor(&self) -> XCapResult<f32> {
         let display_mode = unsafe { CGDisplayCopyDisplayMode(self.cg_direct_display_id) };
-        let pixel_width = unsafe { CGDisplayModeGetPixelWidth(display_mode.as_deref()) };
+        let pixel_width = unsafe { CGDisplayMode::pixel_width(display_mode.as_deref()) };
         let width = self.width()?;
 
         Ok(pixel_width as f32 / width as f32)
@@ -178,7 +178,7 @@ impl ImplMonitor {
     pub fn frequency(&self) -> XCapResult<f32> {
         let frequency = unsafe {
             let display_mode = CGDisplayCopyDisplayMode(self.cg_direct_display_id);
-            CGDisplayModeGetRefreshRate(display_mode.as_deref())
+            CGDisplayMode::refresh_rate(display_mode.as_deref())
         };
 
         Ok(frequency as f32)
