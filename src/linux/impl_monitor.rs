@@ -18,7 +18,10 @@ use crate::{
 use super::{
     capture::capture_monitor,
     impl_video_recorder::ImplVideoRecorder,
-    utils::{get_atom, get_current_screen_buf, get_monitor_info_buf, get_xcb_connection_and_index},
+    utils::{
+        get_atom, get_current_screen_buf, get_monitor_info_buf, get_xcb_connection_and_index,
+        wayland_detect,
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -30,7 +33,7 @@ pub(crate) struct ImplMonitor {
 fn get_current_frequency(mode_infos: Vec<ModeInfo>, mode: Mode) -> f32 {
     let mode_info = match mode_infos.iter().find(|m| m.id == mode.resource_id()) {
         Some(mode_info) => mode_info,
-        None => return 0.0,
+        _ => return 0.0,
     };
 
     let vtotal = {
@@ -52,6 +55,23 @@ fn get_current_frequency(mode_infos: Vec<ModeInfo>, mode: Mode) -> f32 {
 }
 
 fn get_scale_factor() -> XCapResult<f32> {
+    if wayland_detect() {
+        // for wayland we can get all the outputs, and get the maximum scaling of them.
+        let wayshot_conn = libwayshot::WayshotConnection::new()?;
+
+        let max_scale = wayshot_conn
+            .get_all_outputs()
+            .iter()
+            .map(|output_info| {
+                output_info.physical_size.height as f64
+                    / output_info.logical_region.inner.size.height as f64
+            })
+            .reduce(f64::max)
+            .unwrap_or(0.);
+
+        return Ok(max_scale as f32);
+    }
+
     let (conn, _) = get_xcb_connection_and_index()?;
 
     let screen_buf = get_current_screen_buf()?;
