@@ -101,11 +101,17 @@ fn wlroots_screenshot(
     height: i32,
 ) -> XCapResult<RgbaImage> {
     let wayshot_connection = libwayshot::WayshotConnection::new()?;
-    let capture_region = libwayshot::CaptureRegion {
-        x_coordinate,
-        y_coordinate,
-        width,
-        height,
+    let capture_region = libwayshot::region::LogicalRegion {
+        inner: libwayshot::region::Region {
+            position: libwayshot::region::Position {
+                x: x_coordinate,
+                y: y_coordinate,
+            },
+            size: libwayshot::region::Size {
+                width: width as u32,
+                height: height as u32,
+            },
+        },
     };
     let rgba_image = wayshot_connection.screenshot(capture_region, false)?;
 
@@ -114,7 +120,7 @@ fn wlroots_screenshot(
     let image = image::RgbaImage::from_raw(
         rgba_image.width(),
         rgba_image.height(),
-        rgba_image.into_raw(),
+        rgba_image.to_rgba8().into_vec(),
     )
     .expect("Conversion of PNG -> Raw -> PNG does not fail");
 
