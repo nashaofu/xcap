@@ -61,6 +61,8 @@ lazy_static = "1.5"
 percent-encoding = "2.3"
 xcb = { version = "1.5", features = ["randr"] }
 libwayshot = { git = "https://github.com/waycrate/wayshot", rev = "9d5478ab340895a295d7ce169c4487fcc22c6275" }
+
+
 [dev-dependencies]
 fs_extra = "1.3"
 
