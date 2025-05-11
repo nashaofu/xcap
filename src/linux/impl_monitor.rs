@@ -57,7 +57,7 @@ fn get_current_frequency(mode_infos: Vec<ModeInfo>, mode: Mode) -> f32 {
 fn get_scale_factor() -> XCapResult<f32> {
     if wayland_detect() {
         // for wayland we can get all the outputs, and get the maximum scaling of them.
-        let wayshot_conn = libwayshot::WayshotConnection::new()?;
+        let wayshot_conn = libwayshot_xcap::WayshotConnection::new()?;
 
         let max_scale = wayshot_conn
             .get_all_outputs()
