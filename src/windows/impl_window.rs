@@ -151,22 +151,26 @@ fn is_valid_window(hwnd: HWND) -> bool {
     true
 }
 
-unsafe extern "system" fn enum_valid_windows(hwnd: HWND, state: LPARAM) -> BOOL {
-    let state = Box::leak(Box::from_raw(state.0 as *mut Vec<HWND>));
+extern "system" fn enum_valid_windows(hwnd: HWND, state: LPARAM) -> BOOL {
+    unsafe {
+        let state = Box::leak(Box::from_raw(state.0 as *mut Vec<HWND>));
 
-    if is_valid_window(hwnd) {
-        state.push(hwnd);
+        if is_valid_window(hwnd) {
+            state.push(hwnd);
+        }
+
+        TRUE
     }
-
-    TRUE
 }
 
-unsafe extern "system" fn enum_all_windows(hwnd: HWND, state: LPARAM) -> BOOL {
-    let state = Box::leak(Box::from_raw(state.0 as *mut Vec<HWND>));
+extern "system" fn enum_all_windows(hwnd: HWND, state: LPARAM) -> BOOL {
+    unsafe {
+        let state = Box::leak(Box::from_raw(state.0 as *mut Vec<HWND>));
 
-    state.push(hwnd);
+        state.push(hwnd);
 
-    TRUE
+        TRUE
+    }
 }
 
 fn get_window_title(hwnd: HWND) -> XCapResult<String> {

@@ -151,29 +151,31 @@ impl ImplVideoRecorder {
 
                 let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
                 let mut resource: Option<IDXGIResource> = None;
-
                 unsafe {
-                    if let Err(err) =
-                        duplication.AcquireNextFrame(200, &mut frame_info, &mut resource)
-                    {
-                        // 尝试释放当前帧，不然不能获取到下一帧数据
-                        let _ = duplication.ReleaseFrame();
-                        if err.code() != DXGI_ERROR_WAIT_TIMEOUT {
-                            break Err::<(), XCapError>(XCapError::new("DXGI_ERROR_UNSUPPORTED"));
+                    match duplication.AcquireNextFrame(200, &mut frame_info, &mut resource) {
+                        Err(err) => {
+                            // 尝试释放当前帧，不然不能获取到下一帧数据
+                            let _ = duplication.ReleaseFrame();
+                            if err.code() != DXGI_ERROR_WAIT_TIMEOUT {
+                                break Err::<(), XCapError>(XCapError::new(
+                                    "DXGI_ERROR_UNSUPPORTED",
+                                ));
+                            }
                         }
-                    } else {
-                        // 如何确定 AcquireNextFrame 执行成功
-                        if frame_info.LastPresentTime != 0 {
-                            let resource =
-                                resource.ok_or(XCapError::new("AcquireNextFrame failed"))?;
-                            let source_texture = resource.cast::<ID3D11Texture2D>()?;
-                            let frame =
-                                texture_to_frame(&d3d_device, &d3d_context, source_texture)?;
-                            let _ = tx.send(frame);
-                        }
+                        _ => {
+                            // 如何确定 AcquireNextFrame 执行成功
+                            if frame_info.LastPresentTime != 0 {
+                                let resource =
+                                    resource.ok_or(XCapError::new("AcquireNextFrame failed"))?;
+                                let source_texture = resource.cast::<ID3D11Texture2D>()?;
+                                let frame =
+                                    texture_to_frame(&d3d_device, &d3d_context, source_texture)?;
+                                let _ = tx.send(frame);
+                            }
 
-                        // 最后释放帧，不然获取不到当前帧的数据
-                        duplication.ReleaseFrame()?;
+                            // 最后释放帧，不然获取不到当前帧的数据
+                            duplication.ReleaseFrame()?;
+                        }
                     }
                 }
             }
