@@ -32,7 +32,7 @@ pub enum XCapError {
     StdTimeSystemTimeError(#[from] std::time::SystemTimeError),
     #[cfg(target_os = "linux")]
     #[error(transparent)]
-    LibwayshotError(#[from] libwayshot::Error),
+    LibwayshotError(#[from] libwayshot_xcap::Error),
     #[cfg(target_os = "linux")]
     #[error(transparent)]
     UrlParseError(#[from] url::ParseError),

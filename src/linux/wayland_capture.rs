@@ -2,9 +2,10 @@ use std::{collections::HashMap, env::temp_dir, fmt::Debug, fs, sync::Mutex};
 
 use image::RgbaImage;
 use scopeguard::defer;
+use serde::Deserialize;
 use zbus::{
     blocking::{Connection, Proxy},
-    zvariant::{DeserializeDict, Type, Value},
+    zvariant::{Type, Value},
 };
 
 use crate::{
@@ -49,7 +50,7 @@ fn org_gnome_shell_screenshot(
     Ok(rgba_image)
 }
 
-#[derive(DeserializeDict, Type, Debug)]
+#[derive(Deserialize, Type, Debug)]
 #[zvariant(signature = "dict")]
 pub struct ScreenshotResponse {
     uri: String,
@@ -100,14 +101,14 @@ fn wlroots_screenshot(
     width: i32,
     height: i32,
 ) -> XCapResult<RgbaImage> {
-    let wayshot_connection = libwayshot::WayshotConnection::new()?;
-    let capture_region = libwayshot::region::LogicalRegion {
-        inner: libwayshot::region::Region {
-            position: libwayshot::region::Position {
+    let wayshot_connection = libwayshot_xcap::WayshotConnection::new()?;
+    let capture_region = libwayshot_xcap::region::LogicalRegion {
+        inner: libwayshot_xcap::region::Region {
+            position: libwayshot_xcap::region::Position {
                 x: x_coordinate,
                 y: y_coordinate,
             },
-            size: libwayshot::region::Size {
+            size: libwayshot_xcap::region::Size {
                 width: width as u32,
                 height: height as u32,
             },
