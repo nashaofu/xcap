@@ -39,6 +39,9 @@ pub(crate) struct ImplWindow {
     pub hwnd: HWND,
 }
 
+unsafe impl Send for ImplWindow {}
+unsafe impl Sync for ImplWindow {}
+
 fn is_window_cloaked(hwnd: HWND) -> bool {
     unsafe {
         let mut cloaked = 0u32;
