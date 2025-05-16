@@ -35,22 +35,22 @@ pub fn capture_monitor(impl_monitor: &ImplMonitor) -> XCapResult<RgbaImage> {
 
 pub fn capture_region(
     impl_monitor: &ImplMonitor,
-    x: i32,
-    y: i32,
+    x: u32,
+    y: u32,
     width: u32,
     height: u32,
 ) -> XCapResult<RgbaImage> {
     let monitor_info_buf = get_monitor_info_buf(impl_monitor.output)?;
 
     if wayland_detect() {
-        wayland_capture(x, y, width as i32, height as i32)
+        wayland_capture(x as i32, y as i32, width as i32, height as i32)
     } else {
         let screen_buf = get_current_screen_buf()?;
 
         xorg_capture(
             screen_buf.root(),
-            monitor_info_buf.x() as i32 + x,
-            monitor_info_buf.y() as i32 + y,
+            monitor_info_buf.x() as i32 + x as i32,
+            monitor_info_buf.y() as i32 + y as i32,
             width,
             height,
         )

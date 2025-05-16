@@ -202,16 +202,14 @@ impl ImplMonitor {
         capture(cg_rect, CGWindowListOption::OptionAll, 0)
     }
 
-    pub fn capture_region(&self, x: i32, y: i32, width: u32, height: u32) -> XCapResult<RgbaImage> {
+    pub fn capture_region(&self, x: u32, y: u32, width: u32, height: u32) -> XCapResult<RgbaImage> {
         // Validate region bounds
         let monitor_x = self.x()?;
         let monitor_y = self.y()?;
         let monitor_width = self.width()?;
         let monitor_height = self.height()?;
 
-        if x < 0
-            || y < 0
-            || width > monitor_width
+        if width > monitor_width
             || height > monitor_height
             || x as u32 + width > monitor_width
             || y as u32 + height > monitor_height
@@ -226,8 +224,8 @@ impl ImplMonitor {
         unsafe {
             let cg_rect = objc2_core_foundation::CGRect {
                 origin: objc2_core_foundation::CGPoint {
-                    x: (monitor_x + x) as f64,
-                    y: (monitor_y + y) as f64,
+                    x: (monitor_x + x as i32) as f64,
+                    y: (monitor_y + y as i32) as f64,
                 },
                 size: objc2_core_foundation::CGSize {
                     width: width as f64,

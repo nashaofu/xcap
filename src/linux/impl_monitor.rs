@@ -2,12 +2,12 @@ use std::{ffi::CStr, sync::mpsc::Receiver};
 
 use image::RgbaImage;
 use xcb::{
+    Xid,
     randr::{
         GetCrtcInfo, GetMonitors, GetOutputInfo, GetOutputProperty, GetScreenResources, Mode,
         ModeFlag, ModeInfo, Output, Rotation,
     },
-    x::{GetProperty, ATOM_ANY, ATOM_RESOURCE_MANAGER, ATOM_STRING, CURRENT_TIME},
-    Xid,
+    x::{ATOM_ANY, ATOM_RESOURCE_MANAGER, ATOM_STRING, CURRENT_TIME, GetProperty},
 };
 
 use crate::{
@@ -346,16 +346,14 @@ impl ImplMonitor {
         capture_monitor(self)
     }
 
-    pub fn capture_region(&self, x: i32, y: i32, width: u32, height: u32) -> XCapResult<RgbaImage> {
+    pub fn capture_region(&self, x: u32, y: u32, width: u32, height: u32) -> XCapResult<RgbaImage> {
         // Validate region bounds
         let monitor_x = self.x()?;
         let monitor_y = self.y()?;
         let monitor_width = self.width()?;
         let monitor_height = self.height()?;
 
-        if x < 0
-            || y < 0
-            || width > monitor_width
+        if width > monitor_width
             || height > monitor_height
             || x as u32 + width > monitor_width
             || y as u32 + height > monitor_height
