@@ -91,7 +91,7 @@ impl Monitor {
         self.impl_monitor.capture_image()
     }
 
-    pub fn capture_region(&self, x: i32, y: i32, width: u32, height: u32) -> XCapResult<RgbaImage> {
+    pub fn capture_region(&self, x: u32, y: u32, width: u32, height: u32) -> XCapResult<RgbaImage> {
         self.impl_monitor.capture_region(x, y, width, height)
     }
 
