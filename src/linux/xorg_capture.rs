@@ -1,7 +1,7 @@
 use image::RgbaImage;
 use xcb::{
-    x::{Drawable, GetImage, ImageFormat, ImageOrder, Window},
     Connection,
+    x::{Drawable, GetImage, ImageFormat, ImageOrder, Window},
 };
 
 use crate::error::{XCapError, XCapResult};

@@ -4,12 +4,11 @@ use std::{ffi::c_void, mem, ptr};
 use image::RgbaImage;
 use widestring::U16CString;
 use windows::{
-    core::{BOOL, HSTRING, PCWSTR},
     Win32::{
         Foundation::{GetLastError, HANDLE, HWND, LPARAM, MAX_PATH, RECT, TRUE},
         Graphics::{
-            Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS},
-            Gdi::{IsRectEmpty, MonitorFromWindow, MONITOR_DEFAULTTONEAREST},
+            Dwm::{DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
+            Gdi::{IsRectEmpty, MONITOR_DEFAULTTONEAREST, MonitorFromWindow},
         },
         Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW},
         System::{
@@ -19,11 +18,12 @@ use windows::{
             },
         },
         UI::WindowsAndMessaging::{
-            EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowLongPtrW,
+            EnumWindows, GWL_EXSTYLE, GetClassNameW, GetForegroundWindow, GetWindowLongPtrW,
             GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindow,
-            IsWindowVisible, IsZoomed, GWL_EXSTYLE, WINDOW_EX_STYLE, WS_EX_TOOLWINDOW,
+            IsWindowVisible, IsZoomed, WINDOW_EX_STYLE, WS_EX_TOOLWINDOW,
         },
     },
+    core::{BOOL, HSTRING, PCWSTR},
 };
 
 use crate::error::XCapResult;

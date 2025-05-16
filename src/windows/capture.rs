@@ -7,12 +7,13 @@ use windows::Win32::{
     Graphics::{
         Dwm::DwmIsCompositionEnabled,
         Gdi::{
-            BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
-            GetCurrentObject, GetDIBits, GetObjectW, GetWindowDC, ReleaseDC, SelectObject, BITMAP,
-            BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, HBITMAP, HDC, OBJ_BITMAP, SRCCOPY,
+            BITMAP, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleBitmap,
+            CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetCurrentObject,
+            GetDIBits, GetObjectW, GetWindowDC, HBITMAP, HDC, OBJ_BITMAP, ReleaseDC, SRCCOPY,
+            SelectObject,
         },
     },
-    Storage::Xps::{PrintWindow, PRINT_WINDOW_FLAGS},
+    Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow},
     UI::WindowsAndMessaging::GetDesktopWindow,
 };
 

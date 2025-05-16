@@ -1,6 +1,6 @@
 use image::RgbaImage;
 
-use crate::{error::XCapResult, platform::impl_window::ImplWindow, Monitor};
+use crate::{Monitor, error::XCapResult, platform::impl_window::ImplWindow};
 
 #[derive(Debug, Clone)]
 pub struct Window {

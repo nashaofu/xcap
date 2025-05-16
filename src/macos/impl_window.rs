@@ -11,7 +11,7 @@ use objc2_core_graphics::{
 };
 use objc2_foundation::{NSNumber, NSString};
 
-use crate::{error::XCapResult, XCapError};
+use crate::{XCapError, error::XCapResult};
 
 use super::{capture::capture, impl_monitor::ImplMonitor};
 

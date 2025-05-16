@@ -1,6 +1,6 @@
 use std::sync::mpsc::Receiver;
 
-use crate::{video_recorder::Frame, XCapResult};
+use crate::{XCapResult, video_recorder::Frame};
 
 use super::{
     impl_monitor::ImplMonitor, utils::wayland_detect, wayland_video_recorder::WaylandVideoRecorder,
