@@ -22,8 +22,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Iterate through all available monitors
     for monitor in monitors {
         // Calculate center of the monitor for region capture
-        let x = 0i32;
-        let y = 0i32;
+        let x = 0;
+        let y = 0;
 
         // Capture the region
         let start = Instant::now();

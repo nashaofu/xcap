@@ -3,10 +3,7 @@ use std::sync::mpsc::Receiver;
 use image::RgbaImage;
 
 use crate::{
-    error::{XCapError, XCapResult},
-    platform::impl_monitor::ImplMonitor,
-    video_recorder::Frame,
-    VideoRecorder,
+    VideoRecorder, error::XCapResult, platform::impl_monitor::ImplMonitor, video_recorder::Frame,
 };
 
 #[derive(Debug, Clone)]
@@ -104,6 +101,8 @@ impl Monitor {
 
 #[cfg(test)]
 mod tests {
+    use crate::XCapError;
+
     use super::*;
 
     #[test]
@@ -112,10 +111,10 @@ mod tests {
         let monitor = &monitors[0]; // Get first monitor
 
         // Try to capture a region that extends beyond monitor bounds
-        let x = monitor.width().unwrap() as i32 - 100;
-        let y = monitor.height().unwrap() as i32 - 100;
-        let width = 400;
-        let height = 300;
+        let x = monitor.width().unwrap() / 2;
+        let y = monitor.height().unwrap() / 2;
+        let width = monitor.width().unwrap();
+        let height = monitor.height().unwrap();
 
         let result = monitor.capture_region(x, y, width, height);
 
