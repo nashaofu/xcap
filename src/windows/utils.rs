@@ -321,31 +321,31 @@ mod tests {
         }
     }
 
-    unsafe fn get_monitor_info_ex_w() -> MONITORINFOEXW {
-        let point = POINT { x: 0, y: 0 };
-        let h_monitor = MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY);
-        let mut monitor_info_ex_w = MONITORINFOEXW::default();
-        monitor_info_ex_w.monitorInfo.cbSize = mem::size_of::<MONITORINFOEXW>() as u32;
-        let monitor_info_ex_w_ptr =
-            &mut monitor_info_ex_w as *mut MONITORINFOEXW as *mut MONITORINFO;
+    fn get_monitor_info_ex_w() -> MONITORINFOEXW {
+        unsafe {
+            let point = POINT { x: 0, y: 0 };
+            let h_monitor = MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY);
+            let mut monitor_info_ex_w = MONITORINFOEXW::default();
+            monitor_info_ex_w.monitorInfo.cbSize = mem::size_of::<MONITORINFOEXW>() as u32;
+            let monitor_info_ex_w_ptr =
+                &mut monitor_info_ex_w as *mut MONITORINFOEXW as *mut MONITORINFO;
 
-        // https://learn.microsoft.com/zh-cn/windows/win32/api/winuser/nf-winuser-getmonitorinfoa
-        GetMonitorInfoW(h_monitor, monitor_info_ex_w_ptr)
-            .ok()
-            .unwrap();
+            // https://learn.microsoft.com/zh-cn/windows/win32/api/winuser/nf-winuser-getmonitorinfoa
+            GetMonitorInfoW(h_monitor, monitor_info_ex_w_ptr)
+                .ok()
+                .unwrap();
 
-        monitor_info_ex_w
+            monitor_info_ex_w
+        }
     }
 
     #[test]
     fn test_get_monitor_config() {
-        unsafe {
-            let monitor_info_ex_w = get_monitor_info_ex_w();
-            // 获取显示器配置信息
-            let monitor_config = get_monitor_config(monitor_info_ex_w).unwrap();
+        let monitor_info_ex_w = get_monitor_info_ex_w();
+        // 获取显示器配置信息
+        let monitor_config = get_monitor_config(monitor_info_ex_w).unwrap();
 
-            assert!(!monitor_config.monitorFriendlyDeviceName.is_empty());
-        }
+        assert!(!monitor_config.monitorFriendlyDeviceName.is_empty());
     }
 
     #[test]
