@@ -14,9 +14,17 @@ fn main() {
             window.app_name().unwrap(),
             window.title().unwrap(),
             window.current_monitor().unwrap().name().unwrap(),
-            (window.x().unwrap(), window.y().unwrap(), window.z().unwrap()),
+            (
+                window.x().unwrap(),
+                window.y().unwrap(),
+                window.z().unwrap()
+            ),
             (window.width().unwrap(), window.height().unwrap()),
-            (window.is_minimized().unwrap(), window.is_maximized().unwrap(), window.is_focused().unwrap())
+            (
+                window.is_minimized().unwrap(),
+                window.is_maximized().unwrap(),
+                window.is_focused().unwrap()
+            )
         );
     }
 }

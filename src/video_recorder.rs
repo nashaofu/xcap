@@ -1,6 +1,6 @@
 use std::sync::{Condvar, Mutex};
 
-use crate::{platform::impl_video_recorder::ImplVideoRecorder, XCapResult};
+use crate::{XCapResult, platform::impl_video_recorder::ImplVideoRecorder};
 
 #[derive(Debug, Clone)]
 pub struct Frame {

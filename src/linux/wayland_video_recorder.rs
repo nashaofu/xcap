@@ -2,9 +2,9 @@ use std::{
     collections::HashMap,
     io::Cursor,
     sync::{
+        Arc,
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, Sender},
-        Arc,
     },
     thread,
 };
@@ -16,12 +16,12 @@ use pipewire::{
     properties,
     spa::{
         param::{
+            ParamType,
             format::{FormatProperties, MediaSubtype, MediaType},
             format_utils,
             video::{VideoFormat, VideoInfoRaw},
-            ParamType,
         },
-        pod::{self, serialize::PodSerializer, Pod},
+        pod::{self, Pod, serialize::PodSerializer},
         utils::{Direction, Fraction, Rectangle, SpaTypes},
     },
     stream::{Stream, StreamFlags},
@@ -32,7 +32,7 @@ use zbus::{
     zvariant::{OwnedFd, OwnedObjectPath, Type, Value},
 };
 
-use crate::{video_recorder::Frame, XCapError, XCapResult};
+use crate::{XCapError, XCapResult, video_recorder::Frame};
 
 use super::{
     impl_monitor::ImplMonitor,

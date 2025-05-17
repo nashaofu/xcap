@@ -3,23 +3,23 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use image::{open, RgbaImage};
+use image::{RgbaImage, open};
 use lazy_static::lazy_static;
 use percent_encoding::percent_decode_str;
 use serde::Deserialize;
 use url::Url;
 use xcb::{
+    ConnResult, Connection as XcbConnection, Xid,
     randr::{GetMonitors, MonitorInfoBuf, Output},
     x::{Atom, InternAtom, ScreenBuf},
-    ConnResult, Connection as XcbConnection, Xid,
 };
 use zbus::{
+    Result as ZBusResult,
     blocking::{Connection as ZBusConnection, Proxy},
     zvariant::Type,
-    Result as ZBusResult,
 };
 
-use crate::{error::XCapResult, XCapError};
+use crate::{XCapError, error::XCapResult};
 
 lazy_static! {
     static ref XCB_CONNECTION_AND_INDEX: ConnResult<(XcbConnection, i32)> = {

@@ -1,11 +1,11 @@
 use std::{
     slice,
-    sync::mpsc::{sync_channel, Receiver, SyncSender},
+    sync::mpsc::{Receiver, SyncSender, sync_channel},
 };
 
 use dispatch2::{DispatchQueue, DispatchQueueAttr};
 use objc2::{
-    define_class, msg_send, rc::Retained, runtime::ProtocolObject, AllocAnyThread, DefinedClass,
+    AllocAnyThread, DefinedClass, define_class, msg_send, rc::Retained, runtime::ProtocolObject,
 };
 use objc2_av_foundation::{
     AVCaptureConnection, AVCaptureOutput, AVCaptureScreenInput, AVCaptureSession,
@@ -14,15 +14,15 @@ use objc2_av_foundation::{
 use objc2_core_graphics::CGDirectDisplayID;
 use objc2_core_media::CMSampleBuffer;
 use objc2_core_video::{
-    kCVPixelBufferPixelFormatTypeKey, kCVPixelFormatType_32BGRA, CVPixelBufferGetBaseAddress,
-    CVPixelBufferGetBytesPerRow, CVPixelBufferGetDataSize, CVPixelBufferGetHeight,
-    CVPixelBufferGetPixelFormatType, CVPixelBufferGetWidth, CVPixelBufferLockBaseAddress,
-    CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
+    CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow, CVPixelBufferGetDataSize,
+    CVPixelBufferGetHeight, CVPixelBufferGetPixelFormatType, CVPixelBufferGetWidth,
+    CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
+    kCVPixelBufferPixelFormatTypeKey, kCVPixelFormatType_32BGRA,
 };
 use objc2_foundation::{NSDictionary, NSNumber, NSObject, NSObjectProtocol, NSString};
 use scopeguard::defer;
 
-use crate::{video_recorder::Frame, XCapError, XCapResult};
+use crate::{XCapError, XCapResult, video_recorder::Frame};
 
 #[derive(Debug, Clone)]
 struct DataOutputSampleBufferDelegateVars {

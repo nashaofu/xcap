@@ -1,36 +1,36 @@
 use std::{
     slice,
     sync::{
-        mpsc::{sync_channel, Receiver, SyncSender},
         Arc,
+        mpsc::{Receiver, SyncSender, sync_channel},
     },
     thread,
 };
 
 use windows::{
-    core::Interface,
     Win32::{
         Foundation::HMODULE,
         Graphics::{
             Direct3D::D3D_DRIVER_TYPE_HARDWARE,
             Direct3D11::{
-                D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Resource,
-                ID3D11Texture2D, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                D3D11_CREATE_DEVICE_SINGLETHREADED, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ,
-                D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
+                D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                D3D11_CREATE_DEVICE_SINGLETHREADED, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
+                D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, D3D11CreateDevice,
+                ID3D11Device, ID3D11DeviceContext, ID3D11Resource, ID3D11Texture2D,
             },
             Dxgi::{
-                IDXGIDevice, IDXGIOutput1, IDXGIOutputDuplication, IDXGIResource,
-                DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO,
+                DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO, IDXGIDevice, IDXGIOutput1,
+                IDXGIOutputDuplication, IDXGIResource,
             },
             Gdi::HMONITOR,
         },
     },
+    core::Interface,
 };
 
 use crate::{
-    video_recorder::{Frame, RecorderWaker},
     XCapError, XCapResult,
+    video_recorder::{Frame, RecorderWaker},
 };
 
 use super::utils::bgra_to_rgba;

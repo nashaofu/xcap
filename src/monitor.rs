@@ -3,7 +3,7 @@ use std::sync::mpsc::Receiver;
 use image::RgbaImage;
 
 use crate::{
-    error::XCapResult, platform::impl_monitor::ImplMonitor, video_recorder::Frame, VideoRecorder,
+    VideoRecorder, error::XCapResult, platform::impl_monitor::ImplMonitor, video_recorder::Frame,
 };
 
 #[derive(Debug, Clone)]
@@ -88,9 +88,39 @@ impl Monitor {
         self.impl_monitor.capture_image()
     }
 
+    pub fn capture_region(&self, x: u32, y: u32, width: u32, height: u32) -> XCapResult<RgbaImage> {
+        self.impl_monitor.capture_region(x, y, width, height)
+    }
+
     pub fn video_recorder(&self) -> XCapResult<(VideoRecorder, Receiver<Frame>)> {
         let (impl_video_recorder, sx) = self.impl_monitor.video_recorder()?;
 
         Ok((VideoRecorder::new(impl_video_recorder), sx))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::XCapError;
+
+    use super::*;
+
+    #[test]
+    fn test_capture_region_out_of_bounds() {
+        let monitors = Monitor::all().unwrap();
+        let monitor = &monitors[0]; // Get first monitor
+
+        // Try to capture a region that extends beyond monitor bounds
+        let x = monitor.width().unwrap() / 2;
+        let y = monitor.height().unwrap() / 2;
+        let width = monitor.width().unwrap();
+        let height = monitor.height().unwrap();
+
+        let result = monitor.capture_region(x, y, width, height);
+
+        match result {
+            Err(XCapError::InvalidCaptureRegion(_)) => (),
+            _ => panic!("Expected InvalidCaptureRegion error"),
+        }
     }
 }

@@ -1,30 +1,30 @@
 use std::mem;
 
 use image::RgbaImage;
-use scopeguard::{guard, ScopeGuard};
+use scopeguard::{ScopeGuard, guard};
 use widestring::U16CString;
 use windows::{
-    core::{s, w, HRESULT, PCWSTR},
     Win32::{
         Devices::Display::{
-            DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QueryDisplayConfig,
             DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
             DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO,
             DISPLAYCONFIG_SOURCE_DEVICE_NAME, DISPLAYCONFIG_TARGET_DEVICE_NAME,
-            QDC_ONLY_ACTIVE_PATHS,
+            DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS,
+            QueryDisplayConfig,
         },
         Foundation::{CloseHandle, FreeLibrary, GetLastError, HANDLE, HMODULE, HWND},
         Graphics::Gdi::MONITORINFOEXW,
         System::{
             LibraryLoader::{GetProcAddress, LoadLibraryW},
-            Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ},
+            Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW},
             Threading::{OpenProcess, PROCESS_ACCESS_RIGHTS},
         },
         UI::WindowsAndMessaging::{GetWindowInfo, WINDOWINFO},
     },
+    core::{HRESULT, PCWSTR, s, w},
 };
 
-use crate::{error::XCapResult, XCapError};
+use crate::{XCapError, error::XCapResult};
 
 pub(super) fn get_build_number() -> u32 {
     unsafe {
@@ -247,8 +247,8 @@ pub fn get_window_info(hwnd: HWND) -> XCapResult<WINDOWINFO> {
 mod tests {
     use windows::Win32::Foundation::POINT;
     use windows::Win32::Graphics::Gdi::{
-        EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromPoint, DEVMODEW, ENUM_CURRENT_SETTINGS,
-        MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
+        DEVMODEW, ENUM_CURRENT_SETTINGS, EnumDisplaySettingsW, GetMonitorInfoW,
+        MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint,
     };
     use windows::Win32::System::Threading::{
         GetCurrentProcessId, PROCESS_QUERY_LIMITED_INFORMATION,

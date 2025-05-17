@@ -2,12 +2,12 @@ use std::{ffi::CStr, sync::mpsc::Receiver};
 
 use image::RgbaImage;
 use xcb::{
+    Xid,
     randr::{
         GetCrtcInfo, GetMonitors, GetOutputInfo, GetOutputProperty, GetScreenResources, Mode,
         ModeFlag, ModeInfo, Output, Rotation,
     },
-    x::{GetProperty, ATOM_ANY, ATOM_RESOURCE_MANAGER, ATOM_STRING, CURRENT_TIME},
-    Xid,
+    x::{ATOM_ANY, ATOM_RESOURCE_MANAGER, ATOM_STRING, CURRENT_TIME, GetProperty},
 };
 
 use crate::{
@@ -16,7 +16,7 @@ use crate::{
 };
 
 use super::{
-    capture::capture_monitor,
+    capture::{capture_monitor, capture_region},
     impl_video_recorder::ImplVideoRecorder,
     utils::{
         get_atom, get_current_screen_buf, get_monitor_info_buf, get_xcb_connection_and_index,
@@ -344,6 +344,26 @@ impl ImplMonitor {
 
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
         capture_monitor(self)
+    }
+
+    pub fn capture_region(&self, x: u32, y: u32, width: u32, height: u32) -> XCapResult<RgbaImage> {
+        // Validate region bounds
+        let monitor_x = self.x()?;
+        let monitor_y = self.y()?;
+        let monitor_width = self.width()?;
+        let monitor_height = self.height()?;
+
+        if width > monitor_width
+            || height > monitor_height
+            || x as u32 + width > monitor_width
+            || y as u32 + height > monitor_height
+        {
+            return Err(XCapError::InvalidCaptureRegion(format!(
+                "Region ({}, {}, {}, {}) is outside monitor bounds ({}, {}, {}, {})",
+                x, y, width, height, monitor_x, monitor_y, monitor_width, monitor_height
+            )));
+        }
+        capture_region(self, x, y, width, height)
     }
 
     pub fn video_recorder(&self) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {

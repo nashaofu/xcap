@@ -8,6 +8,8 @@ pub enum XCapError {
     Error(String),
     #[error("StdSyncPoisonError {0}")]
     StdSyncPoisonError(String),
+    #[error("Invalid capture region: {0}")]
+    InvalidCaptureRegion(String),
 
     #[cfg(target_os = "linux")]
     #[error(transparent)]

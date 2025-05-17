@@ -1,11 +1,11 @@
 use image::RgbaImage;
 use xcb::{
-    x::{
-        Atom, Drawable, GetGeometry, GetProperty, GetPropertyReply, QueryPointer,
-        TranslateCoordinates, Window, ATOM_ATOM, ATOM_CARDINAL, ATOM_NONE, ATOM_STRING,
-        ATOM_WM_CLASS, ATOM_WM_NAME,
-    },
     Xid,
+    x::{
+        ATOM_ATOM, ATOM_CARDINAL, ATOM_NONE, ATOM_STRING, ATOM_WM_CLASS, ATOM_WM_NAME, Atom,
+        Drawable, GetGeometry, GetProperty, GetPropertyReply, QueryPointer, TranslateCoordinates,
+        Window,
+    },
 };
 
 use crate::error::{XCapError, XCapResult};

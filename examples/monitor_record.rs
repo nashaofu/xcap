@@ -6,12 +6,14 @@ fn main() {
 
     let (video_recorder, sx) = monitor.video_recorder().unwrap();
 
-    thread::spawn(move || loop {
-        match sx.recv() {
-            Ok(frame) => {
-                println!("frame: {:?}", frame.width);
+    thread::spawn(move || {
+        loop {
+            match sx.recv() {
+                Ok(frame) => {
+                    println!("frame: {:?}", frame.width);
+                }
+                _ => continue,
             }
-            _ => continue,
         }
     });
 

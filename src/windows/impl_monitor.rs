@@ -4,19 +4,19 @@ use image::RgbaImage;
 use scopeguard::guard;
 use widestring::U16CString;
 use windows::{
-    core::{s, w, BOOL, HRESULT, PCWSTR},
     Win32::{
         Devices::Display::DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL,
         Foundation::{GetLastError, LPARAM, POINT, RECT, TRUE},
         Graphics::Gdi::{
-            CreateDCW, DeleteDC, EnumDisplayMonitors, EnumDisplaySettingsW, GetDeviceCaps,
-            GetMonitorInfoW, MonitorFromPoint, DESKTOPHORZRES, DEVMODEW, DMDO_180, DMDO_270,
-            DMDO_90, DMDO_DEFAULT, ENUM_CURRENT_SETTINGS, HDC, HMONITOR, HORZRES, MONITORINFO,
-            MONITORINFOEXW, MONITOR_DEFAULTTONULL,
+            CreateDCW, DESKTOPHORZRES, DEVMODEW, DMDO_90, DMDO_180, DMDO_270, DMDO_DEFAULT,
+            DeleteDC, ENUM_CURRENT_SETTINGS, EnumDisplayMonitors, EnumDisplaySettingsW,
+            GetDeviceCaps, GetMonitorInfoW, HDC, HMONITOR, HORZRES, MONITOR_DEFAULTTONULL,
+            MONITORINFO, MONITORINFOEXW, MonitorFromPoint,
         },
         System::{LibraryLoader::GetProcAddress, Threading::GetCurrentProcess},
         UI::WindowsAndMessaging::MONITORINFOF_PRIMARY,
     },
+    core::{BOOL, HRESULT, PCWSTR, s, w},
 };
 
 use crate::{
@@ -277,6 +277,31 @@ impl ImplMonitor {
         let height = self.height()?;
 
         capture_monitor(x, y, width as i32, height as i32)
+    }
+
+    pub fn capture_region(&self, x: u32, y: u32, width: u32, height: u32) -> XCapResult<RgbaImage> {
+        // Validate region bounds
+        let monitor_x = self.x()?;
+        let monitor_y = self.y()?;
+        let monitor_width = self.width()?;
+        let monitor_height = self.height()?;
+
+        if width > monitor_width
+            || height > monitor_height
+            || x as u32 + width > monitor_width
+            || y as u32 + height > monitor_height
+        {
+            return Err(XCapError::InvalidCaptureRegion(format!(
+                "Region ({}, {}, {}, {}) is outside monitor bounds ({}, {}, {}, {})",
+                x, y, width, height, monitor_x, monitor_y, monitor_width, monitor_height
+            )));
+        }
+
+        // Calculate absolute coordinates
+        let abs_x = monitor_x + x as i32;
+        let abs_y = monitor_y + y as i32;
+
+        capture_monitor(abs_x, abs_y, width as i32, height as i32)
     }
 
     pub fn video_recorder(&self) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {
