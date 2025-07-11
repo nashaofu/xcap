@@ -355,12 +355,11 @@ impl ImplMonitor {
 
         if width > monitor_width
             || height > monitor_height
-            || x as u32 + width > monitor_width
-            || y as u32 + height > monitor_height
+            || x + width > monitor_width
+            || y + height > monitor_height
         {
             return Err(XCapError::InvalidCaptureRegion(format!(
-                "Region ({}, {}, {}, {}) is outside monitor bounds ({}, {}, {}, {})",
-                x, y, width, height, monitor_x, monitor_y, monitor_width, monitor_height
+                "Region ({x}, {y}, {width}, {height}) is outside monitor bounds ({monitor_x}, {monitor_y}, {monitor_width}, {monitor_height})"
             )));
         }
         capture_region(self, x, y, width, height)

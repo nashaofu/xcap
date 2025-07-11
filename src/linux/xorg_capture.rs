@@ -108,7 +108,7 @@ pub fn xorg_capture(
         16 => get_pixel16_rgba,
         24 => get_pixel24_32_rgba,
         32 => get_pixel24_32_rgba,
-        _ => return Err(XCapError::new(format!("Unsupported {} depth", depth))),
+        _ => return Err(XCapError::new(format!("Unsupported {depth} depth"))),
     };
 
     let mut rgba = vec![0u8; (width * height * 4) as usize];

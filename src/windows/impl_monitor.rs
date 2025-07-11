@@ -119,7 +119,7 @@ fn get_scale_factor(h_monitor: HMONITOR) -> XCapResult<f32> {
     let scale_factor = match get_hi_dpi_scale_factor(h_monitor) {
         Ok(val) => val,
         Err(err) => {
-            log::info!("get_hi_dpi_scale_factor failed: {}", err);
+            log::info!("get_hi_dpi_scale_factor failed: {err}");
             let monitor_info_ex_w = get_monitor_info_ex_w(h_monitor)?;
             // https://learn.microsoft.com/zh-cn/windows/win32/api/wingdi/nf-wingdi-getdevicecaps
             unsafe {
@@ -288,12 +288,11 @@ impl ImplMonitor {
 
         if width > monitor_width
             || height > monitor_height
-            || x as u32 + width > monitor_width
-            || y as u32 + height > monitor_height
+            || x + width > monitor_width
+            || y + height > monitor_height
         {
             return Err(XCapError::InvalidCaptureRegion(format!(
-                "Region ({}, {}, {}, {}) is outside monitor bounds ({}, {}, {}, {})",
-                x, y, width, height, monitor_x, monitor_y, monitor_width, monitor_height
+                "Region ({x}, {y}, {width}, {height}) is outside monitor bounds ({monitor_x}, {monitor_y}, {monitor_width}, {monitor_height})"
             )));
         }
 

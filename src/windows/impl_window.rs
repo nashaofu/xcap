@@ -228,7 +228,7 @@ fn get_app_name(pid: u32) -> XCapResult<String> {
         let scope_guard_handle = match open_process(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
             Ok(box_handle) => box_handle,
             Err(err) => {
-                log::error!("open_process failed: {}", err);
+                log::error!("open_process failed: {err}");
                 return Ok(String::new());
             }
         };
@@ -426,9 +426,7 @@ impl ImplWindow {
         let current_process_is_dpi_awareness =
             unsafe { get_process_is_dpi_awareness(GetCurrentProcess())? };
 
-        let scale_factor = if !window_is_dpi_awareness {
-            1.0
-        } else if current_process_is_dpi_awareness {
+        let scale_factor = if !window_is_dpi_awareness || current_process_is_dpi_awareness {
             1.0
         } else {
             self.current_monitor()?.scale_factor()?

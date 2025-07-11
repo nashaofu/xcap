@@ -106,15 +106,11 @@ fn get_window_state(window: &Window) -> XCapResult<(bool, bool)> {
     let wm_state_reply = get_window_property(*window, wm_state_atom, ATOM_ATOM, 0, 12)?;
     let wm_state = wm_state_reply.value::<Atom>();
 
-    let is_minimized = wm_state.iter().any(|&state| state == wm_state_hidden_atom);
+    let is_minimized = wm_state.contains(&wm_state_hidden_atom);
 
-    let is_maximized_vert = wm_state
-        .iter()
-        .any(|&state| state == wm_state_maximized_vert_atom);
+    let is_maximized_vert = wm_state.contains(&wm_state_maximized_vert_atom);
 
-    let is_maximized_horz = wm_state
-        .iter()
-        .any(|&state| state == wm_state_maximized_horz_atom);
+    let is_maximized_horz = wm_state.contains(&wm_state_maximized_horz_atom);
 
     Ok((
         is_minimized,

@@ -38,14 +38,14 @@ impl XorgVideoRecorder {
         thread::spawn(move || {
             loop {
                 if let Err(err) = recorder_waker.wait() {
-                    log::error!("Recorder waker error: {:?}", err);
+                    log::error!("Recorder waker error: {err:?}");
                     break Err(err);
                 }
 
                 let is_running = match running_flag.lock() {
                     Ok(guard) => *guard,
                     Err(e) => {
-                        log::error!("Failed to lock running flag: {:?}", e);
+                        log::error!("Failed to lock running flag: {e:?}");
                         break Err(XCapError::from(e));
                     }
                 };
@@ -62,12 +62,12 @@ impl XorgVideoRecorder {
 
                         let frame = Frame::new(width, height, raw);
                         if let Err(e) = sender.send(frame) {
-                            log::error!("Failed to send frame: {:?}", e);
-                            break Err(XCapError::new(format!("Failed to send frame: {}", e)));
+                            log::error!("Failed to send frame: {e:?}");
+                            break Err(XCapError::new(format!("Failed to send frame: {e}")));
                         }
                     }
                     Err(e) => {
-                        log::error!("Failed to capture frame: {:?}", e);
+                        log::error!("Failed to capture frame: {e:?}");
                         thread::sleep(Duration::from_millis(10));
                         continue;
                     }
