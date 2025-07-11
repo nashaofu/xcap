@@ -131,7 +131,7 @@ pub(super) fn load_library(
 
         let scope_guard_hmodule = guard(hmodule, |val| {
             if let Err(err) = FreeLibrary(val) {
-                log::error!("FreeLibrary {:?} failed {:?}", val, err);
+                log::error!("FreeLibrary {val:?} failed {err:?}");
             }
         });
 
@@ -156,7 +156,7 @@ pub(super) fn open_process(
 
         let scope_guard_handle = guard(handle, |val| {
             if let Err(err) = CloseHandle(val) {
-                log::error!("CloseHandle {:?} failed {:?}", val, err);
+                log::error!("CloseHandle {val:?} failed {err:?}");
             }
         });
 
@@ -262,7 +262,7 @@ mod tests {
     #[test]
     fn test_get_build_number() {
         let build = get_build_number();
-        println!("build {}", build);
+        println!("build {build}");
         assert!(build == 26100, "build number should be 26100");
     }
 
