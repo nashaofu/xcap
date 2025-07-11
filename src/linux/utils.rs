@@ -100,7 +100,7 @@ pub fn get_atom(name: &str) -> XCapResult<Atom> {
     let atom = atom_reply.atom();
 
     if atom.is_none() {
-        return Err(XCapError::new(format!("{} not supported", name)));
+        return Err(XCapError::new(format!("{name} not supported")));
     }
 
     Ok(atom)
@@ -183,5 +183,5 @@ where
         return Err(XCapError::new("Z-Bus canceled"));
     }
 
-    Err(XCapError::new(format!("Response code is {}", code)))
+    Err(XCapError::new(format!("Response code is {code}")))
 }

@@ -229,7 +229,7 @@ impl WaylandVideoRecorder {
                     let (media_type, media_subtype) = match format_utils::parse_format(param) {
                         Ok(v) => v,
                         Err(err) => {
-                            log::error!("Failed to parse format: {:?}", err);
+                            log::error!("Failed to parse format: {err:?}");
                             return;
                         }
                     };
@@ -239,7 +239,7 @@ impl WaylandVideoRecorder {
                     }
 
                     if let Err(err) = user_data.format.parse(param) {
-                        log::error!("Failed to parse format: {:?}", err);
+                        log::error!("Failed to parse format: {err:?}");
                     }
                 })
                 .process(move |stream, user_data| {

@@ -53,7 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         image.save(&filename).unwrap();
-        println!("Saved to {}", filename);
+        println!("Saved to {filename}");
     }
 
     println!(
