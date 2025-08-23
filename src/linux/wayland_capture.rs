@@ -2,10 +2,9 @@ use std::{collections::HashMap, env::temp_dir, fmt::Debug, fs, sync::Mutex};
 
 use image::RgbaImage;
 use scopeguard::defer;
-use serde::Deserialize;
 use zbus::{
     blocking::{Connection, Proxy},
-    zvariant::{Type, Value},
+    zvariant::{DeserializeDict, Type, Value},
 };
 
 use crate::{
@@ -51,7 +50,7 @@ fn org_gnome_shell_screenshot(
     Ok(rgba_image)
 }
 
-#[derive(Deserialize, Type, Debug)]
+#[derive(DeserializeDict, Type, Debug)]
 #[zvariant(signature = "dict")]
 pub struct ScreenshotResponse {
     uri: zbus::zvariant::OwnedValue,
