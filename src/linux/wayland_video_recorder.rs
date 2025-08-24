@@ -26,10 +26,9 @@ use pipewire::{
     },
     stream::{Stream, StreamFlags},
 };
-use serde::Deserialize;
 use zbus::{
     blocking::Proxy,
-    zvariant::{OwnedFd, OwnedObjectPath, Type, Value},
+    zvariant::{DeserializeDict, OwnedFd, OwnedObjectPath, Type, Value},
 };
 
 use crate::{XCapError, XCapResult, video_recorder::Frame};
@@ -40,7 +39,7 @@ use super::{
 };
 
 #[allow(dead_code)]
-#[derive(Deserialize, Type, Debug)]
+#[derive(DeserializeDict, Type, Debug)]
 #[zvariant(signature = "dict")]
 pub struct ScreenCastStartStream {
     pub id: Option<String>,
@@ -50,7 +49,7 @@ pub struct ScreenCastStartStream {
     pub mapping_id: Option<String>,
 }
 
-#[derive(Deserialize, Type, Debug)]
+#[derive(DeserializeDict, Type, Debug)]
 #[zvariant(signature = "dict")]
 pub struct ScreenCastStartResponse {
     pub streams: Option<Vec<(u32, ScreenCastStartStream)>>,
