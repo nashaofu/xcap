@@ -4,6 +4,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum XCapError {
+    #[error("Not supported")]
+    NotSupported,
     #[error("{0}")]
     Error(String),
     #[error("StdSyncPoisonError {0}")]

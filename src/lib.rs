@@ -15,6 +15,10 @@ mod platform;
 #[path = "linux/mod.rs"]
 mod platform;
 
+#[cfg(target_os = "android")]
+#[path = "android/mod.rs"]
+mod platform;
+
 pub use image;
 
 pub use error::{XCapError, XCapResult};
