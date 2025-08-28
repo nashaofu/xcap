@@ -8,7 +8,6 @@ use zbus::{
 };
 
 use crate::{
-    XCapError,
     error::XCapResult,
     platform::utils::{get_zbus_portal_request, safe_uri_to_path, wait_zbus_response},
 };
@@ -53,7 +52,7 @@ fn org_gnome_shell_screenshot(
 #[derive(DeserializeDict, Type, Debug)]
 #[zvariant(signature = "dict")]
 pub struct ScreenshotResponse {
-    uri: zbus::zvariant::OwnedValue,
+    uri: String,
 }
 
 /// https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Screenshot.html
@@ -82,15 +81,7 @@ fn org_freedesktop_portal_screenshot(
     // https://github.com/flatpak/xdg-desktop-portal/blob/main/data/org.freedesktop.portal.Screenshot.xml
     proxy.call_method("Screenshot", &("", options))?;
     let screenshot_response: ScreenshotResponse = wait_zbus_response(&portal_request)?;
-
-    let filename = safe_uri_to_path(&match screenshot_response.uri.into() {
-        Value::Str(path) => path,
-        _ => {
-            return Err(XCapError::new(
-                "[org_freedesktop_portal_screenshot] Failed to get file name",
-            ));
-        }
-    })?;
+    let filename = safe_uri_to_path(&screenshot_response.uri)?;
     defer!({
         let _ = fs::remove_file(&filename);
     });
