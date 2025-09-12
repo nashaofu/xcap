@@ -43,6 +43,13 @@ use super::{
 #[allow(dead_code)]
 #[derive(DeserializeDict, Type, Debug)]
 #[zvariant(signature = "dict")]
+pub struct ScreenCastCreateSessionResponse {
+    session_handle: String,
+}
+
+#[allow(dead_code)]
+#[derive(DeserializeDict, Type, Debug)]
+#[zvariant(signature = "dict")]
 pub struct ScreenCastStartStream {
     pub id: Option<String>,
     pub position: Option<(i32, i32)>,
@@ -92,7 +99,7 @@ impl ScreenCast<'_> {
 
         self.proxy.call_method("CreateSession", &(options))?;
 
-        portal_request.receive_signal("Response")?;
+        let response: ScreenCastCreateSessionResponse = wait_zbus_response(&portal_request)?;
 
         let unique_name = conn
             .unique_name()
@@ -102,6 +109,10 @@ impl ScreenCast<'_> {
         let session = OwnedObjectPath::try_from(format!(
             "/org/freedesktop/portal/desktop/session/{unique_identifier}/{session_handle_token}"
         ))?;
+
+        if session.as_str() != response.session_handle {
+            return Err(XCapError::new("Session handle mismatch"));
+        }
 
         Ok(session)
     }
