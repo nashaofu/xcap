@@ -97,9 +97,11 @@ impl ScreenCast<'_> {
         let session_handle_token = rand::random::<u32>().to_string();
         options.insert("session_handle_token", Value::from(&session_handle_token));
 
+        let receiver = wait_zbus_response::<ScreenCastCreateSessionResponse>(&portal_request);
+
         self.proxy.call_method("CreateSession", &(options))?;
 
-        let response: ScreenCastCreateSessionResponse = wait_zbus_response(&portal_request)?;
+        let response = receiver.recv()??;
 
         let unique_name = conn
             .unique_name()
@@ -147,9 +149,11 @@ impl ScreenCast<'_> {
 
         options.insert("handle_token", Value::from(&handle_token));
 
+        let receiver = wait_zbus_response(&portal_request);
+
         self.proxy.call_method("Start", &(session, "", options))?;
 
-        wait_zbus_response(&portal_request)
+        receiver.recv()?
     }
 
     #[allow(dead_code)]

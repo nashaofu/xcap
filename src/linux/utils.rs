@@ -1,6 +1,7 @@
 use std::{
     env::{self, var_os},
     path::{Path, PathBuf},
+    sync::mpsc::Receiver,
 };
 
 use image::{RgbaImage, open};
@@ -162,7 +163,24 @@ pub(super) fn get_zbus_portal_request(
     Ok(request)
 }
 
-pub(super) fn wait_zbus_response<'a, T>(request: &Proxy<'a>) -> XCapResult<T>
+pub(super) fn wait_zbus_response<T>(request: &Proxy<'static>) -> Receiver<XCapResult<T>>
+where
+    T: for<'de> Deserialize<'de> + Type + Send + Sync + 'static,
+{
+    let (sender, receiver) = std::sync::mpsc::channel();
+
+    let request = request.clone();
+    std::thread::spawn(move || {
+        let response = wait_zbus_response_inner::<T>(&request);
+        sender
+            .send(response)
+            .map_err(|e| XCapError::new(&format!("Failed to send zbus response: {e}")))
+    });
+
+    receiver
+}
+
+pub(super) fn wait_zbus_response_inner<'a, T>(request: &Proxy<'a>) -> XCapResult<T>
 where
     T: for<'de> Deserialize<'de> + Type,
 {

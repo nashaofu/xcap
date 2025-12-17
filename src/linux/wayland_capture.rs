@@ -78,9 +78,11 @@ fn org_freedesktop_portal_screenshot(
     options.insert("modal", Value::from(true));
     options.insert("interactive", Value::from(false));
 
+    let receiver = wait_zbus_response(&portal_request);
+
     // https://github.com/flatpak/xdg-desktop-portal/blob/main/data/org.freedesktop.portal.Screenshot.xml
     proxy.call_method("Screenshot", &("", options))?;
-    let screenshot_response: ScreenshotResponse = wait_zbus_response(&portal_request)?;
+    let screenshot_response: ScreenshotResponse = receiver.recv()??;
     let filename = safe_uri_to_path(&screenshot_response.uri)?;
     defer!({
         let _ = fs::remove_file(&filename);
