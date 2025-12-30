@@ -6,8 +6,9 @@ use objc2_core_foundation::{
     CFBoolean, CFDictionary, CFNumber, CFNumberType, CFRetained, CFString, CGPoint, CGRect,
 };
 use objc2_core_graphics::{
-    CGDisplayBounds, CGMainDisplayID, CGRectContainsPoint, CGRectIntersectsRect,
-    CGRectMakeWithDictionaryRepresentation, CGWindowListCopyWindowInfo, CGWindowListOption,
+    CGDisplayBounds, CGMainDisplayID, CGPreflightScreenCaptureAccess, CGRectContainsPoint,
+    CGRectIntersectsRect, CGRectMakeWithDictionaryRepresentation, CGWindowListCopyWindowInfo,
+    CGWindowListOption,
 };
 use objc2_foundation::{NSNumber, NSString};
 
@@ -159,6 +160,13 @@ impl ImplWindow {
 
     pub fn all() -> XCapResult<Vec<ImplWindow>> {
         unsafe {
+            if !CGPreflightScreenCaptureAccess() {
+                log::warn!(
+                    "Screen Recording permission not granted. \
+                     Grant access in System Settings > Privacy & Security > Screen Recording"
+                );
+            }
+
             let mut impl_window = Vec::new();
 
             // CGWindowListCopyWindowInfo 返回窗口顺序为从顶层到最底层
