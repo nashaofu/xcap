@@ -12,9 +12,9 @@ use std::{
 
 use pipewire::{
     channel,
-    context::Context,
+    context::ContextRc,
     keys::{MEDIA_CATEGORY, MEDIA_ROLE, MEDIA_TYPE},
-    main_loop::MainLoop,
+    main_loop::MainLoopRc,
     properties,
     spa::{
         param::{
@@ -26,7 +26,7 @@ use pipewire::{
         pod::{self, Pod, serialize::PodSerializer},
         utils::{Direction, Fraction, Rectangle, SpaTypes},
     },
-    stream::{Stream, StreamFlags},
+    stream::{StreamFlags, StreamRc},
 };
 use zbus::{
     blocking::Proxy,
@@ -232,16 +232,16 @@ impl WaylandVideoRecorder {
         thread::spawn(move || {
             pipewire::init();
 
-            let main_loop = MainLoop::new(None)?;
-            let context = Context::new(&main_loop)?;
-            let core = context.connect(None)?;
+            let main_loop = MainLoopRc::new(None)?;
+            let context = ContextRc::new(&main_loop, None)?;
+            let core = context.connect_rc(None)?;
 
             let user_data = ListenerUserData {
                 format: Default::default(),
             };
 
-            let stream = Stream::new(
-                &core,
+            let stream = StreamRc::new(
+                core.clone(),
                 "XCap",
                 properties::properties! {
                     *MEDIA_TYPE => "Video",
@@ -397,7 +397,7 @@ impl WaylandVideoRecorder {
             )?;
 
             // Used to pause/resume the stream
-            let _attached = active_receiver.attach(main_loop.loop_(), {
+            let _attached = active_receiver.attach(&main_loop.loop_(), {
                 move |active| {
                     if let Err(e) = stream.set_active(active) {
                         log::error!("Failed to set stream active={active}: {e:?}");
