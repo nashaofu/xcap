@@ -13,9 +13,7 @@ use windows::{
         Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW},
         System::{
             ProcessStatus::{GetModuleBaseNameW, GetModuleFileNameExW},
-            Threading::{
-                GetCurrentProcess, GetCurrentProcessId, PROCESS_QUERY_LIMITED_INFORMATION,
-            },
+            Threading::{GetCurrentProcessId, PROCESS_QUERY_LIMITED_INFORMATION},
         },
         UI::WindowsAndMessaging::{
             EnumWindows, GWL_EXSTYLE, GetClassNameW, GetForegroundWindow, GetWindowLongPtrW,
@@ -26,12 +24,11 @@ use windows::{
     core::{BOOL, HSTRING, PCWSTR},
 };
 
-use crate::{error::XCapResult, platform::capture::wgc_capture_window};
+use crate::{error::XCapResult, platform::capture::capture_window};
 
 use super::{
-    capture::capture_window,
     impl_monitor::ImplMonitor,
-    utils::{get_process_is_dpi_awareness, get_window_info, open_process},
+    utils::{get_window_info, open_process},
 };
 
 #[derive(Debug, Clone)]
@@ -418,21 +415,6 @@ impl ImplWindow {
     }
 
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
-        // 在win10之后，不同窗口有不同的dpi，所以可能存在截图不全或者截图有较大空白，实际窗口没有填充满图片
-        // 如果窗口不感知dpi，那么就不需要缩放，如果当前进程感知dpi，那么也不需要缩放
-        let scope_guard_handle =
-            open_process(PROCESS_QUERY_LIMITED_INFORMATION, false, self.pid()?)?;
-        let window_is_dpi_awareness = get_process_is_dpi_awareness(*scope_guard_handle)?;
-        let current_process_is_dpi_awareness =
-            unsafe { get_process_is_dpi_awareness(GetCurrentProcess())? };
-
-        let scale_factor = if !window_is_dpi_awareness || current_process_is_dpi_awareness {
-            1.0
-        } else {
-            self.current_monitor()?.scale_factor()?
-        };
-
-        // capture_window(self.hwnd, scale_factor)
-        wgc_capture_window(self.hwnd)
+        capture_window(self)
     }
 }

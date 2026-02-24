@@ -16,9 +16,12 @@ resolver = "2"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
+default = ["wgc"]
 image = ["image/default"]
+wgc = []
 
 [dependencies]
+cfg-if = "1.0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
 scopeguard = "1.2"
@@ -55,10 +58,7 @@ windows = { version = "0.61", features = [
     "Win32_Graphics_Dxgi_Common",
     "Graphics_Capture",
     "Win32_System_WinRT_Graphics_Capture",
-    "Graphics_DirectX",
-    "Foundation",
     "Win32_System_WinRT_Direct3D11",
-    "Win32_System_WinRT_Graphics",
     "Graphics_DirectX_Direct3D11",
 ] }
 
