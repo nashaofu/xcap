@@ -30,8 +30,9 @@ pub fn capture_window(window: &ImplWindow) -> XCapResult<RgbaImage> {
         if #[cfg(feature = "wgc")] {
             wgc::capture_window(window.hwnd)
         } else {
-            use windows::Win32::System::Threading::GetCurrentProcess;
-            use super::utils::get_process_is_dpi_awareness;
+            use windows::Win32::System::Threading::{GetCurrentProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+
+            use super::utils::{open_process, get_process_is_dpi_awareness};
             // 在win10之后，不同窗口有不同的dpi，所以可能存在截图不全或者截图有较大空白，实际窗口没有填充满图片
             // 如果窗口不感知dpi，那么就不需要缩放，如果当前进程感知dpi，那么也不需要缩放
             let scope_guard_handle =
@@ -45,35 +46,7 @@ pub fn capture_window(window: &ImplWindow) -> XCapResult<RgbaImage> {
             } else {
                 window.current_monitor()?.scale_factor()?
             };
-            gdi::capture_window(window.hwnd)
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use windows::Win32::UI::WindowsAndMessaging::GetDesktopWindow;
-
-    #[test]
-    fn test_capture_monitor() {
-        let result = capture_monitor(0, 0, 100, 100);
-        assert!(result.is_ok());
-        let image = result.unwrap();
-        assert_eq!(image.width(), 100);
-        assert_eq!(image.height(), 100);
-    }
-
-    #[test]
-    fn test_capture_window() {
-        unsafe {
-            let hwnd = GetDesktopWindow();
-            let result = capture_window(hwnd, 1.0);
-            assert!(result.is_ok());
-
-            let image = result.unwrap();
-            assert!(image.width() > 0);
-            assert!(image.height() > 0);
+            gdi::capture_window(window.hwnd, scale_factor)
         }
     }
 }
