@@ -1,23 +1,47 @@
-use std::{ffi::c_void, mem};
+use std::{ffi::c_void, mem, sync::mpsc::channel, time::Duration};
 
 use image::{DynamicImage, RgbaImage};
 use scopeguard::guard;
-use windows::Win32::{
-    Foundation::{GetLastError, HWND},
+use windows::{
+    Foundation::TypedEventHandler,
     Graphics::{
-        Dwm::DwmIsCompositionEnabled,
-        Gdi::{
-            BITMAP, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleBitmap,
-            CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetCurrentObject,
-            GetDIBits, GetObjectW, GetWindowDC, HBITMAP, HDC, OBJ_BITMAP, ReleaseDC, SRCCOPY,
-            SelectObject,
-        },
+        Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession},
+        DirectX::{Direct3D11::IDirect3DDevice, DirectXPixelFormat},
     },
-    Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow},
-    UI::WindowsAndMessaging::GetDesktopWindow,
+    Win32::{
+        Foundation::{GetLastError, HMODULE, HWND},
+        Graphics::{
+            Direct3D::{D3D_DRIVER_TYPE, D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP},
+            Direct3D11::{
+                D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_CREATE_DEVICE_FLAG,
+                D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
+                D3D11_USAGE_STAGING, D3D11CreateDevice, ID3D11Device, ID3D11Resource,
+                ID3D11Texture2D,
+            },
+            Dwm::DwmIsCompositionEnabled,
+            Dxgi::{DXGI_ERROR_UNSUPPORTED, IDXGIDevice},
+            Gdi::{
+                BITMAP, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleBitmap,
+                CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetCurrentObject,
+                GetDIBits, GetObjectW, GetWindowDC, HBITMAP, HDC, HMONITOR, OBJ_BITMAP, ReleaseDC,
+                SRCCOPY, SelectObject,
+            },
+        },
+        Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow},
+        System::WinRT::{
+            Direct3D11::{CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess},
+            Graphics::Capture::IGraphicsCaptureItemInterop,
+        },
+        UI::WindowsAndMessaging::GetDesktopWindow,
+    },
+    core::{IInspectable, Interface, factory},
 };
 
-use crate::error::{XCapError, XCapResult};
+use crate::{
+    Frame,
+    error::{XCapError, XCapResult},
+    platform::{impl_video_recorder::texture_to_frame, utils::create_d3d_device},
+};
 
 use super::utils::{bgra_to_rgba_image, get_os_major_version, get_window_info};
 
@@ -214,6 +238,81 @@ pub fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaImage> {
         Ok(DynamicImage::ImageRgba8(image)
             .crop(x as u32, y as u32, w as u32, h as u32)
             .to_rgba8())
+    }
+}
+
+fn create_direct3d_device(d3d_device: &ID3D11Device) -> windows::core::Result<IDirect3DDevice> {
+    let dxgi_device: IDXGIDevice = d3d_device.cast()?;
+    let inspectable = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&dxgi_device)? };
+    inspectable.cast()
+}
+
+#[allow(unused)]
+pub fn wgc_capture(item: GraphicsCaptureItem) -> XCapResult<RgbaImage> {
+    let item_size = item.Size()?;
+
+    let d3d_device = create_d3d_device(D3D11_CREATE_DEVICE_BGRA_SUPPORT)?;
+    let d3d_context = unsafe { d3d_device.GetImmediateContext()? };
+    let device = create_direct3d_device(&d3d_device)?;
+
+    let frame_pool = guard(
+        Direct3D11CaptureFramePool::CreateFreeThreaded(
+            &device,
+            DirectXPixelFormat::B8G8R8A8UIntNormalized,
+            1,
+            item_size,
+        )?,
+        |val| {
+            val.Close().unwrap_or_else(|error| {
+                log::error!("Direct3D11CaptureFramePool Close failed: {:?}", error);
+            });
+        },
+    );
+    let session = guard(frame_pool.CreateCaptureSession(&item)?, |val| {
+        val.Close().unwrap_or_else(|error| {
+            log::error!("GraphicsCaptureSession Close failed: {:?}", error);
+        });
+    });
+
+    let (sender, receiver) = channel();
+    frame_pool.FrameArrived(
+        &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new({
+            move |frame_pool, _| {
+                let frame_pool = frame_pool.as_ref().unwrap();
+                let frame = frame_pool.TryGetNextFrame()?;
+                let _ = sender.send(frame);
+                Ok(())
+            }
+        }),
+    )?;
+    session.SetIsBorderRequired(false);
+    session.StartCapture()?;
+
+    let frame = receiver.recv_timeout(Duration::from_millis(1000)).unwrap();
+
+    let surface = frame.Surface()?;
+    let access = surface.cast::<IDirect3DDxgiInterfaceAccess>()?;
+    let source_texture = unsafe { access.GetInterface()? };
+
+    let frame = texture_to_frame(&d3d_device, &d3d_context, source_texture)?;
+
+    RgbaImage::from_raw(frame.width, frame.height, frame.raw)
+        .ok_or(XCapError::new("RgbaImage::from_raw failed"))
+}
+
+pub fn wgc_capture_monitor(hmonitor: HMONITOR) -> XCapResult<RgbaImage> {
+    unsafe {
+        let interop = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
+        let item: GraphicsCaptureItem = interop.CreateForMonitor(hmonitor)?;
+        wgc_capture(item)
+    }
+}
+
+pub fn wgc_capture_window(hwnd: HWND) -> XCapResult<RgbaImage> {
+    unsafe {
+        let interop = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
+        let item: GraphicsCaptureItem = interop.CreateForWindow(hwnd)?;
+        wgc_capture(item)
     }
 }
 

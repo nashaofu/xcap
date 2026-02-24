@@ -8,28 +8,25 @@ use std::{
 };
 
 use windows::{
-    Win32::{
-        Foundation::HMODULE,
-        Graphics::{
-            Direct3D::D3D_DRIVER_TYPE_HARDWARE,
-            Direct3D11::{
-                D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                D3D11_CREATE_DEVICE_SINGLETHREADED, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
-                D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, D3D11CreateDevice,
-                ID3D11Device, ID3D11DeviceContext, ID3D11Resource, ID3D11Texture2D,
-            },
-            Dxgi::{
-                DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO, IDXGIDevice, IDXGIOutput1,
-                IDXGIOutputDuplication, IDXGIResource,
-            },
-            Gdi::HMONITOR,
+    Win32::Graphics::{
+        Direct3D11::{
+            D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            D3D11_CREATE_DEVICE_SINGLETHREADED, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
+            D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, ID3D11Device, ID3D11DeviceContext,
+            ID3D11Resource, ID3D11Texture2D,
         },
+        Dxgi::{
+            DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO, IDXGIDevice, IDXGIOutput1,
+            IDXGIOutputDuplication, IDXGIResource,
+        },
+        Gdi::HMONITOR,
     },
     core::Interface,
 };
 
 use crate::{
     XCapError, XCapResult,
+    platform::utils::create_d3d_device,
     video_recorder::{Frame, RecorderWaker},
 };
 
@@ -94,20 +91,9 @@ pub struct ImplVideoRecorder {
 impl ImplVideoRecorder {
     pub fn new(h_monitor: HMONITOR) -> XCapResult<(Self, Receiver<Frame>)> {
         unsafe {
-            let mut d3d_device = None;
-            D3D11CreateDevice(
-                None,
-                D3D_DRIVER_TYPE_HARDWARE,
-                HMODULE::default(),
+            let d3d_device = create_d3d_device(
                 D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_SINGLETHREADED,
-                None,
-                D3D11_SDK_VERSION,
-                Some(&mut d3d_device),
-                None,
-                None,
             )?;
-
-            let d3d_device = d3d_device.ok_or(XCapError::new("Call D3D11CreateDevice failed"))?;
             let dxgi_device = d3d_device.cast::<IDXGIDevice>()?;
             let d3d_context = d3d_device.GetImmediateContext()?;
 

@@ -13,7 +13,13 @@ use windows::{
             QueryDisplayConfig,
         },
         Foundation::{CloseHandle, FreeLibrary, GetLastError, HANDLE, HMODULE, HWND},
-        Graphics::Gdi::MONITORINFOEXW,
+        Graphics::{
+            Direct3D::D3D_DRIVER_TYPE_HARDWARE,
+            Direct3D11::{
+                D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION, D3D11CreateDevice, ID3D11Device,
+            },
+            Gdi::MONITORINFOEXW,
+        },
         System::{
             LibraryLoader::{GetProcAddress, LoadLibraryW},
             Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW},
@@ -241,6 +247,27 @@ pub fn get_window_info(hwnd: HWND) -> XCapResult<WINDOWINFO> {
     };
 
     Ok(window_info)
+}
+
+pub fn create_d3d_device(flag: D3D11_CREATE_DEVICE_FLAG) -> XCapResult<ID3D11Device> {
+    unsafe {
+        let mut d3d_device = None;
+        D3D11CreateDevice(
+            None,
+            D3D_DRIVER_TYPE_HARDWARE,
+            HMODULE::default(),
+            flag,
+            None,
+            D3D11_SDK_VERSION,
+            Some(&mut d3d_device),
+            None,
+            None,
+        )?;
+
+        let d3d_device = d3d_device.ok_or(XCapError::new("Call D3D11CreateDevice failed"))?;
+
+        Ok(d3d_device)
+    }
 }
 
 #[cfg(test)]

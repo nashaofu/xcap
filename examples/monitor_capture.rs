@@ -3,7 +3,7 @@ use std::time::Instant;
 use xcap::Monitor;
 
 fn normalized(filename: String) -> String {
-    filename.replace(['|', '\\', ':', '/'], "")
+    filename.replace(['|', '\\', ':', '/', '"'], "")
 }
 
 fn main() {

@@ -20,8 +20,7 @@ use windows::{
 };
 
 use crate::{
-    error::{XCapError, XCapResult},
-    video_recorder::Frame,
+    error::{XCapError, XCapResult}, platform::capture::wgc_capture_monitor, video_recorder::Frame
 };
 
 use super::{
@@ -276,7 +275,8 @@ impl ImplMonitor {
         let width = self.width()?;
         let height = self.height()?;
 
-        capture_monitor(x, y, width as i32, height as i32)
+        // capture_monitor(x, y, width as i32, height as i32)
+        wgc_capture_monitor(self.h_monitor)
     }
 
     pub fn capture_region(&self, x: u32, y: u32, width: u32, height: u32) -> XCapResult<RgbaImage> {

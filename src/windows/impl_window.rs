@@ -26,7 +26,7 @@ use windows::{
     core::{BOOL, HSTRING, PCWSTR},
 };
 
-use crate::error::XCapResult;
+use crate::{error::XCapResult, platform::capture::wgc_capture_window};
 
 use super::{
     capture::capture_window,
@@ -432,6 +432,7 @@ impl ImplWindow {
             self.current_monitor()?.scale_factor()?
         };
 
-        capture_window(self.hwnd, scale_factor)
+        // capture_window(self.hwnd, scale_factor)
+        wgc_capture_window(self.hwnd)
     }
 }
