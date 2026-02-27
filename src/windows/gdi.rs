@@ -9,17 +9,17 @@ use windows::Win32::{
         Gdi::{
             BITMAP, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleBitmap,
             CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetCurrentObject,
-            GetDIBits, GetObjectW, GetWindowDC, HBITMAP, HDC, OBJ_BITMAP, ReleaseDC,
-            SRCCOPY, SelectObject,
+            GetDIBits, GetObjectW, GetWindowDC, HBITMAP, HDC, OBJ_BITMAP, ReleaseDC, SRCCOPY,
+            SelectObject,
         },
     },
     Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow},
     UI::WindowsAndMessaging::GetDesktopWindow,
 };
 
-use crate::error::{XCapError, XCapResult};
+use crate::{error::{XCapError, XCapResult}, platform::utils::bgra_to_rgba};
 
-use super::utils::{bgra_to_rgba_image, get_os_major_version, get_window_info};
+use super::utils::{get_os_major_version, get_window_info};
 
 fn to_rgba_image(
     hdc_mem: HDC,
@@ -60,7 +60,8 @@ fn to_rgba_image(
         }
     };
 
-    bgra_to_rgba_image(width as u32, height as u32, buffer)
+    RgbaImage::from_raw(width as u32, height as u32, bgra_to_rgba(buffer))
+        .ok_or_else(|| XCapError::new("RgbaImage::from_raw failed"))
 }
 
 fn delete_bitmap_object(val: HBITMAP) {
@@ -183,6 +184,10 @@ pub fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaImage> {
                 SRCCOPY,
             )
             .is_ok();
+        }
+
+        if !is_success {
+            return Err(XCapError::new("Capture window failed"));
         }
 
         SelectObject(*scope_guard_hdc_mem, previous_object);

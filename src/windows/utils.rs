@@ -1,6 +1,5 @@
 use std::mem;
 
-use image::RgbaImage;
 use scopeguard::{ScopeGuard, guard};
 use widestring::U16CString;
 use windows::{
@@ -86,15 +85,6 @@ pub(super) fn bgra_to_rgba(mut buffer: Vec<u8>) -> Vec<u8> {
     }
 
     buffer
-}
-
-pub(super) fn bgra_to_rgba_image(
-    width: u32,
-    height: u32,
-    buffer: Vec<u8>,
-) -> XCapResult<RgbaImage> {
-    RgbaImage::from_raw(width, height, bgra_to_rgba(buffer))
-        .ok_or_else(|| XCapError::new("RgbaImage::from_raw failed"))
 }
 
 // 定义 GetProcessDpiAwareness 函数的类型
@@ -304,20 +294,6 @@ mod tests {
         let input = vec![0, 1, 2, 255, 4, 5, 6, 255];
         let output = bgra_to_rgba(input);
         assert_eq!(output, vec![2, 1, 0, 255, 6, 5, 4, 255]);
-    }
-
-    #[test]
-    fn test_bgra_to_rgba_image() {
-        let width = 2;
-        let height = 1;
-        let buffer = vec![0, 1, 2, 255, 4, 5, 6, 255];
-        let result = bgra_to_rgba_image(width, height, buffer);
-
-        assert!(result.is_ok());
-
-        let image = result.unwrap();
-        assert_eq!(image.width(), width);
-        assert_eq!(image.height(), height);
     }
 
     #[test]

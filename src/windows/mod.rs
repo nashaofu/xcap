@@ -1,4 +1,5 @@
 mod capture;
+#[cfg(not(feature = "wgc"))]
 mod gdi;
 mod utils;
 #[cfg(feature = "wgc")]
