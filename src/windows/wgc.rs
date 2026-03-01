@@ -31,33 +31,34 @@ use windows::{
     core::{IInspectable, Interface, Ref, factory},
 };
 
-use crate::{
-    error::{XCapError, XCapResult},
-    platform::{impl_video_recorder::texture_to_frame, utils::create_d3d_device},
-};
+use crate::error::{XCapError, XCapResult};
 
-pub static ID3D11DEVICE: LazyLock<ID3D11Device> = LazyLock::new(|| {
+use super::utils::{create_d3d_device, texture_to_frame};
+
+pub(super) static ID3D11DEVICE: LazyLock<ID3D11Device> = LazyLock::new(|| {
     create_d3d_device(D3D11_CREATE_DEVICE_BGRA_SUPPORT).expect("Failed to create D3D11 device")
 });
 
-pub static ID3D11DEVICE_CONTEXT: LazyLock<ID3D11DeviceContext> = LazyLock::new(|| unsafe {
+pub(super) static ID3D11DEVICE_CONTEXT: LazyLock<ID3D11DeviceContext> = LazyLock::new(|| unsafe {
     ID3D11DEVICE
         .GetImmediateContext()
         .expect("Failed to get D3D11 device context")
 });
-pub static IDXGIDEVICE: LazyLock<IDXGIDevice> = LazyLock::new(|| {
+pub(super) static IDXGIDEVICE: LazyLock<IDXGIDevice> = LazyLock::new(|| {
     ID3D11DEVICE
         .cast::<IDXGIDevice>()
         .expect("Failed to cast D3D11 device to DXGI device")
 });
 
-pub static MONITOR_GRAPHICS_CAPTURE_ITEM: LazyLock<Mutex<HashMap<usize, GraphicsCaptureItem>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+pub(super) static MONITOR_GRAPHICS_CAPTURE_ITEM: LazyLock<
+    Mutex<HashMap<usize, GraphicsCaptureItem>>,
+> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
-pub static WINDOW_GRAPHICS_CAPTURE_ITEM: LazyLock<Mutex<HashMap<usize, GraphicsCaptureItem>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+pub(super) static WINDOW_GRAPHICS_CAPTURE_ITEM: LazyLock<
+    Mutex<HashMap<usize, GraphicsCaptureItem>>,
+> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
-pub fn process_frame_arrival(
+pub(super) fn process_frame_arrival(
     frame_pool: Ref<'_, Direct3D11CaptureFramePool>,
     x: u32,
     y: u32,
@@ -96,7 +97,7 @@ pub fn process_frame_arrival(
         .ok_or(XCapError::new("RgbaImage::from_raw failed"))
 }
 
-pub fn wgc_capture(
+pub(super) fn wgc_capture(
     item: &GraphicsCaptureItem,
     x: u32,
     y: u32,
@@ -150,7 +151,7 @@ pub fn wgc_capture(
     Ok(frame)
 }
 
-pub fn capture_monitor(
+pub(super) fn capture_monitor(
     h_monitor: HMONITOR,
     x: u32,
     y: u32,
@@ -169,7 +170,7 @@ pub fn capture_monitor(
     }
 }
 
-pub fn capture_window(
+pub(super) fn capture_window(
     hwnd: HWND,
     x: u32,
     y: u32,

@@ -24,7 +24,7 @@ fn get_scale_factor(window: &ImplWindow) -> XCapResult<f32> {
 }
 
 #[cfg(feature = "wgc")]
-pub fn capture_monitor(
+pub(super) fn capture_monitor(
     monitor: &ImplMonitor,
     x: i32,
     y: i32,
@@ -36,7 +36,7 @@ pub fn capture_monitor(
 }
 
 #[cfg(not(feature = "wgc"))]
-pub fn capture_monitor(
+pub(super) fn capture_monitor(
     _monitor: &ImplMonitor,
     x: i32,
     y: i32,
@@ -48,7 +48,7 @@ pub fn capture_monitor(
 }
 
 #[cfg(feature = "wgc")]
-pub fn capture_window(window: &ImplWindow) -> XCapResult<RgbaImage> {
+pub(super) fn capture_window(window: &ImplWindow) -> XCapResult<RgbaImage> {
     use super::wgc;
 
     let scale_factor = get_scale_factor(window)?;
@@ -58,7 +58,7 @@ pub fn capture_window(window: &ImplWindow) -> XCapResult<RgbaImage> {
 }
 
 #[cfg(not(feature = "wgc"))]
-pub fn capture_window(window: &ImplWindow) -> XCapResult<RgbaImage> {
+pub(super) fn capture_window(window: &ImplWindow) -> XCapResult<RgbaImage> {
     use super::gdi;
 
     let scale_factor = get_scale_factor(window)?;

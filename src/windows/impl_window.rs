@@ -24,9 +24,10 @@ use windows::{
     core::{BOOL, HSTRING, PCWSTR},
 };
 
-use crate::{error::XCapResult, platform::capture::capture_window};
+use crate::error::XCapResult;
 
 use super::{
+    capture::capture_window,
     impl_monitor::ImplMonitor,
     utils::{get_window_info, open_process},
 };

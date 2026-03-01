@@ -17,12 +17,9 @@ use windows::Win32::{
     UI::WindowsAndMessaging::GetDesktopWindow,
 };
 
-use crate::{
-    error::{XCapError, XCapResult},
-    platform::utils::bgra_to_rgba,
-};
+use crate::error::{XCapError, XCapResult};
 
-use super::utils::{get_os_major_version, get_window_info};
+use super::utils::{bgra_to_rgba, get_os_major_version, get_window_info};
 
 fn to_rgba_image(
     hdc_mem: HDC,
@@ -77,7 +74,7 @@ fn delete_bitmap_object(val: HBITMAP) {
     }
 }
 
-pub fn capture_monitor(x: i32, y: i32, width: i32, height: i32) -> XCapResult<RgbaImage> {
+pub(super) fn capture_monitor(x: i32, y: i32, width: i32, height: i32) -> XCapResult<RgbaImage> {
     unsafe {
         let hwnd = GetDesktopWindow();
         let scope_guard_hdc_desktop_window = guard(GetWindowDC(Some(hwnd)), |val| {
@@ -118,7 +115,7 @@ pub fn capture_monitor(x: i32, y: i32, width: i32, height: i32) -> XCapResult<Rg
     }
 }
 
-pub fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaImage> {
+pub(super) fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaImage> {
     let window_info = get_window_info(hwnd)?;
     unsafe {
         let rc_window = window_info.rcWindow;
