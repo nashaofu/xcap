@@ -418,3 +418,14 @@ impl ImplWindow {
         capture_window(self)
     }
 }
+
+#[cfg(feature = "wgc")]
+impl Drop for ImplWindow {
+    fn drop(&mut self) {
+        use super::wgc::WINDOW_GRAPHICS_CAPTURE_ITEM;
+
+        if let Ok(mut monitor_items) = WINDOW_GRAPHICS_CAPTURE_ITEM.lock() {
+            monitor_items.remove(&(self.hwnd.0 as usize));
+        }
+    }
+}

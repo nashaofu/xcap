@@ -60,6 +60,9 @@ pub enum XCapError {
     #[cfg(target_os = "windows")]
     #[error(transparent)]
     Utf16Error(#[from] widestring::error::Utf16Error),
+    #[cfg(target_os = "windows")]
+    #[error(transparent)]
+    StdSyncMpscRecvTimeoutError(#[from] std::sync::mpsc::RecvTimeoutError),
 }
 
 impl XCapError {

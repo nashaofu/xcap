@@ -303,3 +303,14 @@ impl ImplMonitor {
         ImplVideoRecorder::new(self.h_monitor)
     }
 }
+
+#[cfg(feature = "wgc")]
+impl Drop for ImplMonitor {
+    fn drop(&mut self) {
+        use super::wgc::MONITOR_GRAPHICS_CAPTURE_ITEM;
+
+        if let Ok(mut monitor_items) = MONITOR_GRAPHICS_CAPTURE_ITEM.lock() {
+            monitor_items.remove(&(self.h_monitor.0 as usize));
+        }
+    }
+}

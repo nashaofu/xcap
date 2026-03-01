@@ -16,12 +16,20 @@ resolver = "2"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["wgc"]
 image = ["image/default"]
-wgc = []
+wgc = [
+    "windows/Graphics_Capture",
+    "windows/Graphics_DirectX_Direct3D11",
+    "windows/Win32_Graphics_Gdi",
+    "windows/Win32_Graphics_Dxgi",
+    "windows/Win32_Graphics_Direct3D",
+    "windows/Win32_Graphics_Direct3D11",
+    "windows/Win32_Graphics_Dxgi_Common",
+    "windows/Win32_System_WinRT_Direct3D11",
+    "windows/Win32_System_WinRT_Graphics_Capture",
+]
 
 [dependencies]
-cfg-if = "1.0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
 scopeguard = "1.2"
@@ -40,7 +48,7 @@ objc2-core-video = "0.3.1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 widestring = "1.2"
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Dwm",
@@ -56,10 +64,6 @@ windows = { version = "0.61", features = [
     "Win32_Graphics_Direct3D",
     "Win32_Graphics_Direct3D11",
     "Win32_Graphics_Dxgi_Common",
-    "Graphics_Capture",
-    "Win32_System_WinRT_Graphics_Capture",
-    "Win32_System_WinRT_Direct3D11",
-    "Graphics_DirectX_Direct3D11",
 ] }
 
 [target.'cfg(target_os="linux")'.dependencies]
@@ -77,4 +81,4 @@ xcb = { version = "1.5", features = ["randr"] }
 fs_extra = "1.3"
 
 [target.'cfg(target_os="windows")'.dev-dependencies]
-windows = { version = "0.61", features = ["Win32_UI_HiDpi"] }
+windows = { version = "0.62", features = ["Win32_UI_HiDpi"] }

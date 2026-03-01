@@ -4,29 +4,10 @@ use crate::{
 };
 
 use super::utils::{get_process_is_dpi_awareness, open_process};
-use cfg_if::cfg_if;
 use image::RgbaImage;
 use windows::Win32::System::Threading::{GetCurrentProcess, PROCESS_QUERY_LIMITED_INFORMATION};
 
-pub fn capture_monitor(
-    #[allow(unused_variables)] monitor: &ImplMonitor,
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
-) -> XCapResult<RgbaImage> {
-    cfg_if! {
-        if #[cfg(feature = "wgc")] {
-            use super::wgc;
-            wgc::capture_monitor(monitor.h_monitor, x as u32, y as u32, width, height)
-        } else {
-            use super::gdi;
-            gdi::capture_monitor(x, y, width as i32, height as i32)
-        }
-    }
-}
-
-pub fn capture_window(window: &ImplWindow) -> XCapResult<RgbaImage> {
+fn get_scale_factor(window: &ImplWindow) -> XCapResult<f32> {
     // 在win10之后，不同窗口有不同的dpi，所以可能存在截图不全或者截图有较大空白，实际窗口没有填充满图片
     // 如果窗口不感知dpi，那么就不需要缩放，如果当前进程感知dpi，那么也不需要缩放
     let scope_guard_handle = open_process(PROCESS_QUERY_LIMITED_INFORMATION, false, window.pid()?)?;
@@ -39,15 +20,47 @@ pub fn capture_window(window: &ImplWindow) -> XCapResult<RgbaImage> {
     } else {
         window.current_monitor()?.scale_factor()?
     };
-    cfg_if! {
-        if #[cfg(feature = "wgc")] {
-            use super::wgc;
-            let width = (window.width()? as f32 * scale_factor).ceil() as u32;
-            let height = (window.height()? as f32 * scale_factor).ceil() as u32;
-            wgc::capture_window(window.hwnd, 0, 0, width, height)
-        } else {
-            use super::gdi;
-            gdi::capture_window(window.hwnd, scale_factor)
-        }
-    }
+    Ok(scale_factor)
+}
+
+#[cfg(feature = "wgc")]
+pub fn capture_monitor(
+    monitor: &ImplMonitor,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> XCapResult<RgbaImage> {
+    use super::wgc;
+    wgc::capture_monitor(monitor.h_monitor, x as u32, y as u32, width, height)
+}
+
+#[cfg(not(feature = "wgc"))]
+pub fn capture_monitor(
+    _monitor: &ImplMonitor,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> XCapResult<RgbaImage> {
+    use super::gdi;
+    gdi::capture_monitor(x, y, width as i32, height as i32)
+}
+
+#[cfg(feature = "wgc")]
+pub fn capture_window(window: &ImplWindow) -> XCapResult<RgbaImage> {
+    use super::wgc;
+
+    let scale_factor = get_scale_factor(window)?;
+    let width = (window.width()? as f32 * scale_factor).ceil() as u32;
+    let height = (window.height()? as f32 * scale_factor).ceil() as u32;
+    wgc::capture_window(window.hwnd, 0, 0, width, height)
+}
+
+#[cfg(not(feature = "wgc"))]
+pub fn capture_window(window: &ImplWindow) -> XCapResult<RgbaImage> {
+    use super::gdi;
+
+    let scale_factor = get_scale_factor(window)?;
+    gdi::capture_window(window.hwnd, scale_factor)
 }

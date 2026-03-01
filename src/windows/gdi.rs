@@ -17,7 +17,10 @@ use windows::Win32::{
     UI::WindowsAndMessaging::GetDesktopWindow,
 };
 
-use crate::{error::{XCapError, XCapResult}, platform::utils::bgra_to_rgba};
+use crate::{
+    error::{XCapError, XCapResult},
+    platform::utils::bgra_to_rgba,
+};
 
 use super::utils::{get_os_major_version, get_window_info};
 
