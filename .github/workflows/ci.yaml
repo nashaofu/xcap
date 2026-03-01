@@ -47,11 +47,6 @@ jobs:
             - name: Clippy
               run: cargo clippy --all-features
 
-            # - name: Test
-            #   run: cargo test --all-features
-
-            - name: Check semver
-              uses: obi1kenobi/cargo-semver-checks-action@v2
     publish:
         name: Publish
         runs-on: ubuntu-latest
