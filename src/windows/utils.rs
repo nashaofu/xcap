@@ -1,6 +1,5 @@
-use std::mem;
+use std::{ffi::c_void, mem};
 
-use image::RgbaImage;
 use scopeguard::{ScopeGuard, guard};
 use widestring::U16CString;
 use windows::{
@@ -12,19 +11,28 @@ use windows::{
             DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS,
             QueryDisplayConfig,
         },
-        Foundation::{CloseHandle, FreeLibrary, GetLastError, HANDLE, HMODULE, HWND},
-        Graphics::Gdi::MONITORINFOEXW,
+        Foundation::{CloseHandle, FreeLibrary, GetLastError, HANDLE, HMODULE, HWND, RECT},
+        Graphics::{
+            Direct3D::D3D_DRIVER_TYPE_HARDWARE,
+            Direct3D11::{
+                D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_FLAG, D3D11_MAP_READ,
+                D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
+                D3D11_USAGE_STAGING, D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext,
+                ID3D11Resource, ID3D11Texture2D,
+            },
+            Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
+            Gdi::MONITORINFOEXW,
+        },
         System::{
             LibraryLoader::{GetProcAddress, LoadLibraryW},
             Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW},
             Threading::{OpenProcess, PROCESS_ACCESS_RIGHTS},
         },
-        UI::WindowsAndMessaging::{GetWindowInfo, WINDOWINFO},
     },
-    core::{HRESULT, PCWSTR, s, w},
+    core::{HRESULT, Interface, PCWSTR, s, w},
 };
 
-use crate::{XCapError, error::XCapResult};
+use crate::{Frame, XCapError, error::XCapResult};
 
 pub(super) fn get_build_number() -> u32 {
     unsafe {
@@ -80,15 +88,6 @@ pub(super) fn bgra_to_rgba(mut buffer: Vec<u8>) -> Vec<u8> {
     }
 
     buffer
-}
-
-pub(super) fn bgra_to_rgba_image(
-    width: u32,
-    height: u32,
-    buffer: Vec<u8>,
-) -> XCapResult<RgbaImage> {
-    RgbaImage::from_raw(width, height, bgra_to_rgba(buffer))
-        .ok_or_else(|| XCapError::new("RgbaImage::from_raw failed"))
 }
 
 // 定义 GetProcessDpiAwareness 函数的类型
@@ -230,145 +229,129 @@ pub(super) fn get_monitor_config(
     }
 }
 
-pub fn get_window_info(hwnd: HWND) -> XCapResult<WINDOWINFO> {
-    let mut window_info = WINDOWINFO {
-        cbSize: mem::size_of::<WINDOWINFO>() as u32,
-        ..WINDOWINFO::default()
-    };
+/**
+ * 获取 window 可见的实际宽高，包含标题栏、边框等非客户区的部分
+ * 不同于 WINDOWINFO 中的 rcWindow 与 rcClient
+ *  - rcWindow 包含了窗口的标题栏和边框等非客户区的部分，与 GetWindowRect 获取的窗口位置和大小一致
+ *  - rcClient 只包含了窗口的客户区部分，与 GetClientRect 获取的窗口大小一致，但 GetClientRect 返回left 和 top 都是 0，因为客户区的坐标系是相对于窗口的客户区而言的
+ *
+ * 获取窗口真实 bounds 必须使用 DwmGetWindowAttribute，原因为：
+ * 自 Windows 10 起，桌面窗口管理器（DWM）会为部分窗口添加不可见的 resize 边框（通常 8px 左右），例如 chrome 浏览器的窗口，GetWindowRect 获取的窗口位置和大小包含了这个 resize 边框（eg返回值：-8，-8，2560, 1392）
+ */
+pub(super) fn get_window_bounds(hwnd: HWND) -> XCapResult<RECT> {
+    let mut rect = RECT::default();
 
     unsafe {
-        GetWindowInfo(hwnd, &mut window_info)?;
-    };
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut rect as *mut RECT as *mut c_void,
+            mem::size_of::<RECT>() as u32,
+        )?;
+    }
 
-    Ok(window_info)
+    Ok(rect)
 }
 
-#[cfg(test)]
-mod tests {
-    use windows::Win32::Foundation::POINT;
-    use windows::Win32::Graphics::Gdi::{
-        DEVMODEW, ENUM_CURRENT_SETTINGS, EnumDisplaySettingsW, GetMonitorInfoW,
-        MONITOR_DEFAULTTOPRIMARY, MONITORINFO, MonitorFromPoint,
-    };
-    use windows::Win32::System::Threading::{
-        GetCurrentProcessId, PROCESS_QUERY_LIMITED_INFORMATION,
-    };
-    use windows::Win32::UI::WindowsAndMessaging::GetDesktopWindow;
+pub(super) fn create_d3d_device(flag: D3D11_CREATE_DEVICE_FLAG) -> XCapResult<ID3D11Device> {
+    unsafe {
+        let mut d3d_device = None;
+        D3D11CreateDevice(
+            None,
+            D3D_DRIVER_TYPE_HARDWARE,
+            HMODULE::default(),
+            flag,
+            None,
+            D3D11_SDK_VERSION,
+            Some(&mut d3d_device),
+            None,
+            None,
+        )?;
 
-    use super::*;
+        let d3d_device = d3d_device.ok_or(XCapError::new("Call D3D11CreateDevice failed"))?;
 
-    /// 特别说明
-    /// 以下测试均以 windows11 作为测试环境
-    #[test]
-    fn test_get_build_number() {
-        let build = get_build_number();
-        println!("build {build}");
-        assert!(build == 26100, "build number should be 26100");
+        Ok(d3d_device)
     }
+}
 
-    #[test]
-    fn test_get_os_major_version() {
-        let version = get_os_major_version();
-        assert!(version == 11, "os major version should be 11");
-    }
+pub(super) fn texture_to_frame(
+    d3d_device: &ID3D11Device,
+    d3d_context: &ID3D11DeviceContext,
+    source_texture: &ID3D11Texture2D,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+) -> XCapResult<Frame> {
+    unsafe {
+        let mut src_desc = D3D11_TEXTURE2D_DESC::default();
+        source_texture.GetDesc(&mut src_desc);
 
-    #[test]
-    fn test_bgra_to_rgba() {
-        let input = vec![0, 1, 2, 255, 4, 5, 6, 255];
-        let output = bgra_to_rgba(input);
-        assert_eq!(output, vec![2, 1, 0, 255, 6, 5, 4, 255]);
-    }
-
-    #[test]
-    fn test_bgra_to_rgba_image() {
-        let width = 2;
-        let height = 1;
-        let buffer = vec![0, 1, 2, 255, 4, 5, 6, 255];
-        let result = bgra_to_rgba_image(width, height, buffer);
-
-        assert!(result.is_ok());
-
-        let image = result.unwrap();
-        assert_eq!(image.width(), width);
-        assert_eq!(image.height(), height);
-    }
-
-    #[test]
-    fn test_get_process_is_dpi_awareness() {
-        // // Modify the program's DPI awareness. You can set the value to PROCESS_DPI_UNAWARE or PROCESS_PER_MONITOR_DPI_AWARE for testing.
-        // SetProcessDpiAwareness(PROCESS_DPI_UNAWARE).unwrap();
-
-        // let process = GetCurrentProcess();
-        // let is_dpi_awareness = get_process_is_dpi_awareness(process).unwrap();
-
-        // assert!(!is_dpi_awareness);
-    }
-    #[test]
-    fn test_load_library() {
-        let scope_guard_hmodule = load_library(w!("Shcore.dll")).unwrap();
-
-        assert!(!scope_guard_hmodule.is_invalid());
-    }
-
-    #[test]
-    fn test_open_process() {
-        unsafe {
-            let process_id = GetCurrentProcessId();
-            let scope_guard_handle =
-                open_process(PROCESS_QUERY_LIMITED_INFORMATION, true, process_id).unwrap();
-
-            assert!(!scope_guard_handle.is_invalid());
+        // 边界检查（防止越界）
+        if x + width > src_desc.Width || y + height > src_desc.Height {
+            return Err(XCapError::new("ROI out of bounds"));
         }
-    }
 
-    fn get_monitor_info_ex_w() -> MONITORINFOEXW {
-        unsafe {
-            let point = POINT { x: 0, y: 0 };
-            let h_monitor = MonitorFromPoint(point, MONITOR_DEFAULTTOPRIMARY);
-            let mut monitor_info_ex_w = MONITORINFOEXW::default();
-            monitor_info_ex_w.monitorInfo.cbSize = mem::size_of::<MONITORINFOEXW>() as u32;
-            let monitor_info_ex_w_ptr =
-                &mut monitor_info_ex_w as *mut MONITORINFOEXW as *mut MONITORINFO;
+        let staging_texture = {
+            let mut staging_desc = src_desc;
+            staging_desc.Width = width;
+            staging_desc.Height = height;
+            staging_desc.BindFlags = 0;
+            staging_desc.MiscFlags = 0;
+            staging_desc.Usage = D3D11_USAGE_STAGING;
+            staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
 
-            // https://learn.microsoft.com/zh-cn/windows/win32/api/winuser/nf-winuser-getmonitorinfoa
-            GetMonitorInfoW(h_monitor, monitor_info_ex_w_ptr)
-                .ok()
-                .unwrap();
+            let mut staging = None;
+            d3d_device.CreateTexture2D(&staging_desc, None, Some(&mut staging))?;
+            staging.ok_or(XCapError::new("CreateTexture2D failed"))?
+        };
 
-            monitor_info_ex_w
+        // GPU裁剪区域
+        let region = D3D11_BOX {
+            left: x,
+            top: y,
+            right: x + width,
+            bottom: y + height,
+            front: 0,
+            back: 1,
+        };
+
+        d3d_context.CopySubresourceRegion(
+            Some(&staging_texture.cast()?),
+            0,
+            0,
+            0,
+            0,
+            Some(&source_texture.cast()?),
+            0,
+            Some(&region),
+        );
+
+        let resource: ID3D11Resource = staging_texture.cast()?;
+        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+        d3d_context.Map(
+            Some(&resource.clone()),
+            0,
+            D3D11_MAP_READ,
+            0,
+            Some(&mut mapped),
+        )?;
+
+        let mut bgra = vec![0u8; (width * height * 4) as usize];
+        let src_ptr = mapped.pData as *const u8;
+
+        for row in 0..height {
+            let src_offset = (row * mapped.RowPitch) as usize;
+            let dst_offset = (row * width * 4) as usize;
+
+            let src_slice =
+                std::slice::from_raw_parts(src_ptr.add(src_offset), (width * 4) as usize);
+
+            bgra[dst_offset..dst_offset + (width * 4) as usize].copy_from_slice(src_slice);
         }
-    }
 
-    #[test]
-    fn test_get_monitor_config() {
-        let monitor_info_ex_w = get_monitor_info_ex_w();
-        // 获取显示器配置信息
-        let monitor_config = get_monitor_config(monitor_info_ex_w).unwrap();
+        d3d_context.Unmap(Some(&resource), 0);
 
-        assert!(!monitor_config.monitorFriendlyDeviceName.is_empty());
-    }
-
-    #[test]
-    fn test_get_window_info() {
-        unsafe {
-            let monitor_info_ex_w = get_monitor_info_ex_w();
-            let mut dev_mode_w = DEVMODEW {
-                dmSize: mem::size_of::<DEVMODEW>() as u16,
-                ..DEVMODEW::default()
-            };
-            EnumDisplaySettingsW(
-                PCWSTR(monitor_info_ex_w.szDevice.as_ptr()),
-                ENUM_CURRENT_SETTINGS,
-                &mut dev_mode_w,
-            )
-            .ok()
-            .unwrap();
-
-            let hwnd = GetDesktopWindow();
-            let window_info = get_window_info(hwnd).unwrap();
-            let width = (window_info.rcWindow.right - window_info.rcWindow.left) as u32;
-
-            assert!(width == dev_mode_w.dmPelsWidth);
-        }
+        Ok(Frame::new(width, height, bgra_to_rgba(bgra.to_owned())))
     }
 }

@@ -271,39 +271,26 @@ impl ImplMonitor {
     }
 
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
-        let x = self.x()?;
-        let y = self.y()?;
-        let width = self.width()?;
-        let height = self.height()?;
-
-        capture_monitor(x, y, width as i32, height as i32)
+        capture_monitor(self, None, None, None, None)
     }
 
     pub fn capture_region(&self, x: u32, y: u32, width: u32, height: u32) -> XCapResult<RgbaImage> {
-        // Validate region bounds
-        let monitor_x = self.x()?;
-        let monitor_y = self.y()?;
-        let monitor_width = self.width()?;
-        let monitor_height = self.height()?;
-
-        if width > monitor_width
-            || height > monitor_height
-            || x + width > monitor_width
-            || y + height > monitor_height
-        {
-            return Err(XCapError::InvalidCaptureRegion(format!(
-                "Region ({x}, {y}, {width}, {height}) is outside monitor bounds ({monitor_x}, {monitor_y}, {monitor_width}, {monitor_height})"
-            )));
-        }
-
-        // Calculate absolute coordinates
-        let abs_x = monitor_x + x as i32;
-        let abs_y = monitor_y + y as i32;
-
-        capture_monitor(abs_x, abs_y, width as i32, height as i32)
+        let image = capture_monitor(self, Some(x), Some(y), Some(width), Some(height))?;
+        Ok(image)
     }
 
     pub fn video_recorder(&self) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {
         ImplVideoRecorder::new(self.h_monitor)
+    }
+}
+
+#[cfg(feature = "wgc")]
+impl Drop for ImplMonitor {
+    fn drop(&mut self) {
+        use super::wgc::MONITOR_GRAPHICS_CAPTURE_ITEM;
+
+        if let Ok(mut monitor_items) = MONITOR_GRAPHICS_CAPTURE_ITEM.lock() {
+            monitor_items.remove(&(self.h_monitor.0 as usize));
+        }
     }
 }

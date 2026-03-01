@@ -5,17 +5,15 @@ use image::RgbaImage;
 use widestring::U16CString;
 use windows::{
     Win32::{
-        Foundation::{GetLastError, HANDLE, HWND, LPARAM, MAX_PATH, RECT, TRUE},
+        Foundation::{GetLastError, HANDLE, HWND, LPARAM, MAX_PATH, TRUE},
         Graphics::{
-            Dwm::{DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
+            Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute},
             Gdi::{IsRectEmpty, MONITOR_DEFAULTTONEAREST, MonitorFromWindow},
         },
         Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW},
         System::{
             ProcessStatus::{GetModuleBaseNameW, GetModuleFileNameExW},
-            Threading::{
-                GetCurrentProcess, GetCurrentProcessId, PROCESS_QUERY_LIMITED_INFORMATION,
-            },
+            Threading::{GetCurrentProcessId, PROCESS_QUERY_LIMITED_INFORMATION},
         },
         UI::WindowsAndMessaging::{
             EnumWindows, GWL_EXSTYLE, GetClassNameW, GetForegroundWindow, GetWindowLongPtrW,
@@ -31,7 +29,7 @@ use crate::error::XCapResult;
 use super::{
     capture::capture_window,
     impl_monitor::ImplMonitor,
-    utils::{get_process_is_dpi_awareness, get_window_info, open_process},
+    utils::{get_window_bounds, open_process},
 };
 
 #[derive(Debug, Clone)]
@@ -132,21 +130,11 @@ fn is_valid_window(hwnd: HWND) -> bool {
             return false;
         }
 
-        let mut rect = RECT::default();
-
-        let get_rect_is_err = DwmGetWindowAttribute(
-            hwnd,
-            DWMWA_EXTENDED_FRAME_BOUNDS,
-            &mut rect as *mut RECT as *mut c_void,
-            mem::size_of::<RECT>() as u32,
-        )
-        .is_err();
-
-        if get_rect_is_err {
-            return false;
-        }
-
-        if IsRectEmpty(&rect).as_bool() {
+        if let Ok(rect) = get_window_bounds(hwnd) {
+            if IsRectEmpty(&rect).as_bool() {
+                return false;
+            }
+        } else {
             return false;
         }
     }
@@ -366,13 +354,13 @@ impl ImplWindow {
     }
 
     pub fn x(&self) -> XCapResult<i32> {
-        let window_info = get_window_info(self.hwnd)?;
-        Ok(window_info.rcClient.left)
+        let rect = get_window_bounds(self.hwnd)?;
+        Ok(rect.left)
     }
 
     pub fn y(&self) -> XCapResult<i32> {
-        let window_info = get_window_info(self.hwnd)?;
-        Ok(window_info.rcClient.top)
+        let rect = get_window_bounds(self.hwnd)?;
+        Ok(rect.top)
     }
 
     pub fn z(&self) -> XCapResult<i32> {
@@ -396,13 +384,13 @@ impl ImplWindow {
     }
 
     pub fn width(&self) -> XCapResult<u32> {
-        let window_info = get_window_info(self.hwnd)?;
-        Ok((window_info.rcClient.right - window_info.rcClient.left) as u32)
+        let rect = get_window_bounds(self.hwnd)?;
+        Ok((rect.right - rect.left) as u32)
     }
 
     pub fn height(&self) -> XCapResult<u32> {
-        let window_info = get_window_info(self.hwnd)?;
-        Ok((window_info.rcClient.bottom - window_info.rcClient.top) as u32)
+        let rect = get_window_bounds(self.hwnd)?;
+        Ok((rect.bottom - rect.top) as u32)
     }
 
     pub fn is_minimized(&self) -> XCapResult<bool> {
@@ -418,20 +406,17 @@ impl ImplWindow {
     }
 
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
-        // 在win10之后，不同窗口有不同的dpi，所以可能存在截图不全或者截图有较大空白，实际窗口没有填充满图片
-        // 如果窗口不感知dpi，那么就不需要缩放，如果当前进程感知dpi，那么也不需要缩放
-        let scope_guard_handle =
-            open_process(PROCESS_QUERY_LIMITED_INFORMATION, false, self.pid()?)?;
-        let window_is_dpi_awareness = get_process_is_dpi_awareness(*scope_guard_handle)?;
-        let current_process_is_dpi_awareness =
-            unsafe { get_process_is_dpi_awareness(GetCurrentProcess())? };
+        capture_window(self)
+    }
+}
 
-        let scale_factor = if !window_is_dpi_awareness || current_process_is_dpi_awareness {
-            1.0
-        } else {
-            self.current_monitor()?.scale_factor()?
-        };
+#[cfg(feature = "wgc")]
+impl Drop for ImplWindow {
+    fn drop(&mut self) {
+        use super::wgc::WINDOW_GRAPHICS_CAPTURE_ITEM;
 
-        capture_window(self.hwnd, scale_factor)
+        if let Ok(mut monitor_items) = WINDOW_GRAPHICS_CAPTURE_ITEM.lock() {
+            monitor_items.remove(&(self.hwnd.0 as usize));
+        }
     }
 }
