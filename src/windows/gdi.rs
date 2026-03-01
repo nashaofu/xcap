@@ -1,9 +1,10 @@
 use std::{ffi::c_void, mem};
 
-use image::{DynamicImage, RgbaImage};
+use image::{DynamicImage, RgbaImage, imageops::FilterType};
 use scopeguard::guard;
+use widestring::U16CString;
 use windows::Win32::{
-    Foundation::{GetLastError, HWND},
+    Foundation::{GetLastError, HWND, MAX_PATH, RECT},
     Graphics::{
         Dwm::DwmIsCompositionEnabled,
         Gdi::{
@@ -14,12 +15,17 @@ use windows::Win32::{
         },
     },
     Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow},
-    UI::WindowsAndMessaging::GetDesktopWindow,
+    UI::WindowsAndMessaging::{
+        GetClassNameW, GetDesktopWindow, GetWindowInfo, GetWindowRect, WINDOWINFO,
+    },
 };
 
-use crate::error::{XCapError, XCapResult};
+use crate::{
+    error::{XCapError, XCapResult},
+    platform::utils::get_window_bounds,
+};
 
-use super::utils::{bgra_to_rgba, get_os_major_version, get_window_info};
+use super::utils::{bgra_to_rgba, get_os_major_version};
 
 fn to_rgba_image(
     hdc_mem: HDC,
@@ -115,13 +121,14 @@ pub(super) fn capture_monitor(x: i32, y: i32, width: i32, height: i32) -> XCapRe
     }
 }
 
-pub(super) fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaImage> {
-    let window_info = get_window_info(hwnd)?;
-    unsafe {
-        let rc_window = window_info.rcWindow;
+pub(super) fn capture_window(hwnd: HWND) -> XCapResult<RgbaImage> {
+    let window_bounds = get_window_bounds(hwnd)?;
 
-        let mut width = rc_window.right - rc_window.left;
-        let mut height = rc_window.bottom - rc_window.top;
+    let window_width = window_bounds.right - window_bounds.left;
+    let window_height = window_bounds.bottom - window_bounds.top;
+    unsafe {
+        let mut bitmap_width = window_width;
+        let mut bitmap_height = window_height;
 
         let scope_guard_hdc_window = guard(GetWindowDC(Some(hwnd)), |val| {
             if ReleaseDC(Some(hwnd), val) != 1 {
@@ -138,12 +145,9 @@ pub(super) fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaIm
             Some(&mut bitmap as *mut BITMAP as *mut c_void),
         ) != 0
         {
-            width = bitmap.bmWidth;
-            height = bitmap.bmHeight;
+            bitmap_width = bitmap.bmWidth;
+            bitmap_height = bitmap.bmHeight;
         }
-
-        width = (width as f32 * scale_factor).ceil() as i32;
-        height = (height as f32 * scale_factor).ceil() as i32;
 
         let scope_guard_hdc_mem = guard(CreateCompatibleDC(Some(*scope_guard_hdc_window)), |val| {
             if !DeleteDC(val).as_bool() {
@@ -151,7 +155,7 @@ pub(super) fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaIm
             }
         });
         let scope_guard_h_bitmap = guard(
-            CreateCompatibleBitmap(*scope_guard_hdc_window, width, height),
+            CreateCompatibleBitmap(*scope_guard_hdc_window, bitmap_width, bitmap_height),
             delete_bitmap_object,
         );
 
@@ -176,8 +180,8 @@ pub(super) fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaIm
                 *scope_guard_hdc_mem,
                 0,
                 0,
-                width,
-                height,
+                bitmap_width,
+                bitmap_height,
                 Some(*scope_guard_hdc_window),
                 0,
                 0,
@@ -192,17 +196,50 @@ pub(super) fn capture_window(hwnd: HWND, scale_factor: f32) -> XCapResult<RgbaIm
 
         SelectObject(*scope_guard_hdc_mem, previous_object);
 
-        let image = to_rgba_image(*scope_guard_hdc_mem, *scope_guard_h_bitmap, width, height)?;
+        let image = to_rgba_image(
+            *scope_guard_hdc_mem,
+            *scope_guard_h_bitmap,
+            bitmap_width,
+            bitmap_height,
+        )?;
 
-        let rc_client = window_info.rcClient;
+        let mut window_rect = RECT::default();
+        GetWindowRect(hwnd, &mut window_rect)?;
 
-        let x = ((rc_client.left - rc_window.left) as f32 * scale_factor).ceil();
-        let y = ((rc_client.top - rc_window.top) as f32 * scale_factor).ceil();
-        let w = ((rc_client.right - rc_client.left) as f32 * scale_factor).floor();
-        let h = ((rc_client.bottom - rc_client.top) as f32 * scale_factor).floor();
+        let scale_factor = bitmap_width as f32 / window_width as f32;
+        // 桌面窗口管理器（DWM）会为部分窗口添加不可见的 resize 边框（通常 8px 左右），
+        // PrintWindow 会将这个边框也一起截图，所以需要裁剪掉这个区域
+        let mut x = (window_bounds.left - window_rect.left) as f32 * scale_factor;
+        let mut y = (window_bounds.top - window_rect.top) as f32 * scale_factor;
+
+        let mut window_info = WINDOWINFO::default();
+        GetWindowInfo(hwnd, &mut window_info)?;
+
+        let mut lp_class_name = [0u16; MAX_PATH as usize];
+        let lp_class_name_length = GetClassNameW(hwnd, &mut lp_class_name) as usize;
+
+        let class_name = U16CString::from_vec_truncate(&lp_class_name[0..lp_class_name_length])
+            .to_string()
+            .unwrap_or_default();
+
+        // #32770 为标准 Dialog，DWM 虽然会为它添加 resize 边框，但 PrintWindow 却不会将边框一起截图，所以不需要裁剪
+        if class_name == "#32770" {
+            x = 0.0;
+            y = 0.0;
+        }
 
         Ok(DynamicImage::ImageRgba8(image)
-            .crop(x as u32, y as u32, w as u32, h as u32)
+            .resize(
+                window_width as u32,
+                window_height as u32,
+                FilterType::CatmullRom,
+            )
+            .crop(
+                x as u32,
+                y as u32,
+                window_width as u32,
+                window_height as u32,
+            )
             .to_rgba8())
     }
 }

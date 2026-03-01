@@ -1,4 +1,4 @@
-use std::mem;
+use std::{ffi::c_void, mem};
 
 use scopeguard::{ScopeGuard, guard};
 use widestring::U16CString;
@@ -11,17 +11,16 @@ use windows::{
             DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS,
             QueryDisplayConfig,
         },
-        Foundation::{CloseHandle, FreeLibrary, GetLastError, HANDLE, HMODULE, HWND},
-        Graphics::Direct3D11::{
-            D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE,
-            D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, ID3D11DeviceContext, ID3D11Resource,
-            ID3D11Texture2D,
-        },
+        Foundation::{CloseHandle, FreeLibrary, GetLastError, HANDLE, HMODULE, HWND, RECT},
         Graphics::{
             Direct3D::D3D_DRIVER_TYPE_HARDWARE,
             Direct3D11::{
-                D3D11_CREATE_DEVICE_FLAG, D3D11_SDK_VERSION, D3D11CreateDevice, ID3D11Device,
+                D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_FLAG, D3D11_MAP_READ,
+                D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
+                D3D11_USAGE_STAGING, D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext,
+                ID3D11Resource, ID3D11Texture2D,
             },
+            Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
             Gdi::MONITORINFOEXW,
         },
         System::{
@@ -29,7 +28,6 @@ use windows::{
             Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW},
             Threading::{OpenProcess, PROCESS_ACCESS_RIGHTS},
         },
-        UI::WindowsAndMessaging::{GetWindowInfo, WINDOWINFO},
     },
     core::{HRESULT, Interface, PCWSTR, s, w},
 };
@@ -231,17 +229,28 @@ pub(super) fn get_monitor_config(
     }
 }
 
-pub(super) fn get_window_info(hwnd: HWND) -> XCapResult<WINDOWINFO> {
-    let mut window_info = WINDOWINFO {
-        cbSize: mem::size_of::<WINDOWINFO>() as u32,
-        ..WINDOWINFO::default()
-    };
+/**
+ * 获取 window 可见的实际宽高，包含标题栏、边框等非客户区的部分
+ * 不同于 WINDOWINFO 中的 rcWindow 与 rcClient
+ *  - rcWindow 包含了窗口的标题栏和边框等非客户区的部分，与 GetWindowRect 获取的窗口位置和大小一致
+ *  - rcClient 只包含了窗口的客户区部分，与 GetClientRect 获取的窗口大小一致，但 GetClientRect 返回left 和 top 都是 0，因为客户区的坐标系是相对于窗口的客户区而言的
+ *
+ * 获取窗口真实 bounds 必须使用 DwmGetWindowAttribute，原因为：
+ * 自 Windows 10 起，桌面窗口管理器（DWM）会为部分窗口添加不可见的 resize 边框（通常 8px 左右），例如 chrome 浏览器的窗口，GetWindowRect 获取的窗口位置和大小包含了这个 resize 边框（eg返回值：-8，-8，2560, 1392）
+ */
+pub(super) fn get_window_bounds(hwnd: HWND) -> XCapResult<RECT> {
+    let mut rect = RECT::default();
 
     unsafe {
-        GetWindowInfo(hwnd, &mut window_info)?;
-    };
+        DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut rect as *mut RECT as *mut c_void,
+            mem::size_of::<RECT>() as u32,
+        )?;
+    }
 
-    Ok(window_info)
+    Ok(rect)
 }
 
 pub(super) fn create_d3d_device(flag: D3D11_CREATE_DEVICE_FLAG) -> XCapResult<ID3D11Device> {
