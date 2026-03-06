@@ -13,7 +13,7 @@ fn main() {
                 focused.id().unwrap(),
                 focused.title().unwrap(),
                 focused.app_name().unwrap(),
-                focused.current_monitor().unwrap().name().unwrap(),
+                focused.current_monitor().unwrap().friendly_name().unwrap(),
                 (focused.x().unwrap(), focused.y().unwrap(), focused.z().unwrap()),
                 (focused.width().unwrap(), focused.height().unwrap()),
                 (focused.is_minimized().unwrap(), focused.is_maximized().unwrap(), focused.is_focused().unwrap())

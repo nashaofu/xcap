@@ -18,7 +18,7 @@ fn main() {
         image
             .save(format!(
                 "target/monitors/monitor-{}.png",
-                normalized(monitor.name().unwrap())
+                normalized(monitor.friendly_name().unwrap())
             ))
             .unwrap();
     }

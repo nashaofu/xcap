@@ -39,9 +39,13 @@ impl Monitor {
     pub fn id(&self) -> XCapResult<u32> {
         self.impl_monitor.id()
     }
-    /// Unique identifier associated with the screen.
+    /// The display name
     pub fn name(&self) -> XCapResult<String> {
         self.impl_monitor.name()
+    }
+    /// The display friendly name
+    pub fn friendly_name(&self) -> XCapResult<String> {
+        self.impl_monitor.friendly_name()
     }
     /// The screen x coordinate.
     pub fn x(&self) -> XCapResult<i32> {

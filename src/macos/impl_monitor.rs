@@ -131,6 +131,10 @@ impl ImplMonitor {
     }
 
     pub fn name(&self) -> XCapResult<String> {
+        Ok(format!("Display {}", self.cg_direct_display_id))
+    }
+
+    pub fn friendly_name(&self) -> XCapResult<String> {
         let name = get_display_friendly_name(self.cg_direct_display_id)
             .unwrap_or(format!("Unknown Monitor {}", self.cg_direct_display_id));
 
