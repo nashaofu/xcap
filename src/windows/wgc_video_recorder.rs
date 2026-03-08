@@ -21,7 +21,7 @@ use windows::{
 
 use crate::{XCapResult, video_recorder::Frame};
 
-use super::wgc::{get_next_frame, IDXGIDEVICE};
+use super::wgc::{IDXGIDEVICE, get_next_frame};
 
 #[derive(Debug)]
 struct WgcRuntime {
