@@ -26,7 +26,10 @@ fn main() {
 
     let monitor = Monitor::from_point(100, 100).unwrap();
 
-    println!("Monitor::from_point(): {:?}", monitor.friendly_name().unwrap());
+    println!(
+        "Monitor::from_point(): {:?}",
+        monitor.friendly_name().unwrap()
+    );
     println!(
         "Monitor::from_point(100, 100) 运行耗时: {:?}",
         start.elapsed()
