@@ -19,9 +19,9 @@ use windows::{
     core::{Error as WindowsError, IInspectable, Interface, factory},
 };
 
-use crate::{XCapResult, platform::wgc::get_next_frame, video_recorder::Frame};
+use crate::{XCapResult, video_recorder::Frame};
 
-use super::wgc::IDXGIDEVICE;
+use super::wgc::{get_next_frame, IDXGIDEVICE};
 
 #[derive(Debug)]
 struct WgcRuntime {
