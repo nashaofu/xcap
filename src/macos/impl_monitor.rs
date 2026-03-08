@@ -6,8 +6,8 @@ use objc2_app_kit::NSScreen;
 use objc2_core_foundation::CGPoint;
 use objc2_core_graphics::{
     CGDirectDisplayID, CGDisplayBounds, CGDisplayCopyDisplayMode, CGDisplayIsActive,
-    CGDisplayIsBuiltin, CGDisplayIsMain, CGDisplayMode, CGDisplayRotation, CGError,
-    CGGetActiveDisplayList, CGGetDisplaysWithPoint, CGWindowListOption,
+    CGDisplayIsBuiltin, CGDisplayIsMain, CGDisplayMode, CGDisplayModelNumber, CGDisplayRotation,
+    CGError, CGGetActiveDisplayList, CGGetDisplaysWithPoint, CGWindowListOption,
 };
 use objc2_foundation::{NSNumber, NSString};
 
@@ -131,11 +131,13 @@ impl ImplMonitor {
     }
 
     pub fn name(&self) -> XCapResult<String> {
-        Ok(format!("Display {}", self.cg_direct_display_id))
+        let screen_number = unsafe { CGDisplayModelNumber(self.cg_direct_display_id) };
+        Ok(format!("Display #{}", screen_number))
     }
 
     pub fn friendly_name(&self) -> XCapResult<String> {
         let name = get_display_friendly_name(self.cg_direct_display_id)
+            .map_err(|_| self.name())
             .unwrap_or(format!("Unknown Monitor {}", self.cg_direct_display_id));
 
         Ok(name)
