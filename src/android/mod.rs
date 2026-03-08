@@ -25,6 +25,10 @@ impl ImplMonitor {
         Err(XCapError::NotSupported)
     }
 
+    pub fn friendly_name(&self) -> XCapResult<String> {
+        Err(XCapError::NotSupported)
+    }
+
     pub fn x(&self) -> XCapResult<i32> {
         Err(XCapError::NotSupported)
     }

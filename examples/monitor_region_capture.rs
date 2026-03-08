@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Get monitor name for the filename
         let monitor_name = monitor
-            .name()
+            .friendly_name()
             .unwrap_or_else(|_| format!("unknown-{}", monitor.id().unwrap_or(0)));
         let is_primary = monitor.is_primary().unwrap_or(false);
         let primary_indicator = if is_primary { "-primary" } else { "" };

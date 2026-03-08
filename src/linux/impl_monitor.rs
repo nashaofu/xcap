@@ -277,6 +277,10 @@ impl ImplMonitor {
         Ok(name)
     }
 
+    pub fn friendly_name(&self) -> XCapResult<String> {
+        self.name()
+    }
+
     pub fn x(&self) -> XCapResult<i32> {
         let x = get_monitor_info_buf(self.output)?.x();
         let scale_factor = self.scale_factor()?;

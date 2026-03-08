@@ -8,9 +8,10 @@ fn main() {
 
     for monitor in monitors {
         println!(
-            "Monitor:\n id: {}\n name: {}\n position: {:?}\n size: {:?}\n state:{:?}\n",
+            "Monitor:\n id: {}\n name: {}\n friendly_name: {:?}\n position: {:?}\n size: {:?}\n state:{:?}\n",
             monitor.id().unwrap(),
             monitor.name().unwrap(),
+            monitor.friendly_name().unwrap(),
             (monitor.x().unwrap(), monitor.y().unwrap()),
             (monitor.width().unwrap(), monitor.height().unwrap()),
             (
@@ -25,7 +26,10 @@ fn main() {
 
     let monitor = Monitor::from_point(100, 100).unwrap();
 
-    println!("Monitor::from_point(): {:?}", monitor.name().unwrap());
+    println!(
+        "Monitor::from_point(): {:?}",
+        monitor.friendly_name().unwrap()
+    );
     println!(
         "Monitor::from_point(100, 100) 运行耗时: {:?}",
         start.elapsed()

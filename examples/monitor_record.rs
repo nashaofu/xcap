@@ -1,16 +1,26 @@
-use std::{thread, time::Duration};
+use std::{
+    thread,
+    time::{Duration, Instant},
+};
 use xcap::Monitor;
 
 fn main() {
+    let start = Instant::now();
     let monitor = Monitor::from_point(100, 100).unwrap();
 
     let (video_recorder, sx) = monitor.video_recorder().unwrap();
 
     thread::spawn(move || {
+        let mut prev = start.elapsed();
         loop {
             match sx.recv() {
                 Ok(frame) => {
-                    println!("frame: {:?}", frame.width);
+                    println!(
+                        "frame: {:?}, elapsed: {:?}",
+                        frame.width,
+                        start.elapsed() - prev
+                    );
+                    prev = start.elapsed();
                 }
                 _ => continue,
             }

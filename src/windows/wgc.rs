@@ -31,7 +31,10 @@ use windows::{
     core::{IInspectable, Interface, Ref, factory},
 };
 
-use crate::error::{XCapError, XCapResult};
+use crate::{
+    Frame,
+    error::{XCapError, XCapResult},
+};
 
 use super::utils::{create_d3d_device, texture_to_frame};
 
@@ -58,13 +61,13 @@ pub(super) static WINDOW_GRAPHICS_CAPTURE_ITEM: LazyLock<
     Mutex<HashMap<usize, GraphicsCaptureItem>>,
 > = LazyLock::new(|| Mutex::new(HashMap::new()));
 
-pub(super) fn process_frame_arrival(
+pub(super) fn get_next_frame(
     frame_pool: Ref<'_, Direct3D11CaptureFramePool>,
     x: u32,
     y: u32,
     width: u32,
     height: u32,
-) -> XCapResult<RgbaImage> {
+) -> XCapResult<Frame> {
     let frame_pool = frame_pool
         .as_ref()
         .ok_or(XCapError::new("Frame pool is null"))?;
@@ -83,7 +86,7 @@ pub(super) fn process_frame_arrival(
         source_texture.GetDesc(&mut source_texture_desc);
     };
 
-    let frame = texture_to_frame(
+    texture_to_frame(
         &ID3D11DEVICE,
         &ID3D11DEVICE_CONTEXT,
         &source_texture,
@@ -91,7 +94,17 @@ pub(super) fn process_frame_arrival(
         y,
         width,
         height,
-    )?;
+    )
+}
+
+pub(super) fn process_frame_arrival(
+    frame_pool: Ref<'_, Direct3D11CaptureFramePool>,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+) -> XCapResult<RgbaImage> {
+    let frame = get_next_frame(frame_pool, x, y, width, height)?;
 
     RgbaImage::from_raw(frame.width, frame.height, frame.raw)
         .ok_or(XCapError::new("RgbaImage::from_raw failed"))

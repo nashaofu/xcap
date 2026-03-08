@@ -13,7 +13,7 @@ fn main() {
             window.pid().unwrap(),
             window.app_name().unwrap(),
             window.title().unwrap(),
-            window.current_monitor().unwrap().name().unwrap(),
+            window.current_monitor().unwrap().friendly_name().unwrap(),
             (
                 window.x().unwrap(),
                 window.y().unwrap(),
