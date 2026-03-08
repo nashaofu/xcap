@@ -82,7 +82,7 @@ impl ImplVideoRecorder {
                         item_size.Height as u32,
                     )
                     .map_err(|error| {
-                        log::error!("wgc process_frame_arrival failed: {error}");
+                        log::error!("wgc get_next_frame failed: {error}");
                         WindowsError::empty()
                     })?;
 
