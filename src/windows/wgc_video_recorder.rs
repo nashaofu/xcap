@@ -27,10 +27,15 @@ use super::wgc::{get_next_frame, IDXGIDEVICE};
 struct WgcRuntime {
     frame_pool: Direct3D11CaptureFramePool,
     session: GraphicsCaptureSession,
+    closed: bool,
 }
 
 impl WgcRuntime {
-    fn close(&self) -> XCapResult<()> {
+    fn close(&mut self) -> XCapResult<()> {
+        if self.closed {
+            return Ok(());
+        }
+        self.closed = true;
         self.session.Close()?;
         self.frame_pool.Close()?;
 
@@ -100,6 +105,7 @@ impl ImplVideoRecorder {
         Ok(WgcRuntime {
             frame_pool,
             session,
+            closed: false,
         })
     }
 
@@ -131,7 +137,7 @@ impl ImplVideoRecorder {
     pub fn stop(&self) -> XCapResult<()> {
         let mut runtime = self.runtime.lock()?;
 
-        if let Some(runtime) = runtime.take() {
+        if let Some(mut runtime) = runtime.take() {
             runtime.close()?;
         }
 
