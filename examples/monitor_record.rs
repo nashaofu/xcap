@@ -2,7 +2,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use xcap::Monitor;
+use xcap::{Monitor, image::RgbaImage};
 
 fn main() {
     let start = Instant::now();
@@ -12,6 +12,7 @@ fn main() {
 
     thread::spawn(move || {
         let mut prev = start.elapsed();
+        let mut saved_first_frame = false;
         loop {
             match sx.recv() {
                 Ok(frame) => {
@@ -21,6 +22,15 @@ fn main() {
                         start.elapsed() - prev
                     );
                     prev = start.elapsed();
+                    if !saved_first_frame {
+                        let image = RgbaImage::from_raw(frame.width, frame.height, frame.raw)
+                            .expect("failed to create image from frame");
+                        image
+                            .save("target/kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange.png")
+                            .expect("failed to save first frame");
+                        println!("saved first frame: target/monitor_capture.png");
+                        saved_first_frame = true;
+                    }
                 }
                 _ => continue,
             }
