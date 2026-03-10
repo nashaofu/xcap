@@ -1,6 +1,10 @@
 use std::{
     slice,
-    sync::mpsc::{Receiver, SyncSender, sync_channel},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{Receiver, SyncSender, sync_channel},
+    },
 };
 
 use dispatch2::{DispatchQueue, DispatchQueueAttr};
@@ -32,6 +36,7 @@ use crate::{XCapError, XCapResult, video_recorder::Frame};
 #[derive(Debug, Clone)]
 struct DataOutputSampleBufferDelegateVars {
     tx: SyncSender<Frame>,
+    running: Arc<AtomicBool>,
 }
 
 impl DataOutputSampleBufferDelegateVars {
@@ -278,6 +283,10 @@ impl DataOutputSampleBufferDelegateVars {
         sample_buffer: &CMSampleBuffer,
         _connection: &AVCaptureConnection,
     ) {
+        if !self.running.load(Ordering::Acquire) {
+            return;
+        }
+
         unsafe {
             let pixel_buffer = match CMSampleBuffer::image_buffer(sample_buffer) {
                 Some(pixel_buffer) => pixel_buffer,
@@ -374,6 +383,11 @@ impl DataOutputSampleBufferDelegateVars {
                 }
             };
 
+            // stop 之后，队列里可能还有回调在做像素转换；发送前再检查一次。
+            if !self.running.load(Ordering::Acquire) {
+                return;
+            }
+
             let _ = self.tx.send(Frame {
                 width: width as u32,
                 height: height as u32,
@@ -406,8 +420,8 @@ define_class!(
 unsafe impl NSObjectProtocol for DataOutputSampleBufferDelegate {}
 
 impl DataOutputSampleBufferDelegate {
-    fn new(tx: SyncSender<Frame>) -> Retained<Self> {
-        let this = Self::alloc().set_ivars(DataOutputSampleBufferDelegateVars { tx });
+    fn new(tx: SyncSender<Frame>, running: Arc<AtomicBool>) -> Retained<Self> {
+        let this = Self::alloc().set_ivars(DataOutputSampleBufferDelegateVars { tx, running });
         unsafe { msg_send![super(this), init] }
     }
 }
@@ -418,6 +432,7 @@ pub struct ImplVideoRecorder {
     _input: Retained<AVCaptureScreenInput>,
     _output: Retained<AVCaptureVideoDataOutput>,
     _delegate: Retained<DataOutputSampleBufferDelegate>,
+    running: Arc<AtomicBool>,
 }
 
 impl ImplVideoRecorder {
@@ -487,8 +502,9 @@ impl ImplVideoRecorder {
             }
 
             let (tx, rx) = sync_channel(0);
+            let running = Arc::new(AtomicBool::new(false));
 
-            let delegate = DataOutputSampleBufferDelegate::new(tx.clone());
+            let delegate = DataOutputSampleBufferDelegate::new(tx.clone(), running.clone());
 
             let sample_buffer_delegate = ProtocolObject::<
                 dyn AVCaptureVideoDataOutputSampleBufferDelegate,
@@ -508,6 +524,7 @@ impl ImplVideoRecorder {
                     _output: output,
                     _input: input,
                     _delegate: delegate,
+                    running,
                 },
                 rx,
             ))
@@ -515,11 +532,13 @@ impl ImplVideoRecorder {
     }
 
     pub fn start(&self) -> XCapResult<()> {
+        self.running.store(true, Ordering::Release);
         unsafe { self.session.startRunning() };
         Ok(())
     }
 
     pub fn stop(&self) -> XCapResult<()> {
+        self.running.store(false, Ordering::Release);
         unsafe { self.session.stopRunning() };
         Ok(())
     }
