@@ -121,7 +121,7 @@ pub fn get_window_cf_dictionary(window_id: u32) -> XCapResult<CFRetained<CFDicti
         // CGWindowListCopyWindowInfo 返回窗口顺序为从顶层到最底层
         // 即在前面的窗口在数组前面
         let cf_array = match CGWindowListCopyWindowInfo(
-            CGWindowListOption::OptionOnScreenOnly | CGWindowListOption::ExcludeDesktopElements,
+            CGWindowListOption::OptionAll | CGWindowListOption::ExcludeDesktopElements,
             0,
         ) {
             Some(cf_array) => cf_array,
@@ -172,7 +172,7 @@ impl ImplWindow {
             // CGWindowListCopyWindowInfo 返回窗口顺序为从顶层到最底层
             // 即在前面的窗口在数组前面
             let cf_array = match CGWindowListCopyWindowInfo(
-                CGWindowListOption::OptionOnScreenOnly | CGWindowListOption::ExcludeDesktopElements,
+                CGWindowListOption::OptionAll | CGWindowListOption::ExcludeDesktopElements,
                 0,
             ) {
                 Some(cf_array) => cf_array,
@@ -276,7 +276,7 @@ impl ImplWindow {
             // CGWindowListCopyWindowInfo 返回窗口顺序为从顶层到最底层
             // 即在前面的窗口在数组前面
             let cf_array = match CGWindowListCopyWindowInfo(
-                CGWindowListOption::OptionOnScreenOnly | CGWindowListOption::ExcludeDesktopElements,
+                CGWindowListOption::OptionAll | CGWindowListOption::ExcludeDesktopElements,
                 0,
             ) {
                 Some(cf_array) => cf_array,
@@ -328,7 +328,8 @@ impl ImplWindow {
 
     pub fn is_minimized(&self) -> XCapResult<bool> {
         let window_cf_dictionary = get_window_cf_dictionary(self.window_id)?;
-        let is_on_screen = get_cf_bool_value(window_cf_dictionary.as_ref(), "kCGWindowIsOnscreen")?;
+        let is_on_screen = get_cf_bool_value(window_cf_dictionary.as_ref(), "kCGWindowIsOnscreen")
+            .unwrap_or(false);
         let is_maximized = self.is_maximized()?;
 
         Ok(!is_on_screen && !is_maximized)
