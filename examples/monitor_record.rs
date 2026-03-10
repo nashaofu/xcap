@@ -26,9 +26,9 @@ fn main() {
                         let image = RgbaImage::from_raw(frame.width, frame.height, frame.raw)
                             .expect("failed to create image from frame");
                         image
-                            .save("target/kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange.png")
+                            .save("target/monitor_recorded.png")
                             .expect("failed to save first frame");
-                        println!("saved first frame: target/monitor_capture.png");
+                        println!("saved first frame: target/monitor_recorded.png");
                         saved_first_frame = true;
                     }
                 }

@@ -111,6 +111,12 @@ impl DataOutputSampleBufferDelegateVars {
 
     fn copy_packed_rows(width: usize, height: usize, bytes_per_row: usize, data: &[u8]) -> Vec<u8> {
         let row_len = width * 4;
+
+        // When there is no row padding, a single contiguous copy is faster than row-by-row copy.
+        if bytes_per_row == row_len {
+            return data[..row_len * height].to_vec();
+        }
+
         let mut buffer = vec![0; row_len * height];
 
         for row_index in 0..height {
@@ -202,13 +208,11 @@ impl DataOutputSampleBufferDelegateVars {
             let src_row = &data[src_row_start..src_row_start + row_len];
             let dst_row = &mut buffer[dst_row_start..dst_row_start + row_len];
 
-            let mut offset = 0;
-            while offset < row_len {
-                dst_row[offset] = src_row[offset + 2];
-                dst_row[offset + 1] = src_row[offset + 1];
-                dst_row[offset + 2] = src_row[offset];
-                dst_row[offset + 3] = src_row[offset + 3];
-                offset += 4;
+            for (src, dst) in src_row.chunks_exact(4).zip(dst_row.chunks_exact_mut(4)) {
+                dst[0] = src[2];
+                dst[1] = src[1];
+                dst[2] = src[0];
+                dst[3] = src[3];
             }
         }
 
@@ -225,13 +229,11 @@ impl DataOutputSampleBufferDelegateVars {
             let src_row = &data[src_row_start..src_row_start + row_len];
             let dst_row = &mut buffer[dst_row_start..dst_row_start + row_len];
 
-            let mut offset = 0;
-            while offset < row_len {
-                dst_row[offset] = src_row[offset + 1];
-                dst_row[offset + 1] = src_row[offset + 2];
-                dst_row[offset + 2] = src_row[offset + 3];
-                dst_row[offset + 3] = src_row[offset];
-                offset += 4;
+            for (src, dst) in src_row.chunks_exact(4).zip(dst_row.chunks_exact_mut(4)) {
+                dst[0] = src[1];
+                dst[1] = src[2];
+                dst[2] = src[3];
+                dst[3] = src[0];
             }
         }
 
@@ -383,7 +385,7 @@ impl DataOutputSampleBufferDelegateVars {
                 }
             };
 
-            // stop 之后，队列里可能还有回调在做像素转换；发送前再检查一次。
+            // After stop, there may still be callbacks in the queue converting pixels; check again before sending.
             if !self.running.load(Ordering::Acquire) {
                 return;
             }
@@ -463,11 +465,11 @@ impl ImplVideoRecorder {
                 NSString::from_str(kCVPixelBufferPixelFormatTypeKey.to_string().as_str());
             let available_format_types = output.availableVideoCVPixelFormatTypes();
             let preferred_format_types = [
-                kCVPixelFormatType_422YpCbCr8,
-                kCVPixelFormatType_422YpCbCr8_yuvs,
+                kCVPixelFormatType_32RGBA,
                 kCVPixelFormatType_32BGRA,
                 kCVPixelFormatType_32ARGB,
-                kCVPixelFormatType_32RGBA,
+                kCVPixelFormatType_422YpCbCr8,
+                kCVPixelFormatType_422YpCbCr8_yuvs,
                 kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
                 kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
             ];
