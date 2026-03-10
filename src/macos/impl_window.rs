@@ -241,11 +241,11 @@ impl ImplWindow {
         };
 
         let impl_monitors = ImplMonitor::all()?;
-        let primary_monitor = ImplMonitor::new(unsafe { CGMainDisplayID() });
+        let primary_monitor = ImplMonitor::new(CGMainDisplayID());
 
         let impl_monitor = impl_monitors
             .iter()
-            .find(|impl_monitor| unsafe {
+            .find(|impl_monitor| {
                 let display_bounds = CGDisplayBounds(impl_monitor.cg_direct_display_id);
                 CGRectContainsPoint(display_bounds, cg_point)
                     || CGRectIntersectsRect(display_bounds, cg_rect)
@@ -353,25 +353,23 @@ impl ImplWindow {
     pub fn is_focused(&self) -> XCapResult<bool> {
         let pid_key = NSString::from_str("NSApplicationProcessIdentifier");
 
-        unsafe {
-            let workspace = NSWorkspace::sharedWorkspace();
+        let workspace = NSWorkspace::sharedWorkspace();
 
-            // activeApplication is deprecated, but the alternative, frontmostApplication,
-            // returns the application in focus when the process started while activeApplication
-            // returns a `NSDictionary` of application currently in focus, in real-time
-            let active_app_dictionary = workspace.activeApplication();
+        // activeApplication is deprecated, but the alternative, frontmostApplication,
+        // returns the application in focus when the process started while activeApplication
+        // returns a `NSDictionary` of application currently in focus, in real-time
+        let active_app_dictionary = workspace.activeApplication();
 
-            let active_app_pid = active_app_dictionary
-                .and_then(|dict| dict.valueForKey(&pid_key))
-                .and_then(|pid| pid.downcast::<NSNumber>().ok())
-                .map(|pid| pid.intValue() as u32);
+        let active_app_pid = active_app_dictionary
+            .and_then(|dict| dict.valueForKey(&pid_key))
+            .and_then(|pid| pid.downcast::<NSNumber>().ok())
+            .map(|pid| pid.intValue() as u32);
 
-            if active_app_pid == self.pid().ok() {
-                return Ok(true);
-            }
-
-            Ok(false)
+        if active_app_pid == self.pid().ok() {
+            return Ok(true);
         }
+
+        Ok(false)
     }
 
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {

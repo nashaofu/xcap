@@ -37,7 +37,7 @@ fn get_display_friendly_name(display_id: CGDirectDisplayID) -> XCapResult<String
             .unsignedIntValue();
 
         if screen_id == display_id {
-            unsafe { return Ok(screen.localizedName().to_string()) };
+            return Ok(screen.localizedName().to_string());
         }
     }
 
@@ -115,7 +115,7 @@ impl ImplMonitor {
         }
 
         if let Some(&display_id) = display_ids.first() {
-            if unsafe { !CGDisplayIsActive(display_id) } {
+            if !CGDisplayIsActive(display_id) {
                 return Err(XCapError::new("Monitor is not active"));
             }
             Ok(ImplMonitor::new(display_id))
@@ -131,7 +131,7 @@ impl ImplMonitor {
     }
 
     pub fn name(&self) -> XCapResult<String> {
-        let screen_number = unsafe { CGDisplayModelNumber(self.cg_direct_display_id) };
+        let screen_number = CGDisplayModelNumber(self.cg_direct_display_id);
         Ok(format!("Display #{}", screen_number))
     }
 
@@ -144,45 +144,45 @@ impl ImplMonitor {
     }
 
     pub fn x(&self) -> XCapResult<i32> {
-        let rect = unsafe { CGDisplayBounds(self.cg_direct_display_id) };
+        let rect = CGDisplayBounds(self.cg_direct_display_id);
 
         Ok(rect.origin.x as i32)
     }
 
     pub fn y(&self) -> XCapResult<i32> {
-        let cg_rect = unsafe { CGDisplayBounds(self.cg_direct_display_id) };
+        let cg_rect = CGDisplayBounds(self.cg_direct_display_id);
 
         Ok(cg_rect.origin.y as i32)
     }
 
     pub fn width(&self) -> XCapResult<u32> {
-        let cg_rect = unsafe { CGDisplayBounds(self.cg_direct_display_id) };
+        let cg_rect = CGDisplayBounds(self.cg_direct_display_id);
 
         Ok(cg_rect.size.width as u32)
     }
 
     pub fn height(&self) -> XCapResult<u32> {
-        let cg_rect = unsafe { CGDisplayBounds(self.cg_direct_display_id) };
+        let cg_rect = CGDisplayBounds(self.cg_direct_display_id);
 
         Ok(cg_rect.size.height as u32)
     }
 
     pub fn rotation(&self) -> XCapResult<f32> {
-        let rotation = unsafe { CGDisplayRotation(self.cg_direct_display_id) };
+        let rotation = CGDisplayRotation(self.cg_direct_display_id);
 
         Ok(rotation as f32)
     }
 
     pub fn scale_factor(&self) -> XCapResult<f32> {
-        let display_mode = unsafe { CGDisplayCopyDisplayMode(self.cg_direct_display_id) };
-        let pixel_width = unsafe { CGDisplayMode::pixel_width(display_mode.as_deref()) };
+        let display_mode = CGDisplayCopyDisplayMode(self.cg_direct_display_id);
+        let pixel_width = CGDisplayMode::pixel_width(display_mode.as_deref());
         let width = self.width()?;
 
         Ok(pixel_width as f32 / width as f32)
     }
 
     pub fn frequency(&self) -> XCapResult<f32> {
-        let frequency = unsafe {
+        let frequency = {
             let display_mode = CGDisplayCopyDisplayMode(self.cg_direct_display_id);
             CGDisplayMode::refresh_rate(display_mode.as_deref())
         };
@@ -191,19 +191,19 @@ impl ImplMonitor {
     }
 
     pub fn is_primary(&self) -> XCapResult<bool> {
-        let is_primary = unsafe { CGDisplayIsMain(self.cg_direct_display_id) };
+        let is_primary = CGDisplayIsMain(self.cg_direct_display_id);
 
         Ok(is_primary)
     }
 
     pub fn is_builtin(&self) -> XCapResult<bool> {
-        let is_builtin = unsafe { CGDisplayIsBuiltin(self.cg_direct_display_id) };
+        let is_builtin = CGDisplayIsBuiltin(self.cg_direct_display_id);
 
         Ok(is_builtin)
     }
 
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
-        let cg_rect = unsafe { CGDisplayBounds(self.cg_direct_display_id) };
+        let cg_rect = CGDisplayBounds(self.cg_direct_display_id);
 
         capture(cg_rect, CGWindowListOption::OptionAll, 0)
     }
