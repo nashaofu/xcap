@@ -4,40 +4,31 @@ use std::{
     sync::mpsc::Receiver,
 };
 
-use image::{RgbaImage, open};
-use lazy_static::lazy_static;
+use image::{open, RgbaImage};
 use percent_encoding::percent_decode_str;
 use serde::Deserialize;
 use url::Url;
 use xcb::{
-    ConnResult, Connection as XcbConnection, Xid,
+    Connection as XcbConnection, Xid,
     randr::{GetMonitors, MonitorInfoBuf, Output},
     x::{Atom, InternAtom, ScreenBuf},
 };
 use zbus::{
-    Result as ZBusResult,
     blocking::{Connection as ZBusConnection, Proxy},
     zvariant::Type,
 };
 
-use crate::{XCapError, error::XCapResult};
+use crate::{error::XCapResult, XCapError};
 
-lazy_static! {
-    static ref XCB_CONNECTION_AND_INDEX: ConnResult<(XcbConnection, i32)> = {
-        let display_name = env::var("DISPLAY").unwrap_or("DISPLAY:1".to_string());
-        XcbConnection::connect(Some(display_name.as_str()))
-    };
-    static ref ZBUS_CONNECTION: ZBusResult<ZBusConnection> = ZBusConnection::session();
+pub fn get_xcb_connection_and_index() -> XCapResult<(XcbConnection, i32)> {
+    let display = env::var("DISPLAY").unwrap_or_else(|_| "DISPLAY:1".to_string());
+    let (conn, idx) = XcbConnection::connect(Some(display.as_str()))
+        .map_err(|e| XCapError::new(e.to_string()))?;
+    Ok((conn, idx as i32))
 }
 
-pub fn get_xcb_connection_and_index() -> XCapResult<&'static (XcbConnection, i32)> {
-    XCB_CONNECTION_AND_INDEX.as_ref().map_err(XCapError::new)
-}
-
-pub fn get_zbus_connection() -> XCapResult<&'static ZBusConnection> {
-    ZBUS_CONNECTION
-        .as_ref()
-        .map_err(|err| XCapError::ZbusError(err.clone()))
+pub fn get_zbus_connection() -> XCapResult<ZBusConnection> {
+    ZBusConnection::session().map_err(XCapError::ZbusError)
 }
 
 pub fn wayland_detect() -> bool {
@@ -61,7 +52,7 @@ pub fn get_current_screen_buf() -> XCapResult<ScreenBuf> {
 
     let screen = setup
         .roots()
-        .nth(*index as usize)
+        .nth(index as usize)
         .ok_or_else(|| XCapError::new("Not found screen"))?;
 
     Ok(screen.to_owned())
