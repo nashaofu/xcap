@@ -22,7 +22,8 @@ use crate::{error::XCapResult, XCapError};
 
 pub fn get_xcb_connection_and_index() -> XCapResult<(XcbConnection, i32)> {
     let display = env::var("DISPLAY").unwrap_or_else(|_| "DISPLAY:1".to_string());
-    let (conn, idx) = XcbConnection::connect(Some(display.as_str()))?;
+    let (conn, idx) = XcbConnection::connect(Some(display.as_str()))
+        .map_err(|e| XCapError::new(e.to_string()))?;
     Ok((conn, idx as i32))
 }
 
