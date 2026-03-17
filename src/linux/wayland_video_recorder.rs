@@ -75,7 +75,7 @@ impl ScreenCast<'_> {
     pub fn new() -> XCapResult<Self> {
         let conn = get_zbus_connection()?;
         let proxy = Proxy::new(
-            conn,
+            &conn,
             "org.freedesktop.portal.Desktop",
             "/org/freedesktop/portal/desktop",
             "org.freedesktop.portal.ScreenCast",
@@ -90,7 +90,7 @@ impl ScreenCast<'_> {
         let mut options = HashMap::new();
 
         let handle_token = rand::random::<u32>().to_string();
-        let portal_request = get_zbus_portal_request(conn, &handle_token)?;
+        let portal_request = get_zbus_portal_request(&conn, &handle_token)?;
 
         options.insert("handle_token", Value::from(&handle_token));
 
@@ -125,7 +125,7 @@ impl ScreenCast<'_> {
         let mut options = HashMap::new();
 
         let handle_token = rand::random::<u32>().to_string();
-        let portal_request = get_zbus_portal_request(conn, &handle_token)?;
+        let portal_request = get_zbus_portal_request(&conn, &handle_token)?;
 
         options.insert("handle_token", Value::from(handle_token));
         options.insert("types", Value::from(1_u32));
@@ -145,7 +145,7 @@ impl ScreenCast<'_> {
         let mut options = HashMap::new();
 
         let handle_token = rand::random::<u32>().to_string();
-        let portal_request = get_zbus_portal_request(conn, &handle_token)?;
+        let portal_request = get_zbus_portal_request(&conn, &handle_token)?;
 
         options.insert("handle_token", Value::from(&handle_token));
 
@@ -397,15 +397,13 @@ impl WaylandVideoRecorder {
             )?;
 
             // Used to pause/resume the stream
-            let _attached = active_receiver.attach(&main_loop.loop_(), {
+            let _attached = active_receiver.attach(main_loop.loop_(), {
                 move |active| {
                     if let Err(e) = stream.set_active(active) {
                         log::error!("Failed to set stream active={active}: {e:?}");
                     }
-                    if !active {
-                        if let Err(e) = stream.flush(true) {
-                            log::error!("Failed to flush: {e:?}");
-                        }
+                    if !active && let Err(e) = stream.flush(true) {
+                        log::error!("Failed to flush: {e:?}");
                     }
                 }
             });
