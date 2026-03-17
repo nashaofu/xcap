@@ -132,11 +132,11 @@ pub fn wayland_capture(x: i32, y: i32, width: i32, height: i32) -> XCapResult<Rg
     let lock = DBUS_LOCK.lock();
 
     let conn = get_zbus_connection()?;
-    let res = org_gnome_shell_screenshot(conn, x, y, width, height)
+    let res = org_gnome_shell_screenshot(&conn, x, y, width, height)
         .or_else(|e| {
             log::debug!("org_gnome_shell_screenshot failed {e}");
 
-            org_freedesktop_portal_screenshot(conn, x, y, width, height)
+            org_freedesktop_portal_screenshot(&conn, x, y, width, height)
         })
         .or_else(|e| {
             log::debug!("org_freedesktop_portal_screenshot failed {e}");

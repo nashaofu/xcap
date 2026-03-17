@@ -23,8 +23,9 @@ use crate::{XCapError, error::XCapResult};
 pub fn get_xcb_connection_and_index() -> XCapResult<(XcbConnection, i32)> {
     let display = env::var("DISPLAY").unwrap_or_else(|_| "DISPLAY:1".to_string());
     let (conn, idx) = XcbConnection::connect(Some(display.as_str()))
+        .or_else(|_| XcbConnection::connect(None))
         .map_err(|e| XCapError::new(e.to_string()))?;
-    Ok((conn, idx as i32))
+    Ok((conn, idx))
 }
 
 pub fn get_zbus_connection() -> XCapResult<ZBusConnection> {
@@ -165,7 +166,7 @@ where
         let response = wait_zbus_response_inner::<T>(&request);
         sender
             .send(response)
-            .map_err(|e| XCapError::new(&format!("Failed to send zbus response: {e}")))
+            .map_err(|e| XCapError::new(format!("Failed to send zbus response: {e}")))
     });
 
     receiver
