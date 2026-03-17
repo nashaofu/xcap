@@ -402,10 +402,9 @@ impl WaylandVideoRecorder {
                     if let Err(e) = stream.set_active(active) {
                         log::error!("Failed to set stream active={active}: {e:?}");
                     }
-                    if !active
-                        && let Err(e) = stream.flush(true) {
-                            log::error!("Failed to flush: {e:?}");
-                        }
+                    if !active && let Err(e) = stream.flush(true) {
+                        log::error!("Failed to flush: {e:?}");
+                    }
                 }
             });
 

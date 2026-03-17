@@ -184,9 +184,10 @@ fn is_builtin_edid(edid: &[u8]) -> bool {
         if edid[offset] == 0xFC {
             let text = &edid[offset + 5..offset + 18];
             if let Ok(name) = CStr::from_bytes_until_nul(text)
-                && name.to_string_lossy().contains("Internal") {
-                    return true;
-                }
+                && name.to_string_lossy().contains("Internal")
+            {
+                return true;
+            }
         }
     }
 
@@ -248,10 +249,14 @@ impl ImplMonitor {
             let top = monitor_info.y() as i32;
             let bottom = monitor_info.y() as i32 + monitor_info.height() as i32;
 
-            if x >= left && x < right && y >= top && y < bottom
-                && let Some(&output) = monitor_info.outputs().first() {
-                    return Ok(ImplMonitor::new(output));
-                }
+            if x >= left
+                && x < right
+                && y >= top
+                && y < bottom
+                && let Some(&output) = monitor_info.outputs().first()
+            {
+                return Ok(ImplMonitor::new(output));
+            }
         }
 
         Err(XCapError::new("Not found monitor"))
