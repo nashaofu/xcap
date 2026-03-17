@@ -4,7 +4,7 @@ use std::{
     sync::mpsc::Receiver,
 };
 
-use image::{open, RgbaImage};
+use image::{RgbaImage, open};
 use percent_encoding::percent_decode_str;
 use serde::Deserialize;
 use url::Url;
@@ -18,7 +18,7 @@ use zbus::{
     zvariant::Type,
 };
 
-use crate::{error::XCapResult, XCapError};
+use crate::{XCapError, error::XCapResult};
 
 pub fn get_xcb_connection_and_index() -> XCapResult<(XcbConnection, i32)> {
     let display = env::var("DISPLAY").unwrap_or_else(|_| "DISPLAY:1".to_string());
