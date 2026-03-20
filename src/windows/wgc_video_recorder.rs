@@ -99,8 +99,13 @@ impl ImplVideoRecorder {
         )?;
 
         let session = frame_pool.CreateCaptureSession(&self.item)?;
-        session.SetIsBorderRequired(false)?;
-        session.SetIsCursorCaptureEnabled(false)?;
+        // Best-effort: these may fail on older Windows builds or without capabilities
+        if let Err(e) = session.SetIsBorderRequired(false) {
+            log::debug!("SetIsBorderRequired(false) failed (non-fatal): {:?}", e);
+        }
+        if let Err(e) = session.SetIsCursorCaptureEnabled(false) {
+            log::debug!("SetIsCursorCaptureEnabled(false) failed (non-fatal): {:?}", e);
+        }
 
         Ok(WgcRuntime {
             frame_pool,
