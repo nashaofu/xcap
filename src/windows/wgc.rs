@@ -155,8 +155,19 @@ pub(super) fn wgc_capture(
             log::error!("GraphicsCaptureSession Close failed: {:?}", error);
         });
     });
-    session.SetIsBorderRequired(false)?;
-    session.SetIsCursorCaptureEnabled(false)?;
+    // Best-effort: disable capture border and cursor.
+    // SetIsBorderRequired requires Windows 11 and may fail on older builds,
+    // or when the app lacks graphicsCaptureWithoutBorder capability.
+    // Don't propagate errors — capture should still work with the border visible.
+    if let Err(e) = session.SetIsBorderRequired(false) {
+        log::debug!("SetIsBorderRequired(false) failed (non-fatal): {:?}", e);
+    }
+    if let Err(e) = session.SetIsCursorCaptureEnabled(false) {
+        log::debug!(
+            "SetIsCursorCaptureEnabled(false) failed (non-fatal): {:?}",
+            e
+        );
+    }
 
     session.StartCapture()?;
     let frame = receiver.recv_timeout(Duration::from_millis(200))?;
