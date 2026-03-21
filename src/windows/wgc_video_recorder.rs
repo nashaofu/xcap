@@ -104,7 +104,10 @@ impl ImplVideoRecorder {
             log::debug!("SetIsBorderRequired(false) failed (non-fatal): {:?}", e);
         }
         if let Err(e) = session.SetIsCursorCaptureEnabled(false) {
-            log::debug!("SetIsCursorCaptureEnabled(false) failed (non-fatal): {:?}", e);
+            log::debug!(
+                "SetIsCursorCaptureEnabled(false) failed (non-fatal): {:?}",
+                e
+            );
         }
 
         Ok(WgcRuntime {
