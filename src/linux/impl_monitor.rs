@@ -89,7 +89,7 @@ fn get_scale_factor() -> XCapResult<f32> {
 
     let get_property_reply = conn.wait_for_reply(get_property_cookie)?;
 
-    let resource_manager = String::from_utf8(get_property_reply.value().to_vec())?;
+    let resource_manager = String::from_utf8_lossy(get_property_reply.value()).into_owned();
 
     let xft_dpi = resource_manager
         .split('\n')
@@ -276,7 +276,7 @@ impl ImplMonitor {
         });
         let get_output_info_reply = conn.wait_for_reply(get_output_info_cookie)?;
 
-        let name = String::from_utf8(get_output_info_reply.name().to_vec())?;
+        let name = String::from_utf8_lossy(get_output_info_reply.name()).into_owned();
         Ok(name)
     }
 
