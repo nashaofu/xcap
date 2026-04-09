@@ -179,7 +179,7 @@ impl ImplWindow {
         let get_class_reply =
             get_window_property(self.window, ATOM_WM_CLASS, ATOM_STRING, 0, 1024)?;
 
-        let wm_class = String::from_utf8(get_class_reply.value().to_vec())?;
+        let wm_class = String::from_utf8_lossy(get_class_reply.value()).into_owned();
 
         // WM_CLASS contains two strings: instance name and class name
         // We want the class name (second string)
@@ -198,14 +198,14 @@ impl ImplWindow {
         let utf8_string_atom = get_atom("UTF8_STRING")?;
         let get_title_reply =
             get_window_property(self.window, net_wm_name_atom, utf8_string_atom, 0, 1024)?;
-        let title = String::from_utf8(get_title_reply.value().to_vec())?;
+        let title = String::from_utf8_lossy(get_title_reply.value()).into_owned();
 
         // If _NET_WM_NAME is empty, fall back to WM_NAME with COMPOUND_TEXT type
         if title.is_empty() {
             let compound_text_atom = get_atom("COMPOUND_TEXT")?;
             let get_title_reply =
                 get_window_property(self.window, ATOM_WM_NAME, compound_text_atom, 0, 1024)?;
-            let title = String::from_utf8(get_title_reply.value().to_vec())?;
+            let title = String::from_utf8_lossy(get_title_reply.value()).into_owned();
 
             // If both are empty, try to get the parent window
             if title.is_empty() {
