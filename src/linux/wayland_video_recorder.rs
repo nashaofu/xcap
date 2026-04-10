@@ -134,7 +134,9 @@ impl ScreenCast<'_> {
         self.proxy
             .call_method("SelectSources", &(session, options))?;
 
-        portal_request.receive_signal("Response")?;
+        let mut signals = portal_request.receive_signal("Response")?;
+        // If the iterator is not consumed xdg-desktop-portal-hyprland invalidates the session
+        let _msg = signals.next();
 
         Ok(())
     }
