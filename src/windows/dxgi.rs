@@ -157,115 +157,168 @@ impl DxgiSession {
     /// staging texture.  `x`, `y`, `width`, `height` are monitor-relative.
     fn capture_frame(&self, x: u32, y: u32, width: u32, height: u32) -> XCapResult<CaptureFrame> {
         unsafe {
-            // ── Acquire the next desktop frame ────────────────────────────
-            // Retry on DXGI_ERROR_WAIT_TIMEOUT: the display may not have produced
-            // a frame yet (common on first acquisition or if screen is unchanged).
-            let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
-            let mut resource: Option<IDXGIResource> = None;
-            let mut acquired = false;
+            let bytes_per_pixel = if self.is_hdr { 8usize } else { 4usize };
+            let row_bytes = width as usize * bytes_per_pixel;
+            let mut raw = vec![0u8; row_bytes * height as usize];
 
-            for _ in 0..5 {
-                match self
-                    .duplication
-                    .AcquireNextFrame(100, &mut frame_info, &mut resource)
-                {
-                    Ok(()) => {
-                        acquired = true;
-                        break;
-                    }
-                    Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => continue,
-                    Err(e) => return Err(e.into()),
+            // Staging texture is created on the first iteration and reused on retries
+            // to avoid redundant GPU allocations.
+            let mut staging_opt: Option<ID3D11Texture2D> = None;
+
+            // On some drivers (notably AMD) the very first AcquireNextFrame after a
+            // fresh DuplicateOutput session returns an all-zero frame buffer even
+            // though the call reports success.  We detect this and re-acquire up to
+            // MAX_ATTEMPTS times before giving up (which triggers a GDI fallback).
+            const MAX_ATTEMPTS: usize = 5;
+
+            for attempt in 0..MAX_ATTEMPTS {
+                if attempt > 0 {
+                    // Give the driver a frame period to populate the buffer.
+                    std::thread::sleep(std::time::Duration::from_millis(16));
                 }
-            }
-            if !acquired {
-                return Err(XCapError::new(
-                    "DXGI AcquireNextFrame timed out: display may be asleep or unchanged",
-                ));
-            }
 
-            let resource = resource
-                .ok_or_else(|| XCapError::new("AcquireNextFrame returned no resource"))?;
-            let desktop_texture: ID3D11Texture2D = resource.cast()?;
+                // ── 1. Acquire next desktop frame ─────────────────────────
+                let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
+                let mut resource: Option<IDXGIResource> = None;
+                let mut acquired = false;
 
-            // ── Create a CPU-readable staging texture for the ROI ─────────
-            let staging_texture = {
+                for _ in 0..5 {
+                    match self
+                        .duplication
+                        .AcquireNextFrame(100, &mut frame_info, &mut resource)
+                    {
+                        Ok(()) => {
+                            acquired = true;
+                            break;
+                        }
+                        Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => continue,
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+                if !acquired {
+                    return Err(XCapError::new(
+                        "DXGI AcquireNextFrame timed out: display may be asleep or unchanged",
+                    ));
+                }
+
+                let resource = resource
+                    .ok_or_else(|| XCapError::new("AcquireNextFrame returned no resource"))?;
+                let desktop_texture: ID3D11Texture2D = resource.cast()?;
+
+                // ── 2. Validate ROI against actual desktop texture size ────
+                // CopySubresourceRegion fails silently for out-of-bounds regions,
+                // which leaves the staging texture all zeros.  Detect this early.
                 let mut src_desc = D3D11_TEXTURE2D_DESC::default();
                 desktop_texture.GetDesc(&mut src_desc);
 
-                let mut staging_desc = src_desc;
-                staging_desc.Width = width;
-                staging_desc.Height = height;
-                staging_desc.BindFlags = 0;
-                staging_desc.MiscFlags = 0;
-                staging_desc.ArraySize = 1;
-                staging_desc.MipLevels = 1;
-                staging_desc.SampleDesc.Count = 1;
-                staging_desc.Usage = D3D11_USAGE_STAGING;
-                staging_desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
+                if x + width > src_desc.Width || y + height > src_desc.Height {
+                    self.duplication.ReleaseFrame()?;
+                    return Err(XCapError::new(format!(
+                        "DXGI ROI ({}..{}, {}..{}) exceeds desktop texture {}×{}",
+                        x,
+                        x + width,
+                        y,
+                        y + height,
+                        src_desc.Width,
+                        src_desc.Height,
+                    )));
+                }
 
-                let mut tex = None;
-                self.d3d_device
-                    .CreateTexture2D(&staging_desc, None, Some(&mut tex))?;
-                tex.ok_or_else(|| XCapError::new("CreateTexture2D returned None"))?
-            };
+                // ── 3. Create (or reuse) CPU-readable staging texture ──────
+                let staging = match staging_opt.take() {
+                    Some(t) => t,
+                    None => {
+                        let mut staging_desc = D3D11_TEXTURE2D_DESC {
+                            Width: width,
+                            Height: height,
+                            MipLevels: 1,
+                            ArraySize: 1,
+                            Format: src_desc.Format,
+                            SampleDesc: windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC {
+                                Count: 1,
+                                Quality: 0,
+                            },
+                            Usage: D3D11_USAGE_STAGING,
+                            BindFlags: 0,
+                            CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+                            MiscFlags: 0,
+                        };
+                        staging_desc.MipLevels = 1; // ensure
+                        let mut tex = None;
+                        self.d3d_device
+                            .CreateTexture2D(&staging_desc, None, Some(&mut tex))?;
+                        tex.ok_or_else(|| XCapError::new("CreateTexture2D returned None"))?
+                    }
+                };
 
-            // GPU-side copy of only the requested region.
-            let region = D3D11_BOX {
-                left: x,
-                top: y,
-                right: x + width,
-                bottom: y + height,
-                front: 0,
-                back: 1,
-            };
-            self.d3d_context.CopySubresourceRegion(
-                Some(&staging_texture.cast()?),
-                0,
-                0,
-                0,
-                0,
-                Some(&desktop_texture.cast()?),
-                0,
-                Some(&region),
-            );
-
-            // Release the duplication frame BEFORE mapping — mandatory to avoid lock.
-            self.duplication.ReleaseFrame()?;
-
-            // ── Map staging texture and read pixel rows ───────────────────
-            // RowPitch can exceed width * bytes_per_pixel due to GPU alignment padding.
-            let bytes_per_pixel = if self.is_hdr { 8usize } else { 4usize };
-            let row_bytes = width as usize * bytes_per_pixel;
-
-            let resource: windows::Win32::Graphics::Direct3D11::ID3D11Resource =
-                staging_texture.cast()?;
-            let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-            self.d3d_context
-                .Map(Some(&resource), 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
-
-            let mut raw = vec![0u8; row_bytes * height as usize];
-            let src_ptr = mapped.pData as *const u8;
-            for row in 0..height as usize {
-                std::ptr::copy_nonoverlapping(
-                    src_ptr.add(row * mapped.RowPitch as usize),
-                    raw.as_mut_ptr().add(row * row_bytes),
-                    row_bytes,
+                // ── 4. GPU copy ROI → staging ─────────────────────────────
+                let region = D3D11_BOX {
+                    left: x,
+                    top: y,
+                    right: x + width,
+                    bottom: y + height,
+                    front: 0,
+                    back: 1,
+                };
+                self.d3d_context.CopySubresourceRegion(
+                    Some(&staging.cast()?),
+                    0,
+                    0,
+                    0,
+                    0,
+                    Some(&desktop_texture.cast()?),
+                    0,
+                    Some(&region),
                 );
+
+                // ── 5. Release DXGI frame before mapping staging ──────────
+                self.duplication.ReleaseFrame()?;
+
+                // ── 6. Map staging and read pixel rows ────────────────────
+                let staging_res: windows::Win32::Graphics::Direct3D11::ID3D11Resource =
+                    staging.cast()?;
+                let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+                self.d3d_context
+                    .Map(Some(&staging_res), 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
+
+                let src_ptr = mapped.pData as *const u8;
+                for row in 0..height as usize {
+                    std::ptr::copy_nonoverlapping(
+                        src_ptr.add(row * mapped.RowPitch as usize),
+                        raw.as_mut_ptr().add(row * row_bytes),
+                        row_bytes,
+                    );
+                }
+                self.d3d_context.Unmap(Some(&staging_res), 0);
+
+                // ── 7. Detect empty frame ─────────────────────────────────
+                // A real black frame has alpha = 0xFF (BGRA8) or 0x3C00 (f16),
+                // so all-zero bytes reliably identify an uninitialized frame buffer.
+                if raw.iter().all(|&b| b == 0) {
+                    log::debug!(
+                        "DXGI: empty frame on attempt {attempt}/{MAX_ATTEMPTS}, retrying"
+                    );
+                    staging_opt = Some(staging_res.cast()?);
+                    continue;
+                }
+
+                // ── 8. Produce output ─────────────────────────────────────
+                return if self.is_hdr {
+                    // R16G16B16A16_FLOAT is already in RGBA channel order.
+                    Ok(CaptureFrame::Hdr(HdrImage::new(width, height, raw)))
+                } else {
+                    // B8G8R8A8_UNORM: swap B↔R.
+                    Ok(CaptureFrame::Sdr(
+                        RgbaImage::from_raw(width, height, bgra_to_rgba(raw))
+                            .ok_or_else(|| XCapError::new("RgbaImage::from_raw failed"))?,
+                    ))
+                };
             }
 
-            self.d3d_context.Unmap(Some(&resource), 0);
-
-            // ── Produce output frame ──────────────────────────────────────
-            if self.is_hdr {
-                // R16G16B16A16_FLOAT is already in RGBA channel order — no swap needed.
-                Ok(CaptureFrame::Hdr(HdrImage::new(width, height, raw)))
-            } else {
-                // B8G8R8A8_UNORM: swap B↔R before constructing RgbaImage.
-                Ok(CaptureFrame::Sdr(
-                    RgbaImage::from_raw(width, height, bgra_to_rgba(raw))
-                        .ok_or_else(|| XCapError::new("RgbaImage::from_raw failed"))?,
-                ))
-            }
+            // All attempts returned empty frames — signal the caller to fall back to GDI.
+            Err(XCapError::new(
+                "DXGI: all capture attempts returned an empty frame",
+            ))
         }
     }
 }
