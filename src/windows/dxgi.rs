@@ -16,7 +16,14 @@ use windows::{
                 IDXGIOutput5, IDXGIOutput6, IDXGIOutputDuplication, IDXGIResource,
             },
             Dxgi::Common::{
-                DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709, DXGI_FORMAT_R16G16B16A16_FLOAT,
+                DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709,
+                DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020,
+                DXGI_COLOR_SPACE_RGB_STUDIO_G2084_NONE_P2020,
+                DXGI_COLOR_SPACE_YCBCR_FULL_GHLG_TOPLEFT_P2020,
+                DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020,
+                DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_TOPLEFT_P2020,
+                DXGI_COLOR_SPACE_YCBCR_STUDIO_GHLG_TOPLEFT_P2020,
+                DXGI_FORMAT_R16G16B16A16_FLOAT,
             },
             Gdi::HMONITOR,
         },
@@ -91,7 +98,7 @@ impl DxgiSession {
                         .cast::<IDXGIOutput6>()
                         .ok()
                         .and_then(|o6| o6.GetDesc1().ok())
-                        .map(|d| d.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709)
+                        .map(|d| is_hdr_color_space(d.ColorSpace))
                         .unwrap_or(false);
 
                     // Create a D3D11 device bound to this specific adapter.
@@ -372,7 +379,7 @@ pub(super) fn is_hdr_monitor(h_monitor: HMONITOR) -> bool {
                     .cast::<IDXGIOutput6>()
                     .ok()
                     .and_then(|o6| o6.GetDesc1().ok())
-                    .map(|d| d.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709)
+                    .map(|d| is_hdr_color_space(d.ColorSpace))
                     .unwrap_or(false);
             }
         }
@@ -384,4 +391,25 @@ pub(super) fn is_hdr_monitor(h_monitor: HMONITOR) -> bool {
 
 fn is_not_found(code: HRESULT) -> bool {
     code == DXGI_ERROR_NOT_FOUND
+}
+
+/// Returns `true` for any color space that indicates the output is in an HDR mode.
+///
+/// Windows HDR can surface as several color spaces depending on GPU vendor and
+/// connection type:
+/// - `RGB_FULL_G10_NONE_P709`  – scRGB linear (NVIDIA, typical desktop HDR)
+/// - `RGB_FULL_G2084_NONE_P2020` / `RGB_STUDIO_G2084_NONE_P2020` – HDR10 RGB (PQ)
+/// - `YCBCR_STUDIO_G2084_*`   – HDR10 YCbCr (AMD over HDMI)
+///
+/// DWM always composes the desktop in scRGB linear regardless of scan-out format,
+/// so `DuplicateOutput1` with `DXGI_FORMAT_R16G16B16A16_FLOAT` captures linear
+/// HDR data in all of these cases.
+fn is_hdr_color_space(cs: windows::Win32::Graphics::Dxgi::Common::DXGI_COLOR_SPACE_TYPE) -> bool {
+    cs == DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709           // scRGB linear (NVIDIA)
+        || cs == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020  // RGB HDR10 PQ full
+        || cs == DXGI_COLOR_SPACE_RGB_STUDIO_G2084_NONE_P2020 // RGB HDR10 PQ studio
+        || cs == DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020   // YCbCr HDR10 (AMD HDMI)
+        || cs == DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_TOPLEFT_P2020 // YCbCr HDR10 topleft
+        || cs == DXGI_COLOR_SPACE_YCBCR_STUDIO_GHLG_TOPLEFT_P2020  // HLG studio (broadcast)
+        || cs == DXGI_COLOR_SPACE_YCBCR_FULL_GHLG_TOPLEFT_P2020    // HLG full range
 }
