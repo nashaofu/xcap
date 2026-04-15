@@ -11,6 +11,7 @@ use xcb::{
 };
 
 use crate::{
+    HdrImage,
     error::{XCapError, XCapResult},
     video_recorder::Frame,
 };
@@ -370,6 +371,14 @@ impl ImplMonitor {
             )));
         }
         capture_region(self, x, y, width, height)
+    }
+
+    pub fn capture_image_hdr(&self) -> XCapResult<HdrImage> {
+        Err(XCapError::NotSupported)
+    }
+
+    pub fn is_hdr(&self) -> bool {
+        false
     }
 
     pub fn video_recorder(&self) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {

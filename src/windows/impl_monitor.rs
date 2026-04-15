@@ -20,12 +20,13 @@ use windows::{
 };
 
 use crate::{
+    HdrImage,
     error::{XCapError, XCapResult},
     video_recorder::Frame,
 };
 
 use super::{
-    capture::capture_monitor,
+    capture::{capture_monitor, capture_monitor_hdr, monitor_is_hdr},
     impl_video_recorder::ImplVideoRecorder,
     utils::{get_monitor_config, get_process_is_dpi_awareness, load_library},
 };
@@ -285,6 +286,22 @@ impl ImplMonitor {
     pub fn capture_region(&self, x: u32, y: u32, width: u32, height: u32) -> XCapResult<RgbaImage> {
         let image = capture_monitor(self, Some(x), Some(y), Some(width), Some(height))?;
         Ok(image)
+    }
+
+    /// Capture the full monitor and return raw HDR pixel data.
+    ///
+    /// On HDR monitors (without the `wgc` feature), this returns scRGB linear f16 pixels.
+    /// On SDR monitors, values are in [0, 1] expressed as f16.
+    /// Returns [`crate::XCapError::NotSupported`] when built with the `wgc` feature.
+    pub fn capture_image_hdr(&self) -> XCapResult<HdrImage> {
+        capture_monitor_hdr(self)
+    }
+
+    /// Returns `true` if the monitor is currently in HDR mode.
+    ///
+    /// Always returns `false` when built with the `wgc` feature.
+    pub fn is_hdr(&self) -> bool {
+        monitor_is_hdr(self)
     }
 
     pub fn video_recorder(&self) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {
