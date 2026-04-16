@@ -1,4 +1,4 @@
-use image::RgbaImage;
+use image::{Rgba32FImage, RgbaImage};
 
 /// An HDR screen capture in scRGB linear color space.
 ///
@@ -21,28 +21,6 @@ pub struct HdrImage {
 
 impl HdrImage {
     pub(crate) fn new(width: u32, height: u32, raw: Vec<u8>) -> Self {
-        Self { width, height, raw }
-    }
-
-    /// Build an `HdrImage` from a standard 8-bit `RgbaImage` by converting sRGB → linear f16.
-    /// The resulting values are all in [0, 1] since the source is SDR.
-    pub(crate) fn from_rgba_image(img: &RgbaImage) -> Self {
-        let (width, height) = img.dimensions();
-        let mut raw = vec![0u8; (width * height * 8) as usize];
-        for (idx, pixel) in img.pixels().enumerate() {
-            let [r, g, b, a] = pixel.0;
-            let f16s = [
-                f32_to_f16_bytes(srgb_u8_to_linear(r)),
-                f32_to_f16_bytes(srgb_u8_to_linear(g)),
-                f32_to_f16_bytes(srgb_u8_to_linear(b)),
-                f32_to_f16_bytes(a as f32 / 255.0),
-            ];
-            let base = idx * 8;
-            for (i, b) in f16s.iter().enumerate() {
-                raw[base + i * 2] = b[0];
-                raw[base + i * 2 + 1] = b[1];
-            }
-        }
         Self { width, height, raw }
     }
 
@@ -102,6 +80,25 @@ impl HdrImage {
         }
         RgbaImage::from_raw(self.width, self.height, pixels).expect("dimensions match")
     }
+
+    /// Convert to a linear f32 `Rgba32FImage`, preserving full HDR range.
+    ///
+    /// Values above 1.0 are HDR highlights in scRGB linear space. Use this to
+    /// save as tiff or for downstream HDR processing.
+    pub fn to_rgba32f_image(&self) -> Rgba32FImage {
+        let mut pixels = vec![0.0f32; (self.width * self.height * 4) as usize];
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let [r, g, b, a] = self.pixel_f32(x, y);
+                let base = ((y * self.width + x) * 4) as usize;
+                pixels[base] = r;
+                pixels[base + 1] = g;
+                pixels[base + 2] = b;
+                pixels[base + 3] = a;
+            }
+        }
+        Rgba32FImage::from_raw(self.width, self.height, pixels).expect("dimensions match")
+    }
 }
 
 // ── Tone mapping ──────────────────────────────────────────────────────────────
@@ -122,16 +119,7 @@ fn linear_to_srgb_u8(linear: f32) -> u8 {
     (srgb.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
 }
 
-fn srgb_u8_to_linear(srgb: u8) -> f32 {
-    let s = srgb as f32 / 255.0;
-    if s <= 0.040_45 {
-        s / 12.92
-    } else {
-        ((s + 0.055) / 1.055).powf(2.4)
-    }
-}
-
-// ── f16 ↔ f32 without external crates ────────────────────────────────────────
+// ── f16 → f32 ─────────────────────────────────────────────────────────────────
 
 /// IEEE 754 half-precision bytes (little-endian) → f32.
 fn f16_bytes_to_f32(bytes: [u8; 2]) -> f32 {
@@ -159,34 +147,4 @@ fn f16_bytes_to_f32(bytes: [u8; 2]) -> f32 {
         (s << 31) | ((e + 127 - 15) << 23) | (m << 13)
     };
     f32::from_bits(f32_bits)
-}
-
-/// f32 → IEEE 754 half-precision bytes (little-endian).
-fn f32_to_f16_bytes(val: f32) -> [u8; 2] {
-    let bits = val.to_bits();
-    let s = (bits >> 31) as u16;
-    let e = ((bits >> 23) & 0xFF) as i32;
-    let m = bits & 0x7F_FFFF;
-
-    let f16_bits: u16 = if e == 0xFF {
-        // NaN or Inf
-        (s << 15) | 0x7C00 | ((m >> 13) as u16)
-    } else {
-        let e16 = e - 127 + 15;
-        if e16 >= 31 {
-            // Overflow → Inf
-            (s << 15) | 0x7C00
-        } else if e16 <= 0 {
-            if e16 < -10 {
-                s << 15 // Underflow → ±zero
-            } else {
-                // Subnormal f16
-                let m_with_implicit = (m | 0x80_0000) >> (1 - e16) as u32;
-                (s << 15) | (m_with_implicit >> 13) as u16
-            }
-        } else {
-            (s << 15) | ((e16 as u16) << 10) | ((m >> 13) as u16)
-        }
-    };
-    f16_bits.to_le_bytes()
 }

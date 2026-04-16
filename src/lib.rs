@@ -27,5 +27,8 @@ pub use hdr_image::HdrImage;
 pub use monitor::Monitor;
 pub use window::Window;
 
+#[cfg(target_os = "windows")]
+pub use platform::impl_monitor::DxgiFormatSupport;
+
 pub use video_recorder::Frame;
 pub use video_recorder::VideoRecorder;

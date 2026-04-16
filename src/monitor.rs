@@ -121,6 +121,15 @@ impl Monitor {
         self.impl_monitor.is_hdr()
     }
 
+    /// Query DXGI Desktop Duplication format support for this monitor.
+    ///
+    /// Returns panel bit depth, luminance range, color space, and which
+    /// `DuplicateOutput1` formats the driver accepts. Windows-only.
+    #[cfg(target_os = "windows")]
+    pub fn dxgi_format_support(&self) -> Option<crate::DxgiFormatSupport> {
+        self.impl_monitor.dxgi_format_support()
+    }
+
     pub fn video_recorder(&self) -> XCapResult<(VideoRecorder, Receiver<Frame>)> {
         let (impl_video_recorder, sx) = self.impl_monitor.video_recorder()?;
 

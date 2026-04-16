@@ -130,9 +130,9 @@ impl DxgiSession {
                                 let formats = [DXGI_FORMAT_R16G16B16A16_FLOAT];
                                 match output5.DuplicateOutput1(&dxgi_device, 0, &formats) {
                                     Ok(dup) => (dup, true),
-                                    Err(_) => {
-                                        log::debug!(
-                                            "DuplicateOutput1 rejected R16G16B16A16_FLOAT, falling back to BGRA8"
+                                    Err(e) => {
+                                        println!(
+                                            "DuplicateOutput1 rejected R16G16B16A16_FLOAT: {e} ({:#010x})", e.code().0
                                         );
                                         let o1 = output.cast::<IDXGIOutput1>()?;
                                         (o1.DuplicateOutput(&dxgi_device)?, false)
@@ -148,6 +148,20 @@ impl DxgiSession {
                         let o1 = output.cast::<IDXGIOutput1>()?;
                         (o1.DuplicateOutput(&dxgi_device)?, false)
                     };
+
+                    // Warm up the duplication session: acquire and discard the first
+                    // frame.  On some drivers (notably AMD) the initial frame buffer
+                    // after DuplicateOutput is uninitialized (all zeros).  Discarding
+                    // it here ensures the first real capture_frame() call gets valid
+                    // pixel data.
+                    let mut warm_info = DXGI_OUTDUPL_FRAME_INFO::default();
+                    let mut warm_resource: Option<IDXGIResource> = None;
+                    if duplication
+                        .AcquireNextFrame(500, &mut warm_info, &mut warm_resource)
+                        .is_ok()
+                    {
+                        let _ = duplication.ReleaseFrame();
+                    }
 
                     return Ok(DxgiSession {
                         d3d_device,
@@ -348,8 +362,11 @@ pub(super) fn capture_monitor(
     session.capture_frame(x, y, width, height)
 }
 
-/// Returns `true` if the monitor is currently in Windows HDR mode (scRGB linear).
-/// Detected via `IDXGIOutput6::GetDesc1()`.
+/// Returns `true` only if the monitor is in Windows HDR mode AND
+/// `DuplicateOutput1` with `R16G16B16A16_FLOAT` is supported by the driver.
+///
+/// An HDR color space alone is not sufficient — some 8-bit panels with FRC
+/// report an HDR color space but the driver rejects float-format duplication.
 pub(super) fn is_hdr_monitor(h_monitor: HMONITOR) -> bool {
     unsafe {
         let Ok(factory) = CreateDXGIFactory1::<IDXGIFactory1>() else {
@@ -375,12 +392,52 @@ pub(super) fn is_hdr_monitor(h_monitor: HMONITOR) -> bool {
                     continue;
                 }
 
-                return output
+                // First check: does the color space indicate HDR at all?
+                let color_space_is_hdr = output
                     .cast::<IDXGIOutput6>()
                     .ok()
                     .and_then(|o6| o6.GetDesc1().ok())
                     .map(|d| is_hdr_color_space(d.ColorSpace))
                     .unwrap_or(false);
+
+                if !color_space_is_hdr {
+                    return false;
+                }
+
+                // Second check: can we actually open DuplicateOutput1 with a float format?
+                // Some 8-bit panels with FRC report HDR color space but the driver
+                // rejects R16G16B16A16_FLOAT with DXGI_ERROR_UNSUPPORTED.
+                let Ok(output5) = output.cast::<IDXGIOutput5>() else {
+                    return false;
+                };
+
+                // Create a temporary D3D11 device on this adapter to probe duplication.
+                let mut d3d_device: Option<ID3D11Device> = None;
+                if D3D11CreateDevice(
+                    &adapter,
+                    D3D_DRIVER_TYPE_UNKNOWN,
+                    HMODULE::default(),
+                    D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                    None,
+                    D3D11_SDK_VERSION,
+                    Some(&mut d3d_device),
+                    None,
+                    None,
+                )
+                .is_err()
+                {
+                    return false;
+                }
+                let Some(d3d_device) = d3d_device else {
+                    return false;
+                };
+                let Ok(dxgi_device) = d3d_device.cast::<IDXGIDevice>() else {
+                    return false;
+                };
+
+                let formats = [DXGI_FORMAT_R16G16B16A16_FLOAT];
+                let probe = output5.DuplicateOutput1(&dxgi_device, 0, &formats);
+                return probe.is_ok();
             }
         }
         false

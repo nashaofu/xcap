@@ -7,17 +7,47 @@ use windows::{
     Win32::{
         Devices::Display::DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL,
         Foundation::{GetLastError, LPARAM, POINT, RECT, TRUE},
-        Graphics::Gdi::{
-            CreateDCW, DESKTOPHORZRES, DEVMODEW, DMDO_90, DMDO_180, DMDO_270, DMDO_DEFAULT,
-            DeleteDC, ENUM_CURRENT_SETTINGS, EnumDisplayMonitors, EnumDisplaySettingsW,
-            GetDeviceCaps, GetMonitorInfoW, HDC, HMONITOR, HORZRES, MONITOR_DEFAULTTONULL,
-            MONITORINFO, MONITORINFOEXW, MonitorFromPoint,
+        Graphics::{
+            Direct3D::D3D_DRIVER_TYPE_UNKNOWN,
+            Direct3D11::{
+                D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice,
+            },
+            Dxgi::{
+                CreateDXGIFactory1, IDXGIAdapter1, IDXGIDevice, IDXGIFactory1, IDXGIOutput5,
+                IDXGIOutput6, DXGI_ERROR_NOT_FOUND,
+            },
+            Dxgi::Common::{
+                DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R10G10B10A2_UNORM,
+                DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R8G8B8A8_UNORM,
+            },
+            Gdi::{
+                CreateDCW, DESKTOPHORZRES, DEVMODEW, DMDO_90, DMDO_180, DMDO_270, DMDO_DEFAULT,
+                DeleteDC, ENUM_CURRENT_SETTINGS, EnumDisplayMonitors, EnumDisplaySettingsW,
+                GetDeviceCaps, GetMonitorInfoW, HDC, HMONITOR, HORZRES, MONITOR_DEFAULTTONULL,
+                MONITORINFO, MONITORINFOEXW, MonitorFromPoint,
+            },
         },
         System::{LibraryLoader::GetProcAddress, Threading::GetCurrentProcess},
         UI::WindowsAndMessaging::MONITORINFOF_PRIMARY,
     },
-    core::{BOOL, HRESULT, PCWSTR, s, w},
+    core::{BOOL, HRESULT, Interface, PCWSTR, s, w},
+    Win32::Foundation::HMODULE,
 };
+
+/// Information about DXGI Desktop Duplication format support for a monitor.
+#[derive(Debug, Clone)]
+pub struct DxgiFormatSupport {
+    /// Panel bit depth reported by the driver (8, 10, 12).
+    pub bits_per_color: u32,
+    /// Peak luminance in nits.
+    pub max_luminance_nits: f32,
+    /// Black-level luminance in nits.
+    pub min_luminance_nits: f32,
+    /// Color space name as reported by `IDXGIOutput6::GetDesc1`.
+    pub color_space: String,
+    /// Each entry is `(format_name, supported)`.
+    pub duplication_formats: Vec<(&'static str, bool)>,
+}
 
 use crate::{
     HdrImage,
@@ -306,6 +336,102 @@ impl ImplMonitor {
 
     pub fn video_recorder(&self) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {
         ImplVideoRecorder::new(self.h_monitor)
+    }
+
+    pub fn dxgi_format_support(&self) -> Option<DxgiFormatSupport> {
+        const FORMATS: &[(&str, DXGI_FORMAT)] = &[
+            ("R16G16B16A16_FLOAT", DXGI_FORMAT_R16G16B16A16_FLOAT),
+            ("R10G10B10A2_UNORM", DXGI_FORMAT_R10G10B10A2_UNORM),
+            ("B8G8R8A8_UNORM", DXGI_FORMAT_B8G8R8A8_UNORM),
+            ("R8G8B8A8_UNORM", DXGI_FORMAT_R8G8B8A8_UNORM),
+        ];
+
+        unsafe {
+            let factory = CreateDXGIFactory1::<IDXGIFactory1>().ok()?;
+
+            let mut adapter_idx = 0u32;
+            loop {
+                let adapter: IDXGIAdapter1 = match factory.EnumAdapters1(adapter_idx) {
+                    Ok(a) => a,
+                    Err(e) if e.code() == DXGI_ERROR_NOT_FOUND => break,
+                    _ => break,
+                };
+                adapter_idx += 1;
+
+                let mut output_idx = 0u32;
+                loop {
+                    let output = match adapter.EnumOutputs(output_idx) {
+                        Ok(o) => o,
+                        Err(e) if e.code() == DXGI_ERROR_NOT_FOUND => break,
+                        _ => break,
+                    };
+                    output_idx += 1;
+
+                    let Ok(desc) = output.GetDesc() else { continue };
+                    if desc.Monitor != self.h_monitor {
+                        continue;
+                    }
+
+                    let (bits_per_color, max_luminance_nits, min_luminance_nits, color_space) =
+                        output
+                            .cast::<IDXGIOutput6>()
+                            .ok()
+                            .and_then(|o6| o6.GetDesc1().ok())
+                            .map(|d| {
+                                let cs = match d.ColorSpace.0 {
+                                    0  => "RGB_FULL_G22_NONE_P709 (sRGB)".to_string(),
+                                    1  => "RGB_FULL_G10_NONE_P709 (scRGB linear / Windows HDR)".to_string(),
+                                    4  => "RGB_FULL_G2084_NONE_P2020 (HDR10 PQ RGB full)".to_string(),
+                                    5  => "RGB_STUDIO_G2084_NONE_P2020 (HDR10 PQ RGB studio)".to_string(),
+                                    8  => "YCBCR_STUDIO_G2084_LEFT_P2020 (HDR10 YCbCr AMD HDMI)".to_string(),
+                                    11 => "YCBCR_STUDIO_G2084_TOPLEFT_P2020 (HDR10 YCbCr)".to_string(),
+                                    12 => "YCBCR_FULL_GHLG_TOPLEFT_P2020 (HLG YCbCr full)".to_string(),
+                                    13 => "YCBCR_STUDIO_GHLG_TOPLEFT_P2020 (HLG YCbCr studio)".to_string(),
+                                    v  => format!("unknown ({v})"),
+                                };
+                                (d.BitsPerColor, d.MaxLuminance, d.MinLuminance, cs)
+                            })
+                            .unwrap_or((0, 0.0, 0.0, "IDXGIOutput6 unavailable".to_string()));
+
+                    let mut d3d_device_opt = None;
+                    D3D11CreateDevice(
+                        Some(&adapter.cast().ok()?),
+                        D3D_DRIVER_TYPE_UNKNOWN,
+                        HMODULE::default(),
+                        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                        None,
+                        D3D11_SDK_VERSION,
+                        Some(&mut d3d_device_opt),
+                        None,
+                        None,
+                    )
+                    .ok()?;
+                    let d3d_device = d3d_device_opt?;
+                    let dxgi_device = d3d_device.cast::<IDXGIDevice>().ok()?;
+
+                    let duplication_formats = match output.cast::<IDXGIOutput5>() {
+                        Err(_) => FORMATS.iter().map(|(name, _)| (*name, false)).collect(),
+                        Ok(output5) => FORMATS
+                            .iter()
+                            .map(|(name, fmt)| {
+                                let supported =
+                                    output5.DuplicateOutput1(&dxgi_device, 0, &[*fmt]).is_ok();
+                                (*name, supported)
+                            })
+                            .collect(),
+                    };
+
+                    return Some(DxgiFormatSupport {
+                        bits_per_color,
+                        max_luminance_nits,
+                        min_luminance_nits,
+                        color_space: color_space.to_string(),
+                        duplication_formats,
+                    });
+                }
+            }
+            None
+        }
     }
 }
 

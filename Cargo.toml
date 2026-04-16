@@ -30,7 +30,7 @@ wgc = [
 ]
 
 [dependencies]
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "exr", "tiff"] }
 log = "0.4"
 scopeguard = "1.2"
 thiserror = "2.0"

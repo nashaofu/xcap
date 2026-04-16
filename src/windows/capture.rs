@@ -99,7 +99,9 @@ pub(super) fn capture_monitor_hdr(monitor: &ImplMonitor) -> XCapResult<HdrImage>
 
     match dxgi::capture_monitor(monitor.h_monitor, 0, 0, width, height)? {
         CaptureFrame::Hdr(hdr) => Ok(hdr),
-        CaptureFrame::Sdr(rgba) => Ok(HdrImage::from_rgba_image(&rgba)),
+        CaptureFrame::Sdr(_) => Err(XCapError::new(
+            "DXGI opened in BGRA8 mode despite HDR display; driver does not support R16G16B16A16_FLOAT duplication",
+        )),
     }
 }
 
