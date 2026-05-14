@@ -13,7 +13,7 @@ use windows::{
         Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW},
         System::{
             ProcessStatus::{GetModuleBaseNameW, GetModuleFileNameExW},
-            Threading::{GetCurrentProcessId, PROCESS_QUERY_LIMITED_INFORMATION},
+            Threading::PROCESS_QUERY_LIMITED_INFORMATION,
         },
         UI::WindowsAndMessaging::{
             EnumWindows, GWL_EXSTYLE, GetClassNameW, GetForegroundWindow, GetWindowLongPtrW,
@@ -100,20 +100,12 @@ fn is_valid_window(hwnd: HWND) -> bool {
             }
         }
 
-        // GetWindowText* are potentially blocking operations if `hwnd` is
+        // Note: GetWindowText* are potentially blocking operations if `hwnd` is
         // owned by the current process. The APIs will send messages to the window's
         // message loop, and if the message loop is waiting on this operation we will
-        // enter a deadlock.
+        // enter a deadlock. To avoid this, call Window::all() from a background thread
+        // rather than from the UI/message-loop thread.
         // https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowtexta#remarks
-        //
-        // To help consumers avoid this, there is a DesktopCaptureOption to ignore
-        // windows owned by the current process. Consumers should either ensure that
-        // the thread running their message loop never waits on this operation, or use
-        // the option to exclude these windows from the source list.
-        let lp_dw_process_id = get_window_pid(hwnd);
-        if lp_dw_process_id == GetCurrentProcessId() {
-            return false;
-        }
 
         // Skip Program Manager window.
         if class_name.eq("Progman") {
