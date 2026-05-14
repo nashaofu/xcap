@@ -92,6 +92,11 @@ fn is_valid_window(hwnd: HWND) -> bool {
 
         // 过滤掉具有 WS_EX_TOOLWINDOW 样式的窗口
         if gwl_ex_style.contains(WS_EX_TOOLWINDOW) {
+            // NOTE:
+            // GetWindowText* may block because it can send messages to the target
+            // window procedure. Keep this behavior aligned with MR intent (include
+            // current-process windows), and avoid calling this enumeration from a
+            // thread/message loop that is synchronously waiting on this operation.
             let title = get_window_title(hwnd).unwrap_or_default();
 
             // windows 任务栏可以捕获
