@@ -8,7 +8,12 @@
 //! All function calls are `unsafe`. Structs use `#[repr(C)]` to match the
 //! C ABI of the OHOS NDK.
 
-#![allow(non_snake_case, non_camel_case_types, dead_code, clippy::upper_case_acronyms)]
+#![allow(
+    non_snake_case,
+    non_camel_case_types,
+    dead_code,
+    clippy::upper_case_acronyms
+)]
 
 use std::ffi::c_char;
 use std::os::raw::c_void;
@@ -386,11 +391,8 @@ pub type OH_AVScreenCapture_OnStateChange = unsafe extern "C" fn(
 );
 
 /// Called when an error occurs in the capture session.
-pub type OH_AVScreenCapture_OnError = unsafe extern "C" fn(
-    capture: *mut OH_AVScreenCapture,
-    error_code: i32,
-    user_data: *mut c_void,
-);
+pub type OH_AVScreenCapture_OnError =
+    unsafe extern "C" fn(capture: *mut OH_AVScreenCapture, error_code: i32, user_data: *mut c_void);
 
 /// Called when an audio or video buffer is available.
 pub type OH_AVScreenCapture_OnBufferAvailable = unsafe extern "C" fn(
@@ -545,13 +547,22 @@ unsafe extern "C" {
     pub fn OH_PixelmapImageInfo_GetWidth(info: *mut OH_Pixelmap_ImageInfo, width: *mut u32) -> i32;
 
     /// Get the image height in pixels.
-    pub fn OH_PixelmapImageInfo_GetHeight(info: *mut OH_Pixelmap_ImageInfo, height: *mut u32) -> i32;
+    pub fn OH_PixelmapImageInfo_GetHeight(
+        info: *mut OH_Pixelmap_ImageInfo,
+        height: *mut u32,
+    ) -> i32;
 
     /// Get the row stride in bytes (may be greater than `width × bytes_per_pixel` due to alignment).
-    pub fn OH_PixelmapImageInfo_GetRowStride(info: *mut OH_Pixelmap_ImageInfo, row_stride: *mut u32) -> i32;
+    pub fn OH_PixelmapImageInfo_GetRowStride(
+        info: *mut OH_Pixelmap_ImageInfo,
+        row_stride: *mut u32,
+    ) -> i32;
 
     /// Get the pixel format code (e.g. `PIXEL_FORMAT_RGBA_8888 = 3`, `PIXEL_FORMAT_BGRA_8888 = 4`).
-    pub fn OH_PixelmapImageInfo_GetPixelFormat(info: *mut OH_Pixelmap_ImageInfo, pixel_format: *mut i32) -> i32;
+    pub fn OH_PixelmapImageInfo_GetPixelFormat(
+        info: *mut OH_Pixelmap_ImageInfo,
+        pixel_format: *mut i32,
+    ) -> i32;
 
     /// Free an `OH_Pixelmap_ImageInfo` obtained via `OH_PixelmapImageInfo_Create`.
     pub fn OH_PixelmapImageInfo_Release(info: *mut OH_Pixelmap_ImageInfo) -> i32;
@@ -594,11 +605,17 @@ unsafe extern "C" {
     pub fn OH_NativeBuffer_Unreference(buffer: *mut OH_NativeBuffer) -> i32;
 
     /// Fill `config` with the layout of `buffer` (width, height, stride, format).
-    pub fn OH_NativeBuffer_GetConfig(buffer: *mut OH_NativeBuffer, config: *mut OH_NativeBuffer_Config);
+    pub fn OH_NativeBuffer_GetConfig(
+        buffer: *mut OH_NativeBuffer,
+        config: *mut OH_NativeBuffer_Config,
+    );
 
     /// Map `buffer` into CPU-accessible virtual memory; sets `*vir_addr`.
     /// Returns 0 on success.
-    pub fn OH_NativeBuffer_Map(buffer: *mut OH_NativeBuffer, vir_addr: *mut *mut std::os::raw::c_void) -> i32;
+    pub fn OH_NativeBuffer_Map(
+        buffer: *mut OH_NativeBuffer,
+        vir_addr: *mut *mut std::os::raw::c_void,
+    ) -> i32;
 
     /// Unmap a previously mapped buffer.
     /// Returns 0 on success.
