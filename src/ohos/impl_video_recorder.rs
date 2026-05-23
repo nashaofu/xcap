@@ -16,7 +16,10 @@
 
 use std::os::raw::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc::{self, Receiver, SyncSender}};
+use std::sync::{
+    Arc,
+    mpsc::{self, Receiver, SyncSender},
+};
 
 use crate::{
     error::{XCapError, XCapResult},
@@ -24,6 +27,20 @@ use crate::{
 };
 
 use super::ffi;
+
+fn ensure_callback_registered(
+    err: ffi::OH_AVSCREEN_CAPTURE_ErrCode,
+    callback_name: &str,
+) -> XCapResult<()> {
+    if err == ffi::OH_AVSCREEN_CAPTURE_ErrCode::Ok {
+        return Ok(());
+    }
+
+    Err(XCapError::new(format!(
+        "{callback_name} registration failed: {:?}",
+        err
+    )))
+}
 
 // ── Shared state between ImplVideoRecorder and the FFI callback ───────────────
 
@@ -138,17 +155,22 @@ impl ImplVideoRecorder {
         let shared_raw = Arc::as_ptr(&shared) as *mut c_void;
 
         unsafe {
-            ffi::OH_AVScreenCapture_SetStateCallback(
-                capture,
-                on_state_change,
-                core::ptr::null_mut(),
-            );
-            ffi::OH_AVScreenCapture_SetErrorCallback(
-                capture,
-                on_error,
-                core::ptr::null_mut(),
-            );
-            ffi::OH_AVScreenCapture_SetDataCallback(capture, on_buffer_recorder, shared_raw);
+            ensure_callback_registered(
+                ffi::OH_AVScreenCapture_SetStateCallback(
+                    capture,
+                    on_state_change,
+                    core::ptr::null_mut(),
+                ),
+                "OH_AVScreenCapture_SetStateCallback",
+            )?;
+            ensure_callback_registered(
+                ffi::OH_AVScreenCapture_SetErrorCallback(capture, on_error, core::ptr::null_mut()),
+                "OH_AVScreenCapture_SetErrorCallback",
+            )?;
+            ensure_callback_registered(
+                ffi::OH_AVScreenCapture_SetDataCallback(capture, on_buffer_recorder, shared_raw),
+                "OH_AVScreenCapture_SetDataCallback",
+            )?;
         }
 
         Ok((ImplVideoRecorder { shared }, rx))
@@ -165,9 +187,7 @@ impl ImplVideoRecorder {
         self.shared.frame_running.store(true, Ordering::Release);
 
         if !self.shared.capture_active.load(Ordering::Acquire) {
-            let err = unsafe {
-                ffi::OH_AVScreenCapture_StartScreenCapture(self.shared.capture)
-            };
+            let err = unsafe { ffi::OH_AVScreenCapture_StartScreenCapture(self.shared.capture) };
             if err != ffi::OH_AVSCREEN_CAPTURE_ErrCode::Ok {
                 self.shared.frame_running.store(false, Ordering::Release);
                 return Err(XCapError::new(format!(
@@ -191,9 +211,7 @@ impl ImplVideoRecorder {
         self.shared.frame_running.store(false, Ordering::Release);
 
         if self.shared.capture_active.swap(false, Ordering::AcqRel) {
-            let err = unsafe {
-                ffi::OH_AVScreenCapture_StopScreenCapture(self.shared.capture)
-            };
+            let err = unsafe { ffi::OH_AVScreenCapture_StopScreenCapture(self.shared.capture) };
             if err != ffi::OH_AVSCREEN_CAPTURE_ErrCode::Ok {
                 return Err(XCapError::new(format!(
                     "OH_AVScreenCapture_StopScreenCapture failed: {:?}",

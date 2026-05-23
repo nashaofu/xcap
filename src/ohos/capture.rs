@@ -6,6 +6,14 @@ use crate::error::{XCapError, XCapResult};
 
 use super::ffi;
 
+fn ensure_image_info_query(result: i32, query_name: &str) -> XCapResult<()> {
+    if result == ffi::IMAGE_SUCCESS {
+        return Ok(());
+    }
+
+    Err(XCapError::new(format!("{query_name} failed: {result}",)))
+}
+
 /// Capture one RGBA frame from `display_id`.
 ///
 /// `width` and `height` are kept for API compatibility with other platforms.
@@ -22,7 +30,9 @@ pub fn capture_screen(display_id: u64, _width: u32, _height: u32) -> XCapResult<
         )));
     }
     if pixelmap.is_null() {
-        return Err(XCapError::new("CaptureScreenPixelmap returned null pixelmap"));
+        return Err(XCapError::new(
+            "CaptureScreenPixelmap returned null pixelmap",
+        ));
     }
 
     struct PixelmapGuard(*mut ffi::OH_PixelmapNative);
@@ -64,10 +74,22 @@ pub fn capture_screen(display_id: u64, _width: u32, _height: u32) -> XCapResult<
 
     let (mut width, mut height, mut row_stride, mut pixel_format) = (0u32, 0u32, 0u32, 0i32);
     unsafe {
-        ffi::OH_PixelmapImageInfo_GetWidth(info_ptr, &mut width);
-        ffi::OH_PixelmapImageInfo_GetHeight(info_ptr, &mut height);
-        ffi::OH_PixelmapImageInfo_GetRowStride(info_ptr, &mut row_stride);
-        ffi::OH_PixelmapImageInfo_GetPixelFormat(info_ptr, &mut pixel_format);
+        ensure_image_info_query(
+            ffi::OH_PixelmapImageInfo_GetWidth(info_ptr, &mut width),
+            "OH_PixelmapImageInfo_GetWidth",
+        )?;
+        ensure_image_info_query(
+            ffi::OH_PixelmapImageInfo_GetHeight(info_ptr, &mut height),
+            "OH_PixelmapImageInfo_GetHeight",
+        )?;
+        ensure_image_info_query(
+            ffi::OH_PixelmapImageInfo_GetRowStride(info_ptr, &mut row_stride),
+            "OH_PixelmapImageInfo_GetRowStride",
+        )?;
+        ensure_image_info_query(
+            ffi::OH_PixelmapImageInfo_GetPixelFormat(info_ptr, &mut pixel_format),
+            "OH_PixelmapImageInfo_GetPixelFormat",
+        )?;
     }
 
     if width == 0 || height == 0 || row_stride == 0 {
@@ -89,9 +111,8 @@ pub fn capture_screen(display_id: u64, _width: u32, _height: u32) -> XCapResult<
     let total_bytes = stride * height as usize;
     let mut buf = vec![0u8; total_bytes];
     let mut buf_size = total_bytes;
-    let read_rc = unsafe {
-        ffi::OH_PixelmapNative_ReadPixels(pixelmap, buf.as_mut_ptr(), &mut buf_size)
-    };
+    let read_rc =
+        unsafe { ffi::OH_PixelmapNative_ReadPixels(pixelmap, buf.as_mut_ptr(), &mut buf_size) };
     if read_rc != ffi::IMAGE_SUCCESS {
         return Err(XCapError::new(format!(
             "OH_PixelmapNative_ReadPixels failed: {}",

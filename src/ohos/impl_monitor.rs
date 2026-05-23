@@ -64,9 +64,7 @@ impl ImplMonitor {
         let primary_id = unsafe { query_primary_id() };
 
         let mut all_displays: *mut ffi::NativeDisplayManager_DisplaysInfo = core::ptr::null_mut();
-        let err = unsafe {
-            ffi::OH_NativeDisplayManager_CreateAllDisplays(&mut all_displays)
-        };
+        let err = unsafe { ffi::OH_NativeDisplayManager_CreateAllDisplays(&mut all_displays) };
 
         if err != ffi::NativeDisplayManager_ErrorCode::Ok || all_displays.is_null() {
             return Err(XCapError::new(format!(
@@ -92,18 +90,19 @@ impl ImplMonitor {
 
                 let mut x: i32 = 0;
                 let mut y: i32 = 0;
-                ffi::OH_NativeDisplayManager_GetDisplayPosition(
-                    info.id as u64,
-                    &mut x,
-                    &mut y,
-                );
+                let position_err =
+                    ffi::OH_NativeDisplayManager_GetDisplayPosition(info.id as u64, &mut x, &mut y);
+                if position_err != ffi::NativeDisplayManager_ErrorCode::Ok {
+                    log::warn!(
+                        "OH_NativeDisplayManager_GetDisplayPosition failed for display {}: {:?}",
+                        info.id,
+                        position_err
+                    );
+                    x = 0;
+                    y = 0;
+                }
 
-                monitors.push(ImplMonitor::from_raw(
-                    info,
-                    info.id == primary_id,
-                    x,
-                    y,
-                ));
+                monitors.push(ImplMonitor::from_raw(info, info.id == primary_id, x, y));
             }
 
             ffi::OH_NativeDisplayManager_DestroyAllDisplays(all_displays);
@@ -182,7 +181,11 @@ impl ImplMonitor {
     // ── Capture ───────────────────────────────────────────────────────────────
 
     pub fn capture_image(&self) -> XCapResult<RgbaImage> {
-        capture_screen(self.display_id as u64, self.width as u32, self.height as u32)
+        capture_screen(
+            self.display_id as u64,
+            self.width as u32,
+            self.height as u32,
+        )
     }
 
     /// Capture a sub-region of this monitor.
@@ -201,7 +204,11 @@ impl ImplMonitor {
     }
 
     pub fn video_recorder(&self) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {
-        ImplVideoRecorder::new(self.display_id as u64, self.width as u32, self.height as u32)
+        ImplVideoRecorder::new(
+            self.display_id as u64,
+            self.width as u32,
+            self.height as u32,
+        )
     }
 }
 

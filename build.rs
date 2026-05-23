@@ -1,4 +1,6 @@
 fn main() {
+    use std::path::PathBuf;
+
     let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
 
     if target_env != "ohos" {
@@ -31,16 +33,22 @@ fn main() {
     //   libnative_media_core.so        — OH_AVBuffer helpers
     //   libnative_buffer.so            — OH_NativeBuffer helpers
 
-    let ndk_home = std::env::var("OHOS_NDK_HOME").unwrap_or_else(|_| {
-        // Fall back to OHOS_SDK_HOME/<platform>/native if OHOS_NDK_HOME is not set.
-        // OHOS_SDK_HOME is sometimes set to the SDK root (e.g. ~/.ohos/sdk/default).
-        let platform = if cfg!(target_os = "windows") { "windows" } else { "linux" };
-        std::env::var("OHOS_SDK_HOME")
-            .map(|s| format!("{s}/{platform}/native"))
-            .unwrap_or_default()
-    });
+    let ndk_home = std::env::var_os("OHOS_NDK_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            // Fall back to OHOS_SDK_HOME/<platform>/native if OHOS_NDK_HOME is not set.
+            // OHOS_SDK_HOME is sometimes set to the SDK root (e.g. ~/.ohos/sdk/default).
+            let platform = if cfg!(target_os = "windows") {
+                "windows"
+            } else {
+                "linux"
+            };
+            std::env::var_os("OHOS_SDK_HOME")
+                .map(|sdk_home| PathBuf::from(sdk_home).join(platform).join("native"))
+                .unwrap_or_default()
+        });
 
-    if ndk_home.is_empty() {
+    if ndk_home.as_os_str().is_empty() {
         // Emit a warning but don't hard-fail; the user may be using a custom
         // linker configuration or cross-compilation wrapper that already
         // provides the necessary search paths.
@@ -61,19 +69,25 @@ fn main() {
         "arm" => "arm",
         "x86_64" => "x86_64",
         other => {
-            println!("cargo:warning=Unrecognised OHOS target arch '{other}'. Skipping NDK link-search.");
+            println!(
+                "cargo:warning=Unrecognised OHOS target arch '{other}'. Skipping NDK link-search."
+            );
             return;
         }
     };
 
     // OHOS_NDK_HOME already points to the `native/` directory, so the sysroot
     // library path is:  $OHOS_NDK_HOME/sysroot/usr/lib/<arch>-linux-ohos/
-    let lib_dir = format!("{ndk_home}/sysroot/usr/lib/{ohos_arch}-linux-ohos");
-    println!("cargo:rustc-link-search=native={lib_dir}");
+    let lib_dir = ndk_home
+        .join("sysroot")
+        .join("usr")
+        .join("lib")
+        .join(format!("{ohos_arch}-linux-ohos"));
+    println!("cargo:rustc-link-search=native={}", lib_dir.display());
 
     // Some NDK versions also place stub libraries directly under sysroot/usr/lib/.
-    let sysroot_lib = format!("{ndk_home}/sysroot/usr/lib");
-    println!("cargo:rustc-link-search=native={sysroot_lib}");
+    let sysroot_lib = ndk_home.join("sysroot").join("usr").join("lib");
+    println!("cargo:rustc-link-search=native={}", sysroot_lib.display());
 
     // Re-run this script whenever the NDK home variable changes.
     println!("cargo:rerun-if-env-changed=OHOS_NDK_HOME");
