@@ -1,5 +1,5 @@
 use crate::{
-    XCapError, XCapResult,
+    HdrImage, XCapError, XCapResult,
     platform::{impl_monitor::ImplMonitor, impl_window::ImplWindow},
 };
 
@@ -53,29 +53,134 @@ pub(super) fn capture_monitor(
     width: Option<u32>,
     height: Option<u32>,
 ) -> XCapResult<RgbaImage> {
+    use super::dxgi::{self, CaptureFrame};
     use super::gdi;
 
-    let monitor_x = monitor.x()?;
-    let monitor_y = monitor.y()?;
     let monitor_width = monitor.width()?;
     let monitor_height = monitor.height()?;
 
-    if let (Some(x), Some(y), Some(width), Some(height)) = (x, y, width, height) {
-        check_capture_region(x, y, width, height, monitor_width, monitor_height)?;
+    let (cap_x, cap_y, cap_w, cap_h) =
+        if let (Some(x), Some(y), Some(width), Some(height)) = (x, y, width, height) {
+            check_capture_region(x, y, width, height, monitor_width, monitor_height)?;
+            (x, y, width, height)
+        } else {
+            (0, 0, monitor_width, monitor_height)
+        };
 
-        // Calculate absolute coordinates
-        let abs_x = monitor_x + x as i32;
-        let abs_y = monitor_y + y as i32;
-
-        gdi::capture_monitor(abs_x, abs_y, width as i32, height as i32)
-    } else {
-        gdi::capture_monitor(
-            monitor_x,
-            monitor_y,
-            monitor_width as i32,
-            monitor_height as i32,
-        )
+    // Try DXGI Desktop Duplication first (supports HDR). Fall back to GDI on
+    // E_ACCESSDENIED (secure desktop / UAC) or other driver-level failures.
+    match dxgi::capture_monitor(monitor.h_monitor, cap_x, cap_y, cap_w, cap_h) {
+        Ok(CaptureFrame::Sdr(img)) => Ok(img),
+        Ok(CaptureFrame::Hdr(hdr)) => {
+            // Tone-map HDR → SDR so existing callers get a usable image.
+            let peak_nits = monitor.dxgi_format_support()
+                .map(|i| i.max_luminance_nits)
+                .unwrap_or(400.0);
+            Ok(image::DynamicImage::from(hdr.to_rgb_image_tonemapped(peak_nits)).to_rgba8())
+        }
+        Err(err) => {
+            log::debug!("DXGI capture failed ({err}), falling back to GDI");
+            let monitor_x = monitor.x()?;
+            let monitor_y = monitor.y()?;
+            let abs_x = monitor_x + cap_x as i32;
+            let abs_y = monitor_y + cap_y as i32;
+            gdi::capture_monitor(abs_x, abs_y, cap_w as i32, cap_h as i32)
+        }
     }
+}
+
+/// Capture the full monitor and return raw HDR pixel data when the monitor is in
+/// HDR mode, or an `HdrImage` built from SDR data otherwise.
+///
+/// Only available without the `wgc` feature (requires DXGI Desktop Duplication).
+#[cfg(not(feature = "wgc"))]
+pub(super) fn capture_monitor_hdr(monitor: &ImplMonitor) -> XCapResult<HdrImage> {
+    use super::dxgi::{self, CaptureFrame};
+
+    let width = monitor.width()?;
+    let height = monitor.height()?;
+
+    log::debug!("capture_monitor_hdr: requesting {width}x{height} from DXGI");
+    match dxgi::capture_monitor(monitor.h_monitor, 0, 0, width, height)? {
+
+        CaptureFrame::Hdr(hdr) => {
+
+            log::debug!("capture_monitor_hdr: got Hdr {}x{}", hdr.width, hdr.height);
+            Ok(hdr)
+
+        }
+
+        CaptureFrame::Sdr(img) => {
+
+            log::debug!(
+                "capture_monitor_hdr: got Sdr {}x{} — HDR capture unavailable",
+                img.width(),
+                img.height()
+            );
+            Err(XCapError::new(
+                "DXGI opened in BGRA8 mode despite HDR display; driver does not support R16G16B16A16_FLOAT duplication",
+            ))
+        }
+    }
+}
+
+/// Capture a region of the monitor as raw HDR pixel data via DXGI Desktop Duplication.
+///
+/// Coordinates are in physical pixels relative to the top-left of the monitor.
+/// Only available without the `wgc` feature.
+#[cfg(not(feature = "wgc"))]
+pub(super) fn capture_region_hdr(
+    monitor: &ImplMonitor,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+) -> XCapResult<HdrImage> {
+    use super::dxgi::{self, CaptureFrame};
+
+    let monitor_width = monitor.width()?;
+    let monitor_height = monitor.height()?;
+    check_capture_region(x, y, width, height, monitor_width, monitor_height)?;
+
+    log::debug!("capture_region_hdr: requesting ({x},{y}) {width}x{height} from DXGI");
+    match dxgi::capture_monitor(monitor.h_monitor, x, y, width, height)? {
+        CaptureFrame::Hdr(hdr) => {
+            log::debug!("capture_region_hdr: got Hdr {}x{}", hdr.width, hdr.height);
+            Ok(hdr)
+        }
+        CaptureFrame::Sdr(_) => Err(XCapError::new(
+            "DXGI opened in BGRA8 mode despite HDR display; driver does not support R16G16B16A16_FLOAT duplication",
+        )),
+    }
+}
+
+/// Whether the monitor is currently in HDR mode (DXGI Desktop Duplication path).
+#[cfg(not(feature = "wgc"))]
+pub(super) fn monitor_is_hdr(monitor: &ImplMonitor) -> bool {
+    super::dxgi::is_hdr_monitor(monitor.h_monitor)
+}
+
+/// HDR capture is not supported on the WGC path (WGC only captures in BGRA8).
+#[cfg(feature = "wgc")]
+pub(super) fn capture_monitor_hdr(_monitor: &ImplMonitor) -> XCapResult<HdrImage> {
+    Err(XCapError::NotSupported)
+}
+
+#[cfg(feature = "wgc")]
+pub(super) fn capture_region_hdr(
+    _monitor: &ImplMonitor,
+    _x: u32,
+    _y: u32,
+    _width: u32,
+    _height: u32,
+) -> XCapResult<HdrImage> {
+    Err(XCapError::NotSupported)
+}
+
+/// HDR detection is not available on the WGC path.
+#[cfg(feature = "wgc")]
+pub(super) fn monitor_is_hdr(_monitor: &ImplMonitor) -> bool {
+    false
 }
 
 #[cfg(feature = "wgc")]

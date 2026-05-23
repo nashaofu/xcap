@@ -12,6 +12,7 @@ use objc2_core_graphics::{
 use objc2_foundation::{NSNumber, NSString};
 
 use crate::{
+    HdrImage,
     error::{XCapError, XCapResult},
     video_recorder::Frame,
 };
@@ -239,6 +240,50 @@ impl ImplMonitor {
         };
 
         capture(cg_rect, CGWindowListOption::OptionAll, 0)
+    }
+
+    pub fn capture_image_hdr(&self) -> XCapResult<HdrImage> {
+        Err(XCapError::NotSupported)
+    }
+
+    pub fn capture_region_hdr(&self, x: u32, y: u32, width: u32, height: u32) -> XCapResult<HdrImage> {
+        let img = self.capture_region(x, y, width, height)?;
+        Ok(HdrImage::from_srgb_rgba8(&img))
+    }
+
+    /// Returns `true` if the display supports HDR (EDR value > 1.0).
+    ///
+    /// Uses `NSScreen.maximumPotentialEDRValue`, available on macOS 12+.
+    pub fn is_hdr(&self) -> bool {
+        self.edr_value() > 1.0
+    }
+
+    /// Peak luminance in nits, approximated from `NSScreen.maximumPotentialEDRValue`.
+    ///
+    /// The EDR multiplier is relative to the SDR reference white (203 nits for PQ).
+    /// Returns 0.0 if the display is SDR or the value cannot be determined.
+    pub fn peak_nits(&self) -> f64 {
+        let edr = self.edr_value();
+        if edr > 1.0 { edr * 203.0 } else { 0.0 }
+    }
+
+    fn edr_value(&self) -> f64 {
+        let screens = NSScreen::screens(unsafe { MainThreadMarker::new_unchecked() });
+        for screen in &screens {
+            let device_description = screen.deviceDescription();
+            let Some(screen_number) = device_description
+                .objectForKey(&NSString::from_str("NSScreenNumber"))
+            else {
+                continue;
+            };
+            let Ok(num) = screen_number.downcast::<NSNumber>() else {
+                continue;
+            };
+            if num.unsignedIntValue() == self.cg_direct_display_id {
+                return screen.maximumPotentialExtendedDynamicRangeColorComponentValue() as f64;
+            }
+        }
+        1.0
     }
 
     pub fn video_recorder(&self) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {

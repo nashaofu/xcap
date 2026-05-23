@@ -4,28 +4,56 @@ use image::RgbaImage;
 use scopeguard::guard;
 use widestring::U16CString;
 use windows::{
+    Win32::Foundation::HMODULE,
     Win32::{
         Devices::Display::DISPLAYCONFIG_OUTPUT_TECHNOLOGY_INTERNAL,
         Foundation::{GetLastError, LPARAM, POINT, RECT, TRUE},
-        Graphics::Gdi::{
-            CreateDCW, DESKTOPHORZRES, DEVMODEW, DMDO_90, DMDO_180, DMDO_270, DMDO_DEFAULT,
-            DeleteDC, ENUM_CURRENT_SETTINGS, EnumDisplayMonitors, EnumDisplaySettingsW,
-            GetDeviceCaps, GetMonitorInfoW, HDC, HMONITOR, HORZRES, MONITOR_DEFAULTTONULL,
-            MONITORINFO, MONITORINFOEXW, MonitorFromPoint,
+        Graphics::{
+            Direct3D::D3D_DRIVER_TYPE_UNKNOWN,
+            Direct3D11::{D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_SDK_VERSION, D3D11CreateDevice},
+            Dxgi::Common::{
+                DXGI_FORMAT, DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT,
+            },
+            Dxgi::{
+                CreateDXGIFactory1, DXGI_ERROR_NOT_FOUND, IDXGIAdapter1, IDXGIDevice,
+                IDXGIFactory1, IDXGIOutput1, IDXGIOutput5, IDXGIOutput6,
+            },
+            Gdi::{
+                CreateDCW, DESKTOPHORZRES, DEVMODEW, DMDO_90, DMDO_180, DMDO_270, DMDO_DEFAULT,
+                DeleteDC, ENUM_CURRENT_SETTINGS, EnumDisplayMonitors, EnumDisplaySettingsW,
+                GetDeviceCaps, GetMonitorInfoW, HDC, HMONITOR, HORZRES, MONITOR_DEFAULTTONULL,
+                MONITORINFO, MONITORINFOEXW, MonitorFromPoint,
+            },
         },
         System::{LibraryLoader::GetProcAddress, Threading::GetCurrentProcess},
         UI::WindowsAndMessaging::MONITORINFOF_PRIMARY,
     },
-    core::{BOOL, HRESULT, PCWSTR, s, w},
+    core::{BOOL, HRESULT, Interface, PCWSTR, s, w},
 };
 
+/// Information about DXGI Desktop Duplication format support for a monitor.
+#[derive(Debug, Clone)]
+pub struct DxgiFormatSupport {
+    /// Panel bit depth reported by the driver (8, 10, 12).
+    pub bits_per_color: u32,
+    /// Peak luminance in nits.
+    pub max_luminance_nits: f32,
+    /// Black-level luminance in nits.
+    pub min_luminance_nits: f32,
+    /// Color space name as reported by `IDXGIOutput6::GetDesc1`.
+    pub color_space: String,
+    /// Each entry is `(format_name, supported)`.
+    pub duplication_formats: Vec<(&'static str, bool)>,
+}
+
 use crate::{
+    HdrImage,
     error::{XCapError, XCapResult},
     video_recorder::Frame,
 };
 
 use super::{
-    capture::capture_monitor,
+    capture::{capture_monitor, capture_monitor_hdr, capture_region_hdr, monitor_is_hdr},
     impl_video_recorder::ImplVideoRecorder,
     utils::{get_monitor_config, get_process_is_dpi_awareness, load_library},
 };
@@ -287,8 +315,153 @@ impl ImplMonitor {
         Ok(image)
     }
 
+    /// Capture the full monitor and return raw HDR pixel data.
+    ///
+    /// On HDR monitors (without the `wgc` feature), this returns scRGB linear f16 pixels.
+    /// On SDR monitors, values are in [0, 1] expressed as f16.
+    /// Returns [`crate::XCapError::NotSupported`] when built with the `wgc` feature.
+    pub fn capture_image_hdr(&self) -> XCapResult<HdrImage> {
+        capture_monitor_hdr(self)
+    }
+
+    /// Capture a region of the monitor as raw HDR pixel data.
+    ///
+    /// Coordinates are in physical pixels relative to the top-left of the monitor.
+    /// Returns [`crate::XCapError::NotSupported`] when built with the `wgc` feature.
+    pub fn capture_region_hdr(&self, x: u32, y: u32, width: u32, height: u32) -> XCapResult<HdrImage> {
+        capture_region_hdr(self, x, y, width, height)
+    }
+
+    /// Returns `true` if the monitor is currently in HDR mode.
+    ///
+    /// Always returns `false` when built with the `wgc` feature.
+    pub fn is_hdr(&self) -> bool {
+        monitor_is_hdr(self)
+    }
+
+    pub fn peak_nits(&self) -> f64 {
+        self.dxgi_format_support()
+            .map(|f| f.max_luminance_nits as f64)
+            .unwrap_or(0.0)
+    }
+
     pub fn video_recorder(&self) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {
         ImplVideoRecorder::new(self.h_monitor)
+    }
+
+    pub fn dxgi_format_support(&self) -> Option<DxgiFormatSupport> {
+        const HDR_FORMATS: &[(&str, DXGI_FORMAT)] = &[
+            ("R16G16B16A16_FLOAT", DXGI_FORMAT_R16G16B16A16_FLOAT),
+            ("R10G10B10A2_UNORM", DXGI_FORMAT_R10G10B10A2_UNORM),
+        ];
+
+        unsafe {
+            let factory = CreateDXGIFactory1::<IDXGIFactory1>().ok()?;
+
+            let mut adapter_idx = 0u32;
+            loop {
+                let adapter: IDXGIAdapter1 = match factory.EnumAdapters1(adapter_idx) {
+                    Ok(a) => a,
+                    Err(e) if e.code() == DXGI_ERROR_NOT_FOUND => break,
+                    _ => break,
+                };
+                adapter_idx += 1;
+
+                let mut output_idx = 0u32;
+                loop {
+                    let output = match adapter.EnumOutputs(output_idx) {
+                        Ok(o) => o,
+                        Err(e) if e.code() == DXGI_ERROR_NOT_FOUND => break,
+                        _ => break,
+                    };
+                    output_idx += 1;
+
+                    let Ok(desc) = output.GetDesc() else { continue };
+                    if desc.Monitor != self.h_monitor {
+                        continue;
+                    }
+
+                    let (bits_per_color, max_luminance_nits, min_luminance_nits, color_space) =
+                        output
+                            .cast::<IDXGIOutput6>()
+                            .ok()
+                            .and_then(|o6| o6.GetDesc1().ok())
+                            .map(|d| {
+                                let cs =
+                                    match d.ColorSpace.0 {
+                                        0  => "RGB_FULL_G22_NONE_P709 (sRGB)".to_string(),
+                                        1  => "RGB_FULL_G10_NONE_P709 (scRGB linear / Windows HDR)".to_string(),
+                                        2  => "RGB_STUDIO_G22_NONE_P709".to_string(),
+                                        3  => "RGB_STUDIO_G22_NONE_P2020".to_string(),
+                                        4  => "RESERVED".to_string(),
+                                        5  => "YCBCR_FULL_G22_NONE_P709_X601".to_string(),
+                                        6  => "YCBCR_STUDIO_G22_LEFT_P601".to_string(),
+                                        7  => "YCBCR_FULL_G22_LEFT_P601".to_string(),
+                                        8  => "YCBCR_STUDIO_G22_LEFT_P709".to_string(),
+                                        9  => "YCBCR_FULL_G22_LEFT_P709".to_string(),
+                                        10 => "YCBCR_STUDIO_G22_LEFT_P2020".to_string(),
+                                        11 => "YCBCR_FULL_G22_LEFT_P2020".to_string(),
+                                        12 => "RGB_FULL_G2084_NONE_P2020 (HDR10 PQ RGB full)".to_string(),
+                                        13 => "YCBCR_STUDIO_G2084_LEFT_P2020 (HDR10 YCbCr AMD HDMI)".to_string(),
+                                        14 => "RGB_STUDIO_G2084_NONE_P2020 (HDR10 PQ RGB studio)".to_string(),
+                                        15 => "YCBCR_STUDIO_GHLG_TOPLEFT_P2020 (HLG YCbCr studio)".to_string(),
+                                        16 => "YCBCR_FULL_GHLG_TOPLEFT_P2020 (HLG YCbCr full)".to_string(),
+                                        17 => "RGB_STUDIO_G22_TOPLEFT_P2020".to_string(),
+                                        18 => "YCBCR_STUDIO_G2084_TOPLEFT_P2020 (HDR10 YCbCr topleft)".to_string(),
+                                        v  => format!("DXGI_COLOR_SPACE_TYPE({})", v),
+                                    };
+                                (d.BitsPerColor, d.MaxLuminance, d.MinLuminance, cs)
+                            })
+                            .unwrap_or((0, 0.0, 0.0, "IDXGIOutput6 unavailable".to_string()));
+
+                    let mut d3d_device_opt = None;
+                    D3D11CreateDevice(
+                        Some(&adapter.cast().ok()?),
+                        D3D_DRIVER_TYPE_UNKNOWN,
+                        HMODULE::default(),
+                        D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                        None,
+                        D3D11_SDK_VERSION,
+                        Some(&mut d3d_device_opt),
+                        None,
+                        None,
+                    )
+                    .ok()?;
+                    let d3d_device = d3d_device_opt?;
+                    let dxgi_device = d3d_device.cast::<IDXGIDevice>().ok()?;
+
+                    // Probe HDR formats via DuplicateOutput1, SDR via DuplicateOutput.
+                    let sdr_ok = output
+                        .cast::<IDXGIOutput1>()
+                        .ok()
+                        .and_then(|o1: IDXGIOutput1| o1.DuplicateOutput(&dxgi_device).ok())
+                        .is_some();
+                    let hdr_format_results: Vec<(&str, bool)> = match output.cast::<IDXGIOutput5>() {
+                        Err(_) => HDR_FORMATS.iter().map(|(name, _)| (*name, false)).collect(),
+                        Ok(output5) => HDR_FORMATS
+                            .iter()
+                            .map(|(name, fmt)| {
+                                let supported = output5
+                                    .DuplicateOutput1(&dxgi_device, 0, &[*fmt])
+                                    .is_ok();
+                                (*name, supported)
+                            })
+                            .collect(),
+                    };
+                    let mut duplication_formats = hdr_format_results;
+                    duplication_formats.push(("DuplicateOutput (SDR)", sdr_ok));
+
+                    return Some(DxgiFormatSupport {
+                        bits_per_color,
+                        max_luminance_nits,
+                        min_luminance_nits,
+                        color_space: color_space.to_string(),
+                        duplication_formats,
+                    });
+                }
+            }
+            None
+        }
     }
 }
 
