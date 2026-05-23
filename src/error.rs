@@ -13,40 +13,40 @@ pub enum XCapError {
     #[error("Invalid capture region: {0}")]
     InvalidCaptureRegion(String),
 
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
     XcbError(#[from] xcb::Error),
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
     XcbConnError(#[from] xcb::ConnError),
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
     ImageImageError(#[from] image::ImageError),
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
     StdStringFromUtf8Error(#[from] std::string::FromUtf8Error),
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
     ZbusError(#[from] zbus::Error),
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
     StdIOError(#[from] std::io::Error),
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
     StdMPSCRecvError(#[from] std::sync::mpsc::RecvError),
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
     StdTimeSystemTimeError(#[from] std::time::SystemTimeError),
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
     LibwayshotError(#[from] libwayshot_xcap::Error),
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
     UrlParseError(#[from] url::ParseError),
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
     ZbusZvariantError(#[from] zbus::zvariant::Error),
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
     PipewireError(#[from] pipewire::Error),
 

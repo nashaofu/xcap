@@ -11,12 +11,16 @@ mod platform;
 #[path = "windows/mod.rs"]
 mod platform;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 #[path = "linux/mod.rs"]
 mod platform;
 
 #[cfg(target_os = "android")]
 #[path = "android/mod.rs"]
+mod platform;
+
+#[cfg(target_env = "ohos")]
+#[path = "ohos/mod.rs"]
 mod platform;
 
 pub use image;

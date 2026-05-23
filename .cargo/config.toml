@@ -1,2 +1,18 @@
 [target.x86_64-unknown-linux-musl]
 rustflags = ["-C", "target-feature=-crt-static"]
+
+# ── OHOS cross-compilation ────────────────────────────────────────────────────
+# Set OHOS_NDK_HOME to the NDK's native/ directory before running cargo, e.g.:
+#   export OHOS_NDK_HOME=/path/to/ohos-sdk/openharmony/native
+#
+# The wrapper scripts call $OHOS_NDK_HOME/llvm/bin/clang with the correct
+# --target and --sysroot flags so the host ld is never used.
+
+[target.aarch64-unknown-linux-ohos]
+linker = "scripts/ohos-clang-aarch64.sh"
+
+[target.armv7-unknown-linux-ohos]
+linker = "scripts/ohos-clang-arm.sh"
+
+[target.x86_64-unknown-linux-ohos]
+linker = "scripts/ohos-clang-x86_64.sh"
