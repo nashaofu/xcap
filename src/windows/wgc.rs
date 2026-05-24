@@ -170,7 +170,7 @@ pub(super) fn wgc_capture(
     }
 
     session.StartCapture()?;
-    let frame = receiver.recv_timeout(Duration::from_millis(200))?;
+    let frame = receiver.recv_timeout(Duration::from_millis(3000))?;
 
     Ok(frame)
 }
