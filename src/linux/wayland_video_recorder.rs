@@ -292,8 +292,11 @@ impl WaylandVideoRecorder {
                                     VideoFormat::RGB => {
                                         let mut buf =
                                             vec![0; (size.width * size.height * 4) as usize];
-                                        for (src, dst) in
-                                            frame_data.chunks_exact(3).zip(buf.chunks_exact_mut(4))
+                                        for (src, dst) in frame_data
+                                            .as_chunks::<3>()
+                                            .0
+                                            .iter()
+                                            .zip(buf.as_chunks_mut::<4>().0)
                                         {
                                             dst[0] = src[0];
                                             dst[1] = src[1];
@@ -307,7 +310,7 @@ impl WaylandVideoRecorder {
                                     VideoFormat::RGBx => frame_data.to_vec(),
                                     VideoFormat::BGRx => {
                                         let mut buf = frame_data.to_vec();
-                                        for src in buf.chunks_exact_mut(4) {
+                                        for src in buf.as_chunks_mut::<4>().0 {
                                             src.swap(0, 2);
                                         }
 
