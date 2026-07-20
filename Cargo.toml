@@ -72,7 +72,7 @@ zbus = "5.17"
 rand = "0.10"
 serde = "1.0"
 pipewire = "0.10"
-libwayshot-xcap = { git = "https://github.com/nashaofu/wayshot", branch = "main", package = "libwayshot-xcap"}
+libwayshot-xcap = { git = "https://github.com/nashaofu/wayshot", branch = "main", package = "libwayshot-xcap", version = "0.3.3" }
 percent-encoding = "2.3"
 xcb = { version = "1.7", features = ["randr"] }
 
