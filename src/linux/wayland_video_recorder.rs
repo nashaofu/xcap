@@ -200,6 +200,7 @@ impl WaylandVideoRecorder {
         let session = screen_cast.create_session()?;
         screen_cast.select_sources(&session)?;
         let response = screen_cast.start(&session)?;
+        let pipewire_fd = screen_cast.open_pipe_wire_remote(&session)?;
 
         // 获取流节点ID
         let stream_id = response
@@ -216,7 +217,7 @@ impl WaylandVideoRecorder {
             active_sender,
         };
 
-        recorder.pipewire_capturer(stream_id, active_receiver)?;
+        recorder.pipewire_capturer(stream_id, pipewire_fd.into(), active_receiver)?;
 
         Ok((recorder, receiver))
     }
@@ -224,6 +225,7 @@ impl WaylandVideoRecorder {
     pub fn pipewire_capturer(
         &self,
         stream_id: u32,
+        pipewire_fd: std::os::fd::OwnedFd,
         active_receiver: channel::Receiver<bool>,
     ) -> XCapResult<()> {
         let sender = self.sender.clone();
@@ -234,7 +236,7 @@ impl WaylandVideoRecorder {
 
             let main_loop = MainLoopRc::new(None)?;
             let context = ContextRc::new(&main_loop, None)?;
-            let core = context.connect_rc(None)?;
+            let core = context.connect_fd_rc(pipewire_fd, None)?;
 
             let user_data = ListenerUserData {
                 format: Default::default(),
