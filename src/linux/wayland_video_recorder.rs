@@ -9,7 +9,7 @@ use std::{
     thread,
 };
 
-use ashpd::desktop::screencast::{Screencast, SelectSourcesOptions};
+use ashpd::desktop::screencast::{Screencast, SelectSourcesOptions, SourceType};
 
 use pipewire::{
     channel,
@@ -74,7 +74,11 @@ impl WaylandVideoRecorder {
                 .map_err(|e| XCapError::new(e.to_string()))?;
 
             proxy
-                .select_sources(&session, SelectSourcesOptions::default())
+                .select_sources(
+                    &session,
+                    SelectSourcesOptions::default()
+                        .set_sources(SourceType::Monitor | SourceType::Window),
+                )
                 .await
                 .map_err(|e| XCapError::new(e.to_string()))?;
 
