@@ -27,9 +27,6 @@ pub enum XCapError {
     StdStringFromUtf8Error(#[from] std::string::FromUtf8Error),
     #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
-    ZbusError(#[from] zbus::Error),
-    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
-    #[error(transparent)]
     StdIOError(#[from] std::io::Error),
     #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
@@ -43,9 +40,6 @@ pub enum XCapError {
     #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
     UrlParseError(#[from] url::ParseError),
-    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
-    #[error(transparent)]
-    ZbusZvariantError(#[from] zbus::zvariant::Error),
     #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
     PipewireError(#[from] pipewire::Error),
