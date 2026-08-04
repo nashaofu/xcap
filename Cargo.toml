@@ -68,7 +68,7 @@ windows = { version = "0.62", features = [
 
 [target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
 url = "2.5"
-ashpd = { version = "0.13", default-features = false, features = ["async-io", "pipewire", "screencast", "screenshot"] }
+ashpd = { git = "https://github.com/bilelmoussaoui/ashpd.git", branch = "main", default-features = false, features = ["async-io", "pipewire", "screencast", "screenshot"] }
 pollster = "1.0"
 rand = "0.10"
 serde = "1.0"
@@ -85,9 +85,6 @@ fs_extra = "1.3"
 # Remove once rust-xcb publishes a release with quick-xml >= 0.41.
 [patch.crates-io]
 xcb = { git = "https://github.com/rust-x-bindings/rust-xcb.git", branch = "main" }
-
-# Remove once ashpd publishes support for pipewire >= 0.10
-ashpd = { git = "https://github.com/bilelmoussaoui/ashpd.git", branch = "main" }
 
 [target.'cfg(target_os="windows")'.dev-dependencies]
 windows = { version = "0.62", features = ["Win32_UI_HiDpi"] }
