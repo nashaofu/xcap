@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     fmt,
     io::Cursor,
     sync::{
@@ -9,6 +8,8 @@ use std::{
     },
     thread,
 };
+
+use ashpd::desktop::screencast::{Screencast, SelectSourcesOptions, SourceType};
 
 use pipewire::{
     channel,
@@ -28,142 +29,9 @@ use pipewire::{
     },
     stream::{StreamFlags, StreamRc},
 };
-use zbus::{
-    blocking::Proxy,
-    zvariant::{DeserializeDict, OwnedFd, OwnedObjectPath, Type, Value},
-};
 
+use super::impl_monitor::ImplMonitor;
 use crate::{XCapError, XCapResult, video_recorder::Frame};
-
-use super::{
-    impl_monitor::ImplMonitor,
-    utils::{get_zbus_connection, get_zbus_portal_request, wait_zbus_response},
-};
-
-#[allow(dead_code)]
-#[derive(DeserializeDict, Type, Debug)]
-#[zvariant(signature = "dict")]
-pub struct ScreenCastCreateSessionResponse {
-    session_handle: String,
-}
-
-#[allow(dead_code)]
-#[derive(DeserializeDict, Type, Debug)]
-#[zvariant(signature = "dict")]
-pub struct ScreenCastStartStream {
-    pub id: Option<String>,
-    pub position: Option<(i32, i32)>,
-    pub size: Option<(i32, i32)>,
-    pub source_type: Option<u32>,
-    pub mapping_id: Option<String>,
-}
-
-#[derive(DeserializeDict, Type, Debug)]
-#[zvariant(signature = "dict")]
-pub struct ScreenCastStartResponse {
-    pub streams: Option<Vec<(u32, ScreenCastStartStream)>>,
-    #[allow(dead_code)]
-    pub restore_token: Option<String>,
-}
-
-/// https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.ScreenCast.html
-pub struct ScreenCast<'a> {
-    proxy: Proxy<'a>,
-}
-
-impl ScreenCast<'_> {
-    pub fn new() -> XCapResult<Self> {
-        let conn = get_zbus_connection()?;
-        let proxy = Proxy::new(
-            &conn,
-            "org.freedesktop.portal.Desktop",
-            "/org/freedesktop/portal/desktop",
-            "org.freedesktop.portal.ScreenCast",
-        )?;
-
-        Ok(ScreenCast { proxy })
-    }
-
-    pub fn create_session(&self) -> XCapResult<OwnedObjectPath> {
-        let conn = self.proxy.connection();
-
-        let mut options = HashMap::new();
-
-        let handle_token = rand::random::<u32>().to_string();
-        let portal_request = get_zbus_portal_request(conn, &handle_token)?;
-
-        options.insert("handle_token", Value::from(&handle_token));
-
-        let session_handle_token = rand::random::<u32>().to_string();
-        options.insert("session_handle_token", Value::from(&session_handle_token));
-
-        let receiver = wait_zbus_response::<ScreenCastCreateSessionResponse>(&portal_request);
-
-        self.proxy.call_method("CreateSession", &(options))?;
-
-        let response = receiver.recv()??;
-
-        let unique_name = conn
-            .unique_name()
-            .ok_or(XCapError::new("Failed to get unique name"))?;
-        let unique_identifier = unique_name.trim_start_matches(':').replace('.', "_");
-
-        let session = OwnedObjectPath::try_from(format!(
-            "/org/freedesktop/portal/desktop/session/{unique_identifier}/{session_handle_token}"
-        ))?;
-
-        if session.as_str() != response.session_handle {
-            return Err(XCapError::new("Session handle mismatch"));
-        }
-
-        Ok(session)
-    }
-
-    pub fn select_sources(&self, session: &OwnedObjectPath) -> XCapResult<()> {
-        let conn = self.proxy.connection();
-
-        let mut options = HashMap::new();
-
-        let handle_token = rand::random::<u32>().to_string();
-        let portal_request = get_zbus_portal_request(conn, &handle_token)?;
-
-        options.insert("handle_token", Value::from(handle_token));
-        options.insert("types", Value::from(1_u32));
-        options.insert("multiple", Value::from(false));
-
-        self.proxy
-            .call_method("SelectSources", &(session, options))?;
-
-        portal_request.receive_signal("Response")?;
-
-        Ok(())
-    }
-
-    pub fn start(&self, session: &OwnedObjectPath) -> XCapResult<ScreenCastStartResponse> {
-        let conn = self.proxy.connection();
-
-        let mut options = HashMap::new();
-
-        let handle_token = rand::random::<u32>().to_string();
-        let portal_request = get_zbus_portal_request(conn, &handle_token)?;
-
-        options.insert("handle_token", Value::from(&handle_token));
-
-        let receiver = wait_zbus_response(&portal_request);
-
-        self.proxy.call_method("Start", &(session, "", options))?;
-
-        receiver.recv()?
-    }
-
-    #[allow(dead_code)]
-    pub fn open_pipe_wire_remote(&self, session: &OwnedObjectPath) -> XCapResult<OwnedFd> {
-        let options: HashMap<&str, Value<'_>> = HashMap::new();
-        let fd: OwnedFd = self.proxy.call("OpenPipeWireRemote", &(session, options))?;
-
-        Ok(fd)
-    }
-}
 
 #[derive(Clone)]
 pub struct WaylandVideoRecorder {
@@ -186,7 +54,6 @@ impl fmt::Debug for WaylandVideoRecorder {
     }
 }
 
-#[derive(Clone)]
 struct ListenerUserData {
     pub format: VideoInfoRaw,
 }
@@ -196,18 +63,42 @@ impl WaylandVideoRecorder {
         let (sender, receiver) = mpsc::channel();
         let (active_sender, active_receiver) = channel::channel();
 
-        let screen_cast = ScreenCast::new()?;
-        let session = screen_cast.create_session()?;
-        screen_cast.select_sources(&session)?;
-        let response = screen_cast.start(&session)?;
+        let stream = pollster::block_on(async {
+            let proxy = Screencast::new()
+                .await
+                .map_err(|e| XCapError::new(e.to_string()))?;
 
-        // 获取流节点ID
-        let stream_id = response
-            .streams
-            .ok_or(XCapError::new("Stream ID not found"))?
-            .first()
-            .ok_or(XCapError::new("Stream ID not found"))?
-            .0;
+            let session = proxy
+                .create_session(Default::default())
+                .await
+                .map_err(|e| XCapError::new(e.to_string()))?;
+
+            proxy
+                .select_sources(
+                    &session,
+                    SelectSourcesOptions::default()
+                        .set_sources(SourceType::Monitor | SourceType::Window),
+                )
+                .await
+                .map_err(|e| XCapError::new(e.to_string()))?;
+
+            let response = proxy
+                .start(&session, None, Default::default())
+                .await
+                .map_err(|e| XCapError::new(e.to_string()))?
+                .response()
+                .map_err(|e| XCapError::new(e.to_string()))?;
+
+            let stream = response
+                .streams()
+                .first()
+                .ok_or_else(|| XCapError::new("no stream found / selected"))?
+                .to_owned();
+
+            Ok::<ashpd::desktop::screencast::Stream, XCapError>(stream)
+        })?;
+
+        let stream_id = stream.pipe_wire_node_id();
 
         let recorder = Self {
             monitor,

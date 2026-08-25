@@ -68,7 +68,8 @@ windows = { version = "0.62", features = [
 
 [target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
 url = "2.5"
-zbus = "5.17"
+ashpd = { git = "https://github.com/bilelmoussaoui/ashpd.git", branch = "main", default-features = false, features = ["async-io", "pipewire", "screencast", "screenshot"] }
+pollster = "1.0"
 rand = "0.10"
 serde = "1.0"
 pipewire = "0.10"

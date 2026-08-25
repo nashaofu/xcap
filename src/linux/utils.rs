@@ -1,21 +1,15 @@
 use std::{
     env::{self, var_os},
     path::{Path, PathBuf},
-    sync::mpsc::Receiver,
 };
 
 use image::{RgbaImage, open};
 use percent_encoding::percent_decode_str;
-use serde::Deserialize;
 use url::Url;
 use xcb::{
     Connection as XcbConnection, Xid,
     randr::{GetMonitors, MonitorInfoBuf, Output},
     x::{Atom, InternAtom, ScreenBuf},
-};
-use zbus::{
-    blocking::{Connection as ZBusConnection, Proxy},
-    zvariant::Type,
 };
 
 use crate::{XCapError, error::XCapResult};
@@ -26,10 +20,6 @@ pub fn get_xcb_connection_and_index() -> XCapResult<(XcbConnection, i32)> {
         .or_else(|_| XcbConnection::connect(None))
         .map_err(|e| XCapError::new(e.to_string()))?;
     Ok((conn, idx))
-}
-
-pub fn get_zbus_connection() -> XCapResult<ZBusConnection> {
-    ZBusConnection::session().map_err(XCapError::ZbusError)
 }
 
 pub fn wayland_detect() -> bool {
@@ -130,68 +120,4 @@ pub(super) fn safe_uri_to_path(uri: &str) -> XCapResult<PathBuf> {
     let path = PathBuf::from(&decoded_path);
 
     Ok(path)
-}
-
-pub(super) fn get_zbus_portal_request(
-    conn: &ZBusConnection,
-    handle_token: &str,
-) -> XCapResult<Proxy<'static>> {
-    let unique_identifier = conn
-        .unique_name()
-        .ok_or(XCapError::new("Get DBus unique name failed"))?
-        .trim_start_matches(':')
-        .replace('.', "_");
-
-    let path =
-        format!("/org/freedesktop/portal/desktop/request/{unique_identifier}/{handle_token}");
-
-    let request = Proxy::new(
-        conn,
-        "org.freedesktop.portal.Desktop",
-        path,
-        "org.freedesktop.portal.Request",
-    )?;
-
-    Ok(request)
-}
-
-pub(super) fn wait_zbus_response<T>(request: &Proxy<'static>) -> Receiver<XCapResult<T>>
-where
-    T: for<'de> Deserialize<'de> + Type + Send + Sync + 'static,
-{
-    let (sender, receiver) = std::sync::mpsc::channel();
-
-    let request = request.clone();
-    std::thread::spawn(move || {
-        let response = wait_zbus_response_inner::<T>(&request);
-        sender
-            .send(response)
-            .map_err(|e| XCapError::new(format!("Failed to send zbus response: {e}")))
-    });
-
-    receiver
-}
-
-pub(super) fn wait_zbus_response_inner<'a, T>(request: &Proxy<'a>) -> XCapResult<T>
-where
-    T: for<'de> Deserialize<'de> + Type,
-{
-    let mut response = request.receive_signal("Response")?;
-
-    let message = response
-        .next()
-        .ok_or(XCapError::new("Failed get response"))?;
-
-    let body = message.body();
-    let (code, body): (u32, T) = body.deserialize()?;
-
-    if code == 0 {
-        return Ok(body);
-    }
-
-    if code == 1 {
-        return Err(XCapError::new("Z-Bus canceled"));
-    }
-
-    Err(XCapError::new(format!("Response code is {code}")))
 }

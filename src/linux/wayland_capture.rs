@@ -1,32 +1,33 @@
-use std::{collections::HashMap, env::temp_dir, fmt::Debug, fs, sync::Mutex};
+use std::{env::temp_dir, fs, sync::Mutex};
 
+use ashpd::{
+    desktop::screenshot::Screenshot,
+    zbus::{self, Connection},
+};
 use image::RgbaImage;
 use scopeguard::defer;
-use zbus::{
-    blocking::{Connection, Proxy},
-    zvariant::{DeserializeDict, Type, Value},
-};
 
+use super::utils::png_to_rgba_image;
 use crate::{
-    error::XCapResult,
-    platform::utils::{get_zbus_portal_request, safe_uri_to_path, wait_zbus_response},
+    error::{XCapError, XCapResult},
+    platform::utils::safe_uri_to_path,
 };
 
-use super::utils::{get_zbus_connection, png_to_rgba_image};
-
-fn org_gnome_shell_screenshot(
+async fn org_gnome_shell_screenshot(
     conn: &Connection,
     x: i32,
     y: i32,
     width: i32,
     height: i32,
 ) -> XCapResult<RgbaImage> {
-    let proxy = Proxy::new(
+    let proxy = zbus::Proxy::new(
         conn,
         "org.gnome.Shell.Screenshot",
         "/org/gnome/Shell/Screenshot",
         "org.gnome.Shell.Screenshot",
-    )?;
+    )
+    .await
+    .map_err(|e| XCapError::new(e.to_string()))?;
 
     let filename = rand::random::<u32>();
 
@@ -42,48 +43,33 @@ fn org_gnome_shell_screenshot(
     let filename = path.to_string_lossy().to_string();
 
     // https://github.com/vinzenz/gnome-shell/blob/master/data/org.gnome.Shell.Screenshot.xml
-    proxy.call_method("ScreenshotArea", &(x, y, width, height, false, &filename))?;
+    proxy
+        .call_method("ScreenshotArea", &(x, y, width, height, false, &filename))
+        .await
+        .map_err(|e| XCapError::new(e.to_string()))?;
 
     let rgba_image = png_to_rgba_image(&filename, 0, 0, width, height)?;
 
     Ok(rgba_image)
 }
 
-#[derive(DeserializeDict, Type, Debug)]
-#[zvariant(signature = "dict")]
-pub struct ScreenshotResponse {
-    uri: String,
-}
-
 /// https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Screenshot.html
-fn org_freedesktop_portal_screenshot(
-    conn: &Connection,
+async fn org_freedesktop_portal_screenshot(
     x: i32,
     y: i32,
     width: i32,
     height: i32,
 ) -> XCapResult<RgbaImage> {
-    let proxy = Proxy::new(
-        conn,
-        "org.freedesktop.portal.Desktop",
-        "/org/freedesktop/portal/desktop",
-        "org.freedesktop.portal.Screenshot",
-    )?;
+    let screenshot_response = Screenshot::request()
+        .interactive(false)
+        .send()
+        .await
+        .map_err(|e| XCapError::new(e.to_string()))?
+        .response()
+        .map_err(|e| XCapError::new(e.to_string()))?;
 
-    let handle_token = rand::random::<u32>().to_string();
-    let portal_request = get_zbus_portal_request(conn, &handle_token)?;
+    let filename = safe_uri_to_path(screenshot_response.uri().as_str())?;
 
-    let mut options: HashMap<&str, Value> = HashMap::new();
-    options.insert("handle_token", Value::from(&handle_token));
-    options.insert("modal", Value::from(true));
-    options.insert("interactive", Value::from(false));
-
-    let receiver = wait_zbus_response(&portal_request);
-
-    // https://github.com/flatpak/xdg-desktop-portal/blob/main/data/org.freedesktop.portal.Screenshot.xml
-    proxy.call_method("Screenshot", &("", options))?;
-    let screenshot_response: ScreenshotResponse = receiver.recv()??;
-    let filename = safe_uri_to_path(&screenshot_response.uri)?;
     defer!({
         let _ = fs::remove_file(&filename);
     });
@@ -131,17 +117,22 @@ fn wlroots_screenshot(
 pub fn wayland_capture(x: i32, y: i32, width: i32, height: i32) -> XCapResult<RgbaImage> {
     let lock = DBUS_LOCK.lock();
 
-    let conn = get_zbus_connection()?;
-    let res = org_gnome_shell_screenshot(&conn, x, y, width, height)
-        .or_else(|e| {
-            log::debug!("org_gnome_shell_screenshot failed {e}");
-
-            org_freedesktop_portal_screenshot(&conn, x, y, width, height)
-        })
-        .or_else(|e| {
-            log::debug!("org_freedesktop_portal_screenshot failed {e}");
-            wlroots_screenshot(x, y, width, height)
-        });
+    let res = pollster::block_on(async {
+        let conn = zbus::Connection::session()
+            .await
+            .map_err(|e| XCapError::new(e.to_string()))?;
+        match org_gnome_shell_screenshot(&conn, x, y, width, height).await {
+            Ok(img) => Ok(img),
+            Err(e) => {
+                log::debug!("org_gnome_shell_screenshot failed {e}");
+                org_freedesktop_portal_screenshot(x, y, width, height).await
+            }
+        }
+    })
+    .or_else(|e| {
+        log::debug!("org_freedesktop_portal_screenshot failed {e}");
+        wlroots_screenshot(x, y, width, height)
+    });
 
     drop(lock);
 
