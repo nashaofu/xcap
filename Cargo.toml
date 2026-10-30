@@ -70,7 +70,7 @@ windows = { version = "0.62", features = [
 url = "2.5"
 ashpd = { version = "0.13.13", default-features = false, features = ["async-io", "screencast", "screenshot"] }
 pollster = "1.0"
-rand = "0.10.3"
+rand = "0.10"
 serde = "1.0"
 pipewire = "0.10"
 libwayshot-xcap = "0.3.3"
