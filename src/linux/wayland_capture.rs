@@ -7,7 +7,7 @@ use ashpd::{
 use image::RgbaImage;
 use scopeguard::defer;
 
-use super::utils::png_to_rgba_image;
+use super::wayland_output::desktop_bounds;
 use crate::{
     error::{XCapError, XCapResult},
     platform::utils::safe_uri_to_path,
@@ -43,14 +43,16 @@ async fn org_gnome_shell_screenshot(
     let filename = path.to_string_lossy().to_string();
 
     // https://github.com/vinzenz/gnome-shell/blob/master/data/org.gnome.Shell.Screenshot.xml
-    proxy
+    let reply = proxy
         .call_method("ScreenshotArea", &(x, y, width, height, false, &filename))
         .await
         .map_err(|e| XCapError::new(e.to_string()))?;
-
-    let rgba_image = png_to_rgba_image(&filename, 0, 0, width, height)?;
-
-    Ok(rgba_image)
+    let (success, _): (bool, String) = reply.body().deserialize().map_err(XCapError::new)?;
+    if !success {
+        return Err(XCapError::new("GNOME ScreenshotArea failed"));
+    }
+    // ScreenshotArea already cropped the region, at the output's pixel scale.
+    Ok(image::open(&filename)?.to_rgba8())
 }
 
 /// https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Screenshot.html
@@ -74,48 +76,60 @@ async fn org_freedesktop_portal_screenshot(
         let _ = fs::remove_file(&filename);
     });
 
-    let rgba_image = png_to_rgba_image(&filename, x, y, width, height)?;
+    let image = image::open(&filename)?;
+    let (left, top, right, bottom) = desktop_bounds()?;
+    let scale_x = f64::from(image.width()) / (right - left) as f64;
+    let scale_y = f64::from(image.height()) / (bottom - top) as f64;
+    // The portal must return a uniformly scaled desktop; a selected output is ambiguous.
+    if (scale_x - scale_y).abs() > scale_x.max(scale_y) * 0.001
+        || i64::from(x) < left
+        || i64::from(y) < top
+        || i64::from(x) + i64::from(width) > right
+        || i64::from(y) + i64::from(height) > bottom
+    {
+        return Err(XCapError::new(
+            "Portal screenshot does not match the desktop layout",
+        ));
+    }
+    let crop_x = ((i64::from(x) - left) as f64 * scale_x).round() as u32;
+    let crop_y = ((i64::from(y) - top) as f64 * scale_y).round() as u32;
+    let crop_right = ((i64::from(x) + i64::from(width) - left) as f64 * scale_x).round() as u32;
+    let crop_bottom = ((i64::from(y) + i64::from(height) - top) as f64 * scale_y).round() as u32;
+    Ok(image
+        .crop_imm(crop_x, crop_y, crop_right - crop_x, crop_bottom - crop_y)
+        .to_rgba8())
+}
 
-    Ok(rgba_image)
+fn wlroots_screenshot(x: i32, y: i32, width: i32, height: i32) -> XCapResult<RgbaImage> {
+    use libwayshot_xcap::{
+        WayshotConnection,
+        region::{LogicalRegion, Position, Region, Size},
+    };
+    let connection = WayshotConnection::new()?;
+    let image = connection.screenshot(
+        LogicalRegion {
+            inner: Region {
+                position: Position { x, y },
+                size: Size {
+                    width: width as u32,
+                    height: height as u32,
+                },
+            },
+        },
+        false,
+    )?;
+    Ok(image.to_rgba8())
 }
 
 static DBUS_LOCK: Mutex<()> = Mutex::new(());
 
-fn wlroots_screenshot(
-    x_coordinate: i32,
-    y_coordinate: i32,
-    width: i32,
-    height: i32,
-) -> XCapResult<RgbaImage> {
-    let wayshot_connection = libwayshot_xcap::WayshotConnection::new()?;
-    let capture_region = libwayshot_xcap::region::LogicalRegion {
-        inner: libwayshot_xcap::region::Region {
-            position: libwayshot_xcap::region::Position {
-                x: x_coordinate,
-                y: y_coordinate,
-            },
-            size: libwayshot_xcap::region::Size {
-                width: width as u32,
-                height: height as u32,
-            },
-        },
-    };
-    let rgba_image = wayshot_connection.screenshot(capture_region, false)?;
-
-    // libwayshot returns image 0.24 RgbaImage
-    // we need image 0.25 RgbaImage
-    let image = image::RgbaImage::from_raw(
-        rgba_image.width(),
-        rgba_image.height(),
-        rgba_image.to_rgba8().into_vec(),
-    )
-    .expect("Conversion of PNG -> Raw -> PNG does not fail");
-
-    Ok(image)
-}
-
 pub fn wayland_capture(x: i32, y: i32, width: i32, height: i32) -> XCapResult<RgbaImage> {
-    let lock = DBUS_LOCK.lock();
+    if width <= 0 || height <= 0 {
+        return Err(XCapError::InvalidCaptureRegion(
+            "Capture dimensions must be positive".into(),
+        ));
+    }
+    let lock = DBUS_LOCK.lock()?;
 
     let res = pollster::block_on(async {
         let conn = zbus::Connection::session()
@@ -125,12 +139,18 @@ pub fn wayland_capture(x: i32, y: i32, width: i32, height: i32) -> XCapResult<Rg
             Ok(img) => Ok(img),
             Err(e) => {
                 log::debug!("org_gnome_shell_screenshot failed {e}");
-                org_freedesktop_portal_screenshot(x, y, width, height).await
+                match org_freedesktop_portal_screenshot(x, y, width, height).await {
+                    Ok(image) => Ok(image),
+                    Err(e) => {
+                        log::debug!("org_freedesktop_portal_screenshot failed {e}");
+                        Err(e)
+                    }
+                }
             }
         }
     })
-    .or_else(|e| {
-        log::debug!("org_freedesktop_portal_screenshot failed {e}");
+    .or_else(|err| {
+        log::debug!("D-Bus screenshot failed: {err}");
         wlroots_screenshot(x, y, width, height)
     });
 

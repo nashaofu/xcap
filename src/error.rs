@@ -15,6 +15,10 @@ pub enum XCapError {
 
     #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
+    LibwayshotError(#[from] libwayshot_xcap::Error),
+
+    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
+    #[error(transparent)]
     XcbError(#[from] xcb::Error),
     #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
@@ -34,9 +38,6 @@ pub enum XCapError {
     #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
     StdTimeSystemTimeError(#[from] std::time::SystemTimeError),
-    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
-    #[error(transparent)]
-    LibwayshotError(#[from] libwayshot_xcap::Error),
     #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
     UrlParseError(#[from] url::ParseError),

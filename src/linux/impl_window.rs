@@ -83,14 +83,14 @@ fn get_position_and_size(window: &Window) -> XCapResult<(i32, i32, u32, u32)> {
     let translate_coordinates_cookie = conn.send_request(&TranslateCoordinates {
         dst_window: get_geometry_reply.root(),
         src_window: *window,
-        src_x: get_geometry_reply.x(),
-        src_y: get_geometry_reply.y(),
+        src_x: 0,
+        src_y: 0,
     });
     let translate_coordinates_reply = conn.wait_for_reply(translate_coordinates_cookie)?;
 
     Ok((
-        (translate_coordinates_reply.dst_x() - get_geometry_reply.x()) as i32,
-        (translate_coordinates_reply.dst_y() - get_geometry_reply.y()) as i32,
+        i32::from(translate_coordinates_reply.dst_x()),
+        i32::from(translate_coordinates_reply.dst_y()),
         get_geometry_reply.width() as u32,
         get_geometry_reply.height() as u32,
     ))
@@ -241,15 +241,17 @@ impl ImplWindow {
         let mut max_area = 0;
         // window与哪一个monitor交集最大就属于那个monitor
         for impl_monitor in impl_monitors {
-            let monitor_x = impl_monitor.x()?;
-            let monitor_y = impl_monitor.y()?;
-            let monitor_width = impl_monitor.width()?;
-            let monitor_height = impl_monitor.height()?;
+            // Both rectangles must use XRandR/X11 coordinates, before public DPI scaling.
+            let info = super::utils::get_monitor_info_buf(impl_monitor.output)?;
+            let monitor_x = i64::from(info.x());
+            let monitor_y = i64::from(info.y());
+            let monitor_width = i64::from(info.width());
+            let monitor_height = i64::from(info.height());
 
-            let left = x.max(monitor_x);
-            let top = y.max(monitor_x);
-            let right = (x + width as i32).min(monitor_x + monitor_width as i32);
-            let bottom = (y + height as i32).min(monitor_y + monitor_height as i32);
+            let left = i64::from(x).max(monitor_x);
+            let top = i64::from(y).max(monitor_y);
+            let right = (i64::from(x) + i64::from(width)).min(monitor_x + monitor_width);
+            let bottom = (i64::from(y) + i64::from(height)).min(monitor_y + monitor_height);
 
             // 与0比较，如果小于0则表示两个矩形无交集
             let width = (right - left).max(0);
@@ -310,9 +312,9 @@ impl ImplWindow {
     }
 
     pub fn is_maximized(&self) -> XCapResult<bool> {
-        let (is_minimized, _) = get_window_state(&self.window)?;
+        let (_, is_maximized) = get_window_state(&self.window)?;
 
-        Ok(is_minimized)
+        Ok(is_maximized)
     }
 
     pub fn is_focused(&self) -> XCapResult<bool> {

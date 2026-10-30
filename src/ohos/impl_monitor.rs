@@ -192,7 +192,13 @@ impl ImplMonitor {
     ///
     /// `x`, `y` are relative to the monitor's top-left corner.
     pub fn capture_region(&self, x: u32, y: u32, width: u32, height: u32) -> XCapResult<RgbaImage> {
-        if x + width > self.width as u32 || y + height > self.height as u32 {
+        if width == 0
+            || height == 0
+            || x.checked_add(width)
+                .is_none_or(|right| right > self.width as u32)
+            || y.checked_add(height)
+                .is_none_or(|bottom| bottom > self.height as u32)
+        {
             return Err(XCapError::InvalidCaptureRegion(format!(
                 "Region ({x}, {y}, {width}, {height}) exceeds monitor bounds ({}x{})",
                 self.width, self.height
@@ -220,11 +226,13 @@ impl ImplMonitor {
 /// Calls into the OHOS NDK; must only be called on a valid runtime.
 unsafe fn query_primary_id() -> u32 {
     let mut primary_info: *mut ffi::NativeDisplayManager_DisplayInfo = core::ptr::null_mut();
-    let err = ffi::OH_NativeDisplayManager_CreatePrimaryDisplay(&mut primary_info);
+    // SAFETY: The caller guarantees a valid OHOS runtime; the output pointer is writable.
+    let err = unsafe { ffi::OH_NativeDisplayManager_CreatePrimaryDisplay(&mut primary_info) };
 
     if err == ffi::NativeDisplayManager_ErrorCode::Ok && !primary_info.is_null() {
-        let id = (*primary_info).id;
-        ffi::OH_NativeDisplayManager_DestroyDisplay(primary_info);
+        // SAFETY: A successful call returned a non-null display owned by this function.
+        let id = unsafe { (*primary_info).id };
+        unsafe { ffi::OH_NativeDisplayManager_DestroyDisplay(primary_info) };
         id
     } else {
         0

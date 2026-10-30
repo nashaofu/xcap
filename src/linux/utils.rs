@@ -1,9 +1,8 @@
 use std::{
     env::{self, var_os},
-    path::{Path, PathBuf},
+    path::PathBuf,
 };
 
-use image::{RgbaImage, open};
 use percent_encoding::percent_decode_str;
 use url::Url;
 use xcb::{
@@ -87,21 +86,6 @@ pub fn get_atom(name: &str) -> XCapResult<Atom> {
     }
 
     Ok(atom)
-}
-
-pub(super) fn png_to_rgba_image<T>(
-    filename: T,
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-) -> XCapResult<RgbaImage>
-where
-    T: AsRef<Path>,
-{
-    let mut dynamic_image = open(filename)?;
-    dynamic_image = dynamic_image.crop(x as u32, y as u32, width as u32, height as u32);
-    Ok(dynamic_image.to_rgba8())
 }
 
 /// uri 转换为 path

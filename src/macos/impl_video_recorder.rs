@@ -1,7 +1,7 @@
 use std::{
     slice,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, SyncSender, sync_channel},
     },
@@ -29,7 +29,7 @@ use objc2_core_video::{
     kCVPixelFormatType_422YpCbCr8_yuvs,
 };
 use objc2_foundation::{NSDictionary, NSNumber, NSObject, NSObjectProtocol, NSString};
-use scopeguard::defer;
+use scopeguard::guard;
 
 use crate::{XCapError, XCapResult, video_recorder::Frame};
 
@@ -295,10 +295,13 @@ impl DataOutputSampleBufferDelegateVars {
                 None => return,
             };
 
-            CVPixelBufferLockBaseAddress(&pixel_buffer, CVPixelBufferLockFlags::ReadOnly);
-            defer! {
+            if CVPixelBufferLockBaseAddress(&pixel_buffer, CVPixelBufferLockFlags::ReadOnly) != 0 {
+                log::error!("CVPixelBufferLockBaseAddress failed");
+                return;
+            }
+            let pixel_lock = guard((), |_| {
                 CVPixelBufferUnlockBaseAddress(&pixel_buffer, CVPixelBufferLockFlags::ReadOnly);
-            };
+            });
 
             let format_type = CVPixelBufferGetPixelFormatType(&pixel_buffer);
 
@@ -312,6 +315,18 @@ impl DataOutputSampleBufferDelegateVars {
 
             let width = CVPixelBufferGetWidth(&pixel_buffer);
             let height = CVPixelBufferGetHeight(&pixel_buffer);
+            if width == 0
+                || height == 0
+                || width > u32::MAX as usize
+                || height > u32::MAX as usize
+                || width
+                    .checked_mul(height)
+                    .and_then(|pixels| pixels.checked_mul(4))
+                    .is_none_or(|len| len > isize::MAX as usize)
+            {
+                log::error!("Invalid pixel buffer dimensions");
+                return;
+            }
             let buffer = if format_type == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
                 || format_type == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
             {
@@ -330,6 +345,21 @@ impl DataOutputSampleBufferDelegateVars {
                 let uv_bytes_per_row = CVPixelBufferGetBytesPerRowOfPlane(&pixel_buffer, 1);
                 let y_base_address = CVPixelBufferGetBaseAddressOfPlane(&pixel_buffer, 0);
                 let uv_base_address = CVPixelBufferGetBaseAddressOfPlane(&pixel_buffer, 1);
+                if y_width != width
+                    || y_height != height
+                    || uv_height < height.div_ceil(2)
+                    || y_bytes_per_row < width
+                    || uv_bytes_per_row < width.div_ceil(2) * 2
+                    || y_bytes_per_row
+                        .checked_mul(y_height)
+                        .is_none_or(|len| len > isize::MAX as usize)
+                    || uv_bytes_per_row
+                        .checked_mul(uv_height)
+                        .is_none_or(|len| len > isize::MAX as usize)
+                {
+                    log::error!("Invalid pixel buffer plane layout");
+                    return;
+                }
 
                 if y_base_address.is_null() || uv_base_address.is_null() {
                     log::error!(
@@ -359,6 +389,23 @@ impl DataOutputSampleBufferDelegateVars {
                 let bytes_per_row = CVPixelBufferGetBytesPerRow(&pixel_buffer);
                 let base_address = CVPixelBufferGetBaseAddress(&pixel_buffer);
                 let size = CVPixelBufferGetDataSize(&pixel_buffer);
+                let bytes_per_pixel = if format_type == kCVPixelFormatType_422YpCbCr8
+                    || format_type == kCVPixelFormatType_422YpCbCr8_yuvs
+                {
+                    2
+                } else {
+                    4
+                };
+                if size > isize::MAX as usize
+                    || bytes_per_row < width * bytes_per_pixel
+                    || (bytes_per_pixel == 2 && width % 2 != 0)
+                    || bytes_per_row
+                        .checked_mul(height)
+                        .is_none_or(|len| len > size)
+                {
+                    log::error!("Invalid packed pixel buffer layout");
+                    return;
+                }
 
                 if base_address.is_null() {
                     log::error!(
@@ -385,12 +432,13 @@ impl DataOutputSampleBufferDelegateVars {
                 }
             };
 
+            drop(pixel_lock);
             // After stop, there may still be callbacks in the queue converting pixels; check again before sending.
             if !self.running.load(Ordering::Acquire) {
                 return;
             }
 
-            let _ = self.tx.send(Frame {
+            let _ = self.tx.try_send(Frame {
                 width: width as u32,
                 height: height as u32,
                 raw: buffer,
@@ -430,11 +478,24 @@ impl DataOutputSampleBufferDelegate {
 
 #[derive(Debug, Clone)]
 pub struct ImplVideoRecorder {
+    shared: Arc<RecorderSession>,
+}
+
+#[derive(Debug)]
+struct RecorderSession {
     session: Retained<AVCaptureSession>,
     _input: Retained<AVCaptureScreenInput>,
     _output: Retained<AVCaptureVideoDataOutput>,
     _delegate: Retained<DataOutputSampleBufferDelegate>,
     running: Arc<AtomicBool>,
+    control: Mutex<()>,
+}
+
+impl Drop for RecorderSession {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Release);
+        unsafe { self.session.stopRunning() };
+    }
 }
 
 impl ImplVideoRecorder {
@@ -455,6 +516,8 @@ impl ImplVideoRecorder {
 
             if session.canAddInput(&input) {
                 session.addInput(&input);
+            } else {
+                return Err(XCapError::new("Capture session rejected screen input"));
             }
 
             let output = AVCaptureVideoDataOutput::new();
@@ -501,9 +564,11 @@ impl ImplVideoRecorder {
 
             if session.canAddOutput(&output) {
                 session.addOutput(&output)
+            } else {
+                return Err(XCapError::new("Capture session rejected video output"));
             }
 
-            let (tx, rx) = sync_channel(0);
+            let (tx, rx) = sync_channel(2);
             let running = Arc::new(AtomicBool::new(false));
 
             let delegate = DataOutputSampleBufferDelegate::new(tx.clone(), running.clone());
@@ -522,11 +587,14 @@ impl ImplVideoRecorder {
 
             Ok((
                 ImplVideoRecorder {
-                    session,
-                    _output: output,
-                    _input: input,
-                    _delegate: delegate,
-                    running,
+                    shared: Arc::new(RecorderSession {
+                        session,
+                        _output: output,
+                        _input: input,
+                        _delegate: delegate,
+                        running,
+                        control: Mutex::new(()),
+                    }),
                 },
                 rx,
             ))
@@ -534,14 +602,24 @@ impl ImplVideoRecorder {
     }
 
     pub fn start(&self) -> XCapResult<()> {
-        self.running.store(true, Ordering::Release);
-        unsafe { self.session.startRunning() };
+        let _control = self.shared.control.lock()?;
+        self.shared.running.store(true, Ordering::Release);
+        unsafe {
+            self.shared.session.startRunning();
+            if !self.shared.session.isRunning() {
+                self.shared.running.store(false, Ordering::Release);
+                return Err(XCapError::new(
+                    "Capture session failed to start; check screen recording permission",
+                ));
+            }
+        }
         Ok(())
     }
 
     pub fn stop(&self) -> XCapResult<()> {
-        self.running.store(false, Ordering::Release);
-        unsafe { self.session.stopRunning() };
+        let _control = self.shared.control.lock()?;
+        self.shared.running.store(false, Ordering::Release);
+        unsafe { self.shared.session.stopRunning() };
         Ok(())
     }
 }

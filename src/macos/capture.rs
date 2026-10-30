@@ -1,8 +1,10 @@
 use image::RgbaImage;
 use objc2_core_foundation::CGRect;
+// Keep the synchronous capture API for macOS versions predating ScreenCaptureKit.
+#[allow(deprecated)]
+use objc2_core_graphics::CGWindowListCreateImage;
 use objc2_core_graphics::{
-    CGDataProvider, CGImage, CGWindowID, CGWindowImageOption, CGWindowListCreateImage,
-    CGWindowListOption,
+    CGDataProvider, CGImage, CGWindowID, CGWindowImageOption, CGWindowListOption,
 };
 
 use crate::error::{XCapError, XCapResult};
@@ -12,6 +14,8 @@ pub fn capture(
     list_option: CGWindowListOption,
     window_id: CGWindowID,
 ) -> XCapResult<RgbaImage> {
+    // ScreenCaptureKit requires a separate backend and a newer macOS version.
+    #[allow(deprecated)]
     let cg_image = CGWindowListCreateImage(
         cg_rect,
         list_option,

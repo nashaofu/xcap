@@ -15,9 +15,7 @@ use windows::Win32::{
         },
     },
     Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow},
-    UI::WindowsAndMessaging::{
-        GetClassNameW, GetDesktopWindow, GetWindowInfo, GetWindowRect, WINDOWINFO,
-    },
+    UI::WindowsAndMessaging::{GetClassNameW, GetDesktopWindow, GetWindowRect},
 };
 
 use crate::{
@@ -33,7 +31,17 @@ fn to_rgba_image(
     width: i32,
     height: i32,
 ) -> XCapResult<RgbaImage> {
-    let buffer_size = width * height * 4;
+    let buffer_size = u32::try_from(width)
+        .ok()
+        .filter(|&width| width > 0)
+        .and_then(|width| {
+            u32::try_from(height)
+                .ok()
+                .filter(|&height| height > 0)
+                .and_then(|height| width.checked_mul(height))
+        })
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| XCapError::new("Invalid bitmap dimensions"))?;
     let mut bitmap_info = BITMAPINFO {
         bmiHeader: BITMAPINFOHEADER {
             biSize: mem::size_of::<BITMAPINFOHEADER>() as u32,
@@ -103,7 +111,10 @@ pub(super) fn capture_monitor(x: i32, y: i32, width: i32, height: i32) -> XCapRe
             delete_bitmap_object,
         );
 
-        SelectObject(*scope_guard_mem, (*scope_guard_h_bitmap).into());
+        let previous_object = SelectObject(*scope_guard_mem, (*scope_guard_h_bitmap).into());
+        let selection = guard(previous_object, |previous| {
+            SelectObject(*scope_guard_mem, previous);
+        });
 
         BitBlt(
             *scope_guard_mem,
@@ -117,6 +128,7 @@ pub(super) fn capture_monitor(x: i32, y: i32, width: i32, height: i32) -> XCapRe
             SRCCOPY,
         )?;
 
+        drop(selection);
         to_rgba_image(*scope_guard_mem, *scope_guard_h_bitmap, width, height)
     }
 }
@@ -160,6 +172,9 @@ pub(super) fn capture_window(hwnd: HWND) -> XCapResult<RgbaImage> {
         );
 
         let previous_object = SelectObject(*scope_guard_hdc_mem, (*scope_guard_h_bitmap).into());
+        let selection = guard(previous_object, |previous| {
+            SelectObject(*scope_guard_hdc_mem, previous);
+        });
 
         let mut is_success = false;
 
@@ -194,7 +209,7 @@ pub(super) fn capture_window(hwnd: HWND) -> XCapResult<RgbaImage> {
             return Err(XCapError::new("Capture window failed"));
         }
 
-        SelectObject(*scope_guard_hdc_mem, previous_object);
+        drop(selection);
 
         let image = to_rgba_image(
             *scope_guard_hdc_mem,
@@ -211,9 +226,6 @@ pub(super) fn capture_window(hwnd: HWND) -> XCapResult<RgbaImage> {
         // PrintWindow 会将这个边框也一起截图，所以需要裁剪掉这个区域
         let mut x = (window_bounds.left - window_rect.left) as f32 * scale_factor;
         let mut y = (window_bounds.top - window_rect.top) as f32 * scale_factor;
-
-        let mut window_info = WINDOWINFO::default();
-        GetWindowInfo(hwnd, &mut window_info)?;
 
         let mut lp_class_name = [0u16; MAX_PATH as usize];
         let lp_class_name_length = GetClassNameW(hwnd, &mut lp_class_name) as usize;
