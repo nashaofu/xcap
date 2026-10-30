@@ -36,10 +36,9 @@ impl WgcRuntime {
             return Ok(());
         }
         self.closed = true;
-        let session_result = self.session.Close();
-        let pool_result = self.frame_pool.Close();
-        session_result?;
-        pool_result?;
+        self.session.Close()?;
+        self.frame_pool.Close()?;
+
         Ok(())
     }
 }
@@ -92,7 +91,7 @@ impl ImplVideoRecorder {
                         WindowsError::empty()
                     })?;
 
-                    let _ = tx.try_send(frame);
+                    let _ = tx.send(frame);
 
                     Ok(())
                 },
@@ -122,7 +121,7 @@ impl ImplVideoRecorder {
         let interop = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
         let item = unsafe { interop.CreateForMonitor::<GraphicsCaptureItem>(h_monitor)? };
 
-        let (tx, rx) = sync_channel(2);
+        let (tx, rx) = sync_channel(0);
 
         let recorder = Self {
             item,
@@ -135,9 +134,6 @@ impl ImplVideoRecorder {
 
     pub fn start(&self) -> XCapResult<()> {
         let mut runtime = self.runtime.lock()?;
-        if runtime.is_some() {
-            return Ok(());
-        }
 
         let new_runtime = self.create_runtime()?;
         new_runtime.session.StartCapture()?;

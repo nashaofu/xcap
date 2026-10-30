@@ -14,14 +14,10 @@ fn check_capture_region(
     monitor_height: u32,
 ) -> XCapResult<()> {
     // Validate region bounds
-    if width == 0
-        || height == 0
-        || width > monitor_width
+    if width > monitor_width
         || height > monitor_height
-        || x.checked_add(width)
-            .is_none_or(|right| right > monitor_width)
-        || y.checked_add(height)
-            .is_none_or(|bottom| bottom > monitor_height)
+        || x + width > monitor_width
+        || y + height > monitor_height
     {
         return Err(XCapError::InvalidCaptureRegion(format!(
             "Region ({x}, {y}, {width}, {height}) is outside monitor size ({monitor_width}, {monitor_height})"
@@ -68,8 +64,8 @@ pub(super) fn capture_monitor(
         check_capture_region(x, y, width, height, monitor_width, monitor_height)?;
 
         // Calculate absolute coordinates
-        let abs_x = i32::try_from(i64::from(monitor_x) + i64::from(x)).map_err(XCapError::new)?;
-        let abs_y = i32::try_from(i64::from(monitor_y) + i64::from(y)).map_err(XCapError::new)?;
+        let abs_x = monitor_x + x as i32;
+        let abs_y = monitor_y + y as i32;
 
         gdi::capture_monitor(abs_x, abs_y, width as i32, height as i32)
     } else {

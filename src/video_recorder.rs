@@ -1,11 +1,4 @@
-#[cfg(any(
-    all(target_os = "linux", not(target_env = "ohos")),
-    all(target_os = "windows", not(feature = "wgc"))
-))]
-use std::{
-    sync::{Arc, Condvar, Mutex},
-    thread::JoinHandle,
-};
+use std::sync::{Condvar, Mutex};
 
 use crate::{XCapResult, platform::impl_video_recorder::ImplVideoRecorder};
 
@@ -22,94 +15,44 @@ impl Frame {
     }
 }
 
-#[cfg(any(
-    all(target_os = "linux", not(target_env = "ohos")),
-    all(target_os = "windows", not(feature = "wgc"))
-))]
-#[derive(Debug)]
-struct RecorderState {
-    parked: bool,
-    terminated: bool,
-}
-
-#[cfg(any(
-    all(target_os = "linux", not(target_env = "ohos")),
-    all(target_os = "windows", not(feature = "wgc"))
-))]
+#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) struct RecorderWaker {
-    state: Mutex<RecorderState>,
+    parking: Mutex<bool>,
     condvar: Condvar,
 }
 
-#[cfg(any(
-    all(target_os = "linux", not(target_env = "ohos")),
-    all(target_os = "windows", not(feature = "wgc"))
-))]
 impl RecorderWaker {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
-            state: Mutex::new(RecorderState {
-                parked: true,
-                terminated: false,
-            }),
+            parking: Mutex::new(true),
             condvar: Condvar::new(),
         }
     }
+    #[allow(dead_code)]
     pub fn wake(&self) -> XCapResult<()> {
-        let mut state = self.state.lock()?;
-        if state.terminated {
-            return Err(crate::XCapError::new("Recorder worker has exited"));
-        }
-        state.parked = false;
+        let mut parking = self.parking.lock()?;
+        *parking = false;
         self.condvar.notify_one();
 
         Ok(())
     }
+    #[allow(dead_code)]
     pub fn sleep(&self) -> XCapResult<()> {
-        let mut state = self.state.lock()?;
-        state.parked = true;
+        let mut parking = self.parking.lock()?;
+        *parking = true;
 
         Ok(())
     }
-    pub fn wait(&self) -> XCapResult<bool> {
-        let mut state = self.state.lock()?;
-        while state.parked && !state.terminated {
-            state = self.condvar.wait(state)?;
+    #[allow(dead_code)]
+    pub fn wait(&self) -> XCapResult<()> {
+        let mut parking = self.parking.lock()?;
+        while *parking {
+            parking = self.condvar.wait(parking)?;
         }
 
-        Ok(!state.terminated)
-    }
-
-    pub fn terminate(&self) {
-        let mut state = self.state.lock().unwrap_or_else(|err| err.into_inner());
-        state.terminated = true;
-        self.condvar.notify_all();
-    }
-}
-
-#[cfg(any(
-    all(target_os = "linux", not(target_env = "ohos")),
-    all(target_os = "windows", not(feature = "wgc"))
-))]
-#[derive(Debug)]
-pub(crate) struct RecorderWorker {
-    pub waker: Arc<RecorderWaker>,
-    pub handle: Option<JoinHandle<()>>,
-}
-
-#[cfg(any(
-    all(target_os = "linux", not(target_env = "ohos")),
-    all(target_os = "windows", not(feature = "wgc"))
-))]
-impl Drop for RecorderWorker {
-    fn drop(&mut self) {
-        self.waker.terminate();
-        if let Some(handle) = self.handle.take() {
-            if handle.join().is_err() {
-                log::error!("Recorder worker panicked");
-            }
-        }
+        Ok(())
     }
 }
 
@@ -127,11 +70,9 @@ impl VideoRecorder {
 }
 
 impl VideoRecorder {
-    /// Start or resume capture.
     pub fn start(&self) -> XCapResult<()> {
         self.impl_video_recorder.start()
     }
-    /// Pause capture. Frames already queued in the receiver remain available.
     pub fn stop(&self) -> XCapResult<()> {
         self.impl_video_recorder.stop()
     }

@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::{LazyLock, Mutex, mpsc::sync_channel},
+    sync::{LazyLock, Mutex, mpsc::channel},
     time::Duration,
 };
 
@@ -42,14 +42,11 @@ pub(super) static ID3D11DEVICE: LazyLock<ID3D11Device> = LazyLock::new(|| {
     create_d3d_device(D3D11_CREATE_DEVICE_BGRA_SUPPORT).expect("Failed to create D3D11 device")
 });
 
-pub(super) static ID3D11DEVICE_CONTEXT: LazyLock<Mutex<ID3D11DeviceContext>> =
-    LazyLock::new(|| unsafe {
-        Mutex::new(
-            ID3D11DEVICE
-                .GetImmediateContext()
-                .expect("Failed to get D3D11 device context"),
-        )
-    });
+pub(super) static ID3D11DEVICE_CONTEXT: LazyLock<ID3D11DeviceContext> = LazyLock::new(|| unsafe {
+    ID3D11DEVICE
+        .GetImmediateContext()
+        .expect("Failed to get D3D11 device context")
+});
 pub(super) static IDXGIDEVICE: LazyLock<IDXGIDevice> = LazyLock::new(|| {
     ID3D11DEVICE
         .cast::<IDXGIDevice>()
@@ -89,10 +86,9 @@ pub(super) fn get_next_frame(
         source_texture.GetDesc(&mut source_texture_desc);
     };
 
-    let context = ID3D11DEVICE_CONTEXT.lock()?;
     texture_to_frame(
         &ID3D11DEVICE,
-        &context,
+        &ID3D11DEVICE_CONTEXT,
         &source_texture,
         x,
         y,
@@ -140,7 +136,7 @@ pub(super) fn wgc_capture(
             });
         },
     );
-    let (sender, receiver) = sync_channel(1);
+    let (sender, receiver) = channel();
 
     frame_pool.FrameArrived(
         &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new({
@@ -148,7 +144,7 @@ pub(super) fn wgc_capture(
                 let frame = process_frame_arrival(frame_pool, x, y, width, height)
                     .map_err(|_| WindowsError::empty())?;
 
-                let _ = sender.try_send(frame);
+                let _ = sender.send(frame);
                 Ok(())
             }
         }),

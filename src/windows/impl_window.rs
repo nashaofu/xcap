@@ -176,7 +176,6 @@ fn get_window_title(hwnd: HWND) -> XCapResult<String> {
 }
 
 #[derive(Debug, Default)]
-#[repr(C)]
 struct LangCodePage {
     pub w_language: u16,
     pub w_code_page: u16,
@@ -238,7 +237,7 @@ fn get_app_name(pid: u32) -> XCapResult<String> {
             return get_module_basename(*scope_guard_handle);
         }
 
-        let mut file_version_info = vec![0u32; (file_version_info_size_w as usize).div_ceil(4)];
+        let mut file_version_info = vec![0u16; file_version_info_size_w as usize];
 
         GetFileVersionInfoW(
             pcw_filename,
@@ -258,15 +257,8 @@ fn get_app_name(pid: u32) -> XCapResult<String> {
         )
         .ok()?;
 
-        if lang_code_pages_ptr.is_null()
-            || lang_code_pages_length as usize % mem::size_of::<LangCodePage>() != 0
-        {
-            return get_module_basename(*scope_guard_handle);
-        }
-        let lang_code_pages: &[LangCodePage] = slice::from_raw_parts(
-            lang_code_pages_ptr.cast(),
-            lang_code_pages_length as usize / mem::size_of::<LangCodePage>(),
-        );
+        let lang_code_pages: &[LangCodePage] =
+            slice::from_raw_parts(lang_code_pages_ptr.cast(), lang_code_pages_length as usize);
 
         // 按照 keys 的顺序读取文件的属性值
         // 优先读取 FileDescription
@@ -296,7 +288,7 @@ fn get_app_name(pid: u32) -> XCapResult<String> {
                 )
                 .as_bool();
 
-                if !is_success || value_ptr.is_null() || value_length == 0 {
+                if !is_success {
                     continue;
                 }
 

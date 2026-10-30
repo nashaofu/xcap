@@ -22,7 +22,6 @@ use super::{
         get_atom, get_current_screen_buf, get_monitor_info_buf, get_xcb_connection_and_index,
         wayland_detect,
     },
-    wayland_output,
 };
 
 #[derive(Debug, Clone)]
@@ -57,7 +56,20 @@ fn get_current_frequency(mode_infos: Vec<ModeInfo>, mode: Mode) -> f32 {
 
 fn get_scale_factor() -> XCapResult<f32> {
     if wayland_detect() {
-        return wayland_output::max_scale_factor();
+        // for wayland we can get all the outputs, and get the maximum scaling of them.
+        let wayshot_conn = libwayshot_xcap::WayshotConnection::new()?;
+
+        let max_scale = wayshot_conn
+            .get_all_outputs()
+            .iter()
+            .map(|output_info| {
+                output_info.physical_size.height as f64
+                    / output_info.logical_region.inner.size.height as f64
+            })
+            .reduce(f64::max)
+            .unwrap_or(0.);
+
+        return Ok(max_scale as f32);
     }
 
     let (conn, _) = get_xcb_connection_and_index()?;
@@ -213,20 +225,6 @@ impl ImplMonitor {
     }
 
     pub fn from_point(x: i32, y: i32) -> XCapResult<ImplMonitor> {
-        if wayland_detect() {
-            for monitor in Self::all()? {
-                let (left, top, width, height, _) =
-                    wayland_output::monitor_geometry(&monitor.name()?)?;
-                if i64::from(x) >= i64::from(left)
-                    && i64::from(y) >= i64::from(top)
-                    && i64::from(x) < i64::from(left) + i64::from(width)
-                    && i64::from(y) < i64::from(top) + i64::from(height)
-                {
-                    return Ok(monitor);
-                }
-            }
-            return Err(XCapError::new("Not found monitor"));
-        }
         let (conn, _) = get_xcb_connection_and_index()?;
 
         let screen_buf = get_current_screen_buf()?;
@@ -287,9 +285,6 @@ impl ImplMonitor {
     }
 
     pub fn x(&self) -> XCapResult<i32> {
-        if wayland_detect() {
-            return Ok(wayland_output::monitor_geometry(&self.name()?)?.0);
-        }
         let x = get_monitor_info_buf(self.output)?.x();
         let scale_factor = self.scale_factor()?;
 
@@ -297,9 +292,6 @@ impl ImplMonitor {
     }
 
     pub fn y(&self) -> XCapResult<i32> {
-        if wayland_detect() {
-            return Ok(wayland_output::monitor_geometry(&self.name()?)?.1);
-        }
         let y = get_monitor_info_buf(self.output)?.y();
         let scale_factor = self.scale_factor()?;
 
@@ -307,9 +299,6 @@ impl ImplMonitor {
     }
 
     pub fn width(&self) -> XCapResult<u32> {
-        if wayland_detect() {
-            return Ok(wayland_output::monitor_geometry(&self.name()?)?.2);
-        }
         let width = get_monitor_info_buf(self.output)?.width();
         let scale_factor = self.scale_factor()?;
 
@@ -317,9 +306,6 @@ impl ImplMonitor {
     }
 
     pub fn height(&self) -> XCapResult<u32> {
-        if wayland_detect() {
-            return Ok(wayland_output::monitor_geometry(&self.name()?)?.3);
-        }
         let height = get_monitor_info_buf(self.output)?.height();
         let scale_factor = self.scale_factor()?;
 
@@ -334,9 +320,6 @@ impl ImplMonitor {
     }
 
     pub fn scale_factor(&self) -> XCapResult<f32> {
-        if wayland_detect() {
-            return Ok(wayland_output::monitor_geometry(&self.name()?)?.4);
-        }
         let scale_factor = get_scale_factor().unwrap_or(1.0);
 
         Ok(scale_factor)
@@ -377,14 +360,10 @@ impl ImplMonitor {
         let monitor_width = self.width()?;
         let monitor_height = self.height()?;
 
-        if width == 0
-            || height == 0
-            || width > monitor_width
+        if width > monitor_width
             || height > monitor_height
-            || x.checked_add(width)
-                .is_none_or(|right| right > monitor_width)
-            || y.checked_add(height)
-                .is_none_or(|bottom| bottom > monitor_height)
+            || x + width > monitor_width
+            || y + height > monitor_height
         {
             return Err(XCapError::InvalidCaptureRegion(format!(
                 "Region ({x}, {y}, {width}, {height}) is outside monitor bounds ({monitor_x}, {monitor_y}, {monitor_width}, {monitor_height})"

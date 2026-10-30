@@ -7,10 +7,6 @@ fn main() {
         return;
     }
 
-    // Track configuration even when the SDK is not configured yet.
-    println!("cargo:rerun-if-env-changed=OHOS_NDK_HOME");
-    println!("cargo:rerun-if-env-changed=OHOS_SDK_HOME");
-
     // ── OHOS NDK library search path ─────────────────────────────────────────
     //
     // The OHOS NDK places platform libraries under:
@@ -92,4 +88,8 @@ fn main() {
     // Some NDK versions also place stub libraries directly under sysroot/usr/lib/.
     let sysroot_lib = ndk_home.join("sysroot").join("usr").join("lib");
     println!("cargo:rustc-link-search=native={}", sysroot_lib.display());
+
+    // Re-run this script whenever the NDK home variable changes.
+    println!("cargo:rerun-if-env-changed=OHOS_NDK_HOME");
+    println!("cargo:rerun-if-env-changed=OHOS_SDK_HOME");
 }

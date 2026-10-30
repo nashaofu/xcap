@@ -24,9 +24,7 @@ pub(crate) struct ImplMonitor {
 }
 
 fn get_display_friendly_name(display_id: CGDirectDisplayID) -> XCapResult<String> {
-    let marker = MainThreadMarker::new()
-        .ok_or_else(|| XCapError::new("Display names require the main thread"))?;
-    let screens = NSScreen::screens(marker);
+    let screens = NSScreen::screens(unsafe { MainThreadMarker::new_unchecked() });
     for screen in screens {
         let device_description = screen.deviceDescription();
         let screen_number = device_description
@@ -138,10 +136,11 @@ impl ImplMonitor {
     }
 
     pub fn friendly_name(&self) -> XCapResult<String> {
-        match get_display_friendly_name(self.cg_direct_display_id) {
-            Ok(name) => Ok(name),
-            Err(_) => self.name(),
-        }
+        let name = get_display_friendly_name(self.cg_direct_display_id)
+            .map_err(|_| self.name())
+            .unwrap_or(format!("Unknown Monitor {}", self.cg_direct_display_id));
+
+        Ok(name)
     }
 
     pub fn x(&self) -> XCapResult<i32> {
@@ -216,14 +215,10 @@ impl ImplMonitor {
         let monitor_width = self.width()?;
         let monitor_height = self.height()?;
 
-        if width == 0
-            || height == 0
-            || width > monitor_width
+        if width > monitor_width
             || height > monitor_height
-            || x.checked_add(width)
-                .is_none_or(|right| right > monitor_width)
-            || y.checked_add(height)
-                .is_none_or(|bottom| bottom > monitor_height)
+            || x + width > monitor_width
+            || y + height > monitor_height
         {
             return Err(XCapError::InvalidCaptureRegion(format!(
                 "Region ({}, {}, {}, {}) is outside monitor bounds ({}, {}, {}, {})",
@@ -234,8 +229,8 @@ impl ImplMonitor {
         // Create a CGRect for the region to capture
         let cg_rect = objc2_core_foundation::CGRect {
             origin: objc2_core_foundation::CGPoint {
-                x: f64::from(monitor_x) + f64::from(x),
-                y: f64::from(monitor_y) + f64::from(y),
+                x: (monitor_x + x as i32) as f64,
+                y: (monitor_y + y as i32) as f64,
             },
             size: objc2_core_foundation::CGSize {
                 width: width as f64,

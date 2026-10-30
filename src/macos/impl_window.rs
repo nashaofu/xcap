@@ -358,7 +358,6 @@ impl ImplWindow {
         // activeApplication is deprecated, but the alternative, frontmostApplication,
         // returns the application in focus when the process started while activeApplication
         // returns a `NSDictionary` of application currently in focus, in real-time
-        #[allow(deprecated)]
         let active_app_dictionary = workspace.activeApplication();
 
         let active_app_pid = active_app_dictionary

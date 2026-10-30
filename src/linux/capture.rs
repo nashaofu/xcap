@@ -15,10 +15,10 @@ pub fn capture_monitor(impl_monitor: &ImplMonitor) -> XCapResult<RgbaImage> {
 
     if wayland_detect() {
         wayland_capture(
-            impl_monitor.x()?,
-            impl_monitor.y()?,
-            i32::try_from(impl_monitor.width()?).map_err(crate::XCapError::new)?,
-            i32::try_from(impl_monitor.height()?).map_err(crate::XCapError::new)?,
+            monitor_info_buf.x() as i32,
+            monitor_info_buf.y() as i32,
+            monitor_info_buf.width() as i32,
+            monitor_info_buf.height() as i32,
         )
     } else {
         let screen_buf = get_current_screen_buf()?;
@@ -43,16 +43,7 @@ pub fn capture_region(
     let monitor_info_buf = get_monitor_info_buf(impl_monitor.output)?;
 
     if wayland_detect() {
-        let abs_x = i32::try_from(i64::from(impl_monitor.x()?) + i64::from(x))
-            .map_err(crate::XCapError::new)?;
-        let abs_y = i32::try_from(i64::from(impl_monitor.y()?) + i64::from(y))
-            .map_err(crate::XCapError::new)?;
-        wayland_capture(
-            abs_x,
-            abs_y,
-            i32::try_from(width).map_err(crate::XCapError::new)?,
-            i32::try_from(height).map_err(crate::XCapError::new)?,
-        )
+        wayland_capture(x as i32, y as i32, width as i32, height as i32)
     } else {
         let screen_buf = get_current_screen_buf()?;
 

@@ -36,8 +36,8 @@ use crate::{Frame, XCapError, error::XCapResult};
 
 pub(super) fn get_build_number() -> u32 {
     unsafe {
-        let mut buf = vec![0u16; 2048];
-        let mut buf_len = (buf.len() * mem::size_of::<u16>()) as u32;
+        let mut buf_len: u32 = 2048;
+        let mut buf: Vec<u16> = Vec::with_capacity(buf_len as usize);
 
         let err = RegGetValueW(
             HKEY_LOCAL_MACHINE,
@@ -49,14 +49,11 @@ pub(super) fn get_build_number() -> u32 {
             Some(&mut buf_len),
         );
 
-        if err.is_err()
-            || buf_len as usize > buf.len() * mem::size_of::<u16>()
-            || buf_len as usize % mem::size_of::<u16>() != 0
-        {
+        if err.is_err() {
             return 0;
         }
 
-        buf.truncate(buf_len as usize / mem::size_of::<u16>());
+        buf.set_len(buf_len as usize);
 
         let build_version = U16CString::from_vec_truncate(buf)
             .to_string()
@@ -291,13 +288,7 @@ pub(super) fn texture_to_frame(
         source_texture.GetDesc(&mut src_desc);
 
         // 边界检查（防止越界）
-        if width == 0
-            || height == 0
-            || x.checked_add(width)
-                .is_none_or(|right| right > src_desc.Width)
-            || y.checked_add(height)
-                .is_none_or(|bottom| bottom > src_desc.Height)
-        {
+        if x + width > src_desc.Width || y + height > src_desc.Height {
             return Err(XCapError::new("ROI out of bounds"));
         }
 
@@ -346,32 +337,21 @@ pub(super) fn texture_to_frame(
             Some(&mut mapped),
         )?;
 
-        let _unmap = guard((), |_| d3d_context.Unmap(Some(&resource), 0));
-        let row_len = (width as usize)
-            .checked_mul(4)
-            .ok_or_else(|| XCapError::new("Frame size overflow"))?;
-        let buffer_len = row_len
-            .checked_mul(height as usize)
-            .filter(|&len| len <= isize::MAX as usize)
-            .ok_or_else(|| XCapError::new("Frame size overflow"))?;
-        if mapped.pData.is_null() || (mapped.RowPitch as usize) < row_len {
-            return Err(XCapError::new("Invalid mapped texture"));
-        }
-        let mut bgra = vec![0u8; buffer_len];
+        let mut bgra = vec![0u8; (width * height * 4) as usize];
         let src_ptr = mapped.pData as *const u8;
 
         for row in 0..height {
-            let src_offset = (row as usize)
-                .checked_mul(mapped.RowPitch as usize)
-                .filter(|&offset| offset <= isize::MAX as usize - row_len)
-                .ok_or_else(|| XCapError::new("Texture stride overflow"))?;
-            let dst_offset = row as usize * row_len;
+            let src_offset = (row * mapped.RowPitch) as usize;
+            let dst_offset = (row * width * 4) as usize;
 
-            let src_slice = std::slice::from_raw_parts(src_ptr.add(src_offset), row_len);
+            let src_slice =
+                std::slice::from_raw_parts(src_ptr.add(src_offset), (width * 4) as usize);
 
-            bgra[dst_offset..dst_offset + row_len].copy_from_slice(src_slice);
+            bgra[dst_offset..dst_offset + (width * 4) as usize].copy_from_slice(src_slice);
         }
 
-        Ok(Frame::new(width, height, bgra_to_rgba(bgra)))
+        d3d_context.Unmap(Some(&resource), 0);
+
+        Ok(Frame::new(width, height, bgra_to_rgba(bgra.to_owned())))
     }
 }

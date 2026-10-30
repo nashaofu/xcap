@@ -17,7 +17,7 @@
 use std::os::raw::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{
-    Arc, Mutex,
+    Arc,
     mpsc::{self, Receiver, SyncSender},
 };
 
@@ -54,12 +54,12 @@ struct RecorderShared {
     /// `true` while the caller wants frames delivered to `tx`.
     frame_running: AtomicBool,
     /// `true` while `StartScreenCapture` has been called and not yet stopped.
-    capture_active: Mutex<bool>,
+    capture_active: AtomicBool,
 }
 
 // SAFETY: `OH_AVScreenCapture` callbacks may arrive on any native thread.
-// Control calls are serialized by capture_active. Callbacks only access atomics
-// and the SyncSender, without acquiring the control lock.
+// All shared state is accessed through atomics or the `SyncSender` which is
+// `Send + Sync`.
 unsafe impl Send for RecorderShared {}
 unsafe impl Sync for RecorderShared {}
 
@@ -67,12 +67,7 @@ impl Drop for RecorderShared {
     fn drop(&mut self) {
         // Stop the underlying capture if it is still running, then release.
         unsafe {
-            self.frame_running.store(false, Ordering::Release);
-            if *self
-                .capture_active
-                .get_mut()
-                .unwrap_or_else(|err| err.into_inner())
-            {
+            if self.capture_active.load(Ordering::Acquire) {
                 ffi::OH_AVScreenCapture_StopScreenCapture(self.capture);
             }
             ffi::OH_AVScreenCapture_Release(self.capture);
@@ -139,7 +134,7 @@ impl ImplVideoRecorder {
             height,
             tx,
             frame_running: AtomicBool::new(false),
-            capture_active: Mutex::new(false),
+            capture_active: AtomicBool::new(false),
         });
 
         // We pass a raw pointer to the `RecorderShared` data (i.e., the
@@ -188,11 +183,10 @@ impl ImplVideoRecorder {
     /// The first call starts the underlying `OH_AVScreenCapture` session.
     /// Subsequent calls after `stop()` restart it.
     pub fn start(&self) -> XCapResult<()> {
-        let mut active = self.shared.capture_active.lock()?;
         // Signal the callback to start delivering frames.
         self.shared.frame_running.store(true, Ordering::Release);
 
-        if !*active {
+        if !self.shared.capture_active.load(Ordering::Acquire) {
             let err = unsafe { ffi::OH_AVScreenCapture_StartScreenCapture(self.shared.capture) };
             if err != ffi::OH_AVSCREEN_CAPTURE_ErrCode::Ok {
                 self.shared.frame_running.store(false, Ordering::Release);
@@ -201,7 +195,7 @@ impl ImplVideoRecorder {
                     err
                 )));
             }
-            *active = true;
+            self.shared.capture_active.store(true, Ordering::Release);
         }
 
         Ok(())
@@ -209,15 +203,14 @@ impl ImplVideoRecorder {
 
     /// Stop frame delivery and the underlying capture session.
     ///
-    /// Frames already queued in the receiver remain available after stopping.
+    /// After this call the receiver will not receive any further frames.
     /// `start()` can be called again to restart capture.
     pub fn stop(&self) -> XCapResult<()> {
-        let mut active = self.shared.capture_active.lock()?;
         // Signal the callback to stop delivering frames first to avoid a
         // race where one last frame arrives after StopScreenCapture returns.
         self.shared.frame_running.store(false, Ordering::Release);
 
-        if *active {
+        if self.shared.capture_active.swap(false, Ordering::AcqRel) {
             let err = unsafe { ffi::OH_AVScreenCapture_StopScreenCapture(self.shared.capture) };
             if err != ffi::OH_AVSCREEN_CAPTURE_ErrCode::Ok {
                 return Err(XCapError::new(format!(
@@ -225,7 +218,6 @@ impl ImplVideoRecorder {
                     err
                 )));
             }
-            *active = false;
         }
 
         Ok(())
@@ -259,10 +251,7 @@ unsafe extern "C" fn on_buffer_recorder(
     user_data: *mut c_void,
 ) {
     // Only process video (RGBA) buffers.
-    if buffer_type != ffi::OH_AVScreenCaptureBufferType::Video
-        || buffer.is_null()
-        || user_data.is_null()
-    {
+    if buffer_type != ffi::OH_AVScreenCaptureBufferType::Video {
         return;
     }
 
@@ -270,28 +259,26 @@ unsafe extern "C" fn on_buffer_recorder(
     // The `Arc<RecorderShared>` outlives any callback because `RecorderShared::drop`
     // calls `OH_AVScreenCapture_Release` (which waits for in-flight callbacks)
     // before the allocation is freed.
-    let shared = unsafe { &*(user_data as *const RecorderShared) };
+    let shared = &*(user_data as *const RecorderShared);
 
     // Skip if the caller has not started (or has paused) frame delivery.
     if !shared.frame_running.load(Ordering::Acquire) {
         return;
     }
 
-    // SAFETY: The NDK supplies a non-null buffer valid for this callback.
-    let addr = unsafe { ffi::OH_AVBuffer_GetAddr(buffer) };
+    let addr = ffi::OH_AVBuffer_GetAddr(buffer);
     if addr.is_null() {
         return;
     }
 
-    // SAFETY: The same buffer remains valid until the callback returns.
-    let capacity = unsafe { ffi::OH_AVBuffer_GetCapacity(buffer) };
+    let capacity = ffi::OH_AVBuffer_GetCapacity(buffer);
     if capacity <= 0 {
         return;
     }
 
     // SAFETY: `addr` points to `capacity` valid, CPU-accessible bytes for the
     // duration of this callback invocation.
-    let data = unsafe { std::slice::from_raw_parts(addr, capacity as usize) }.to_vec();
+    let data = std::slice::from_raw_parts(addr, capacity as usize).to_vec();
     let frame = Frame::new(shared.width, shared.height, data);
 
     if let Err(e) = shared.tx.try_send(frame) {
