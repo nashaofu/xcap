@@ -73,7 +73,10 @@ pollster = "1.0.1"
 rand = "0.10.3"
 serde = "1.0.229"
 pipewire = "0.10.1"
-libwayshot-xcap = { git = "https://github.com/nashaofu/wayshot", branch = "main", package = "libwayshot-xcap", version = "0.3.3" }
+wayland-client = "0.31.15"
+wayland-protocols = { version = "0.32.13", features = ["client", "unstable"] }
+wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
+rustix = { version = "1.1.6", features = ["fs", "event"] }
 percent-encoding = "2.3.2"
 xcb = { version = "1.7.1", features = ["randr"] }
 
