@@ -77,7 +77,7 @@ impl WaylandVideoRecorder {
                 .select_sources(
                     &session,
                     SelectSourcesOptions::default()
-                        .set_sources(SourceType::Monitor | SourceType::Window),
+                        .set_sources(SourceType::MONITOR | SourceType::WINDOW),
                 )
                 .await
                 .map_err(|e| XCapError::new(e.to_string()))?;
