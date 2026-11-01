@@ -22,6 +22,7 @@ use super::{
         get_atom, get_current_screen_buf, get_monitor_info_buf, get_xcb_connection_and_index,
         wayland_detect,
     },
+    wayland_screencopy,
 };
 
 #[derive(Debug, Clone)]
@@ -56,20 +57,7 @@ fn get_current_frequency(mode_infos: Vec<ModeInfo>, mode: Mode) -> f32 {
 
 fn get_scale_factor() -> XCapResult<f32> {
     if wayland_detect() {
-        // for wayland we can get all the outputs, and get the maximum scaling of them.
-        let wayshot_conn = libwayshot_xcap::WayshotConnection::new()?;
-
-        let max_scale = wayshot_conn
-            .get_all_outputs()
-            .iter()
-            .map(|output_info| {
-                output_info.physical_size.height as f64
-                    / output_info.logical_region.inner.size.height as f64
-            })
-            .reduce(f64::max)
-            .unwrap_or(0.);
-
-        return Ok(max_scale as f32);
+        return wayland_screencopy::scale_factor();
     }
 
     let (conn, _) = get_xcb_connection_and_index()?;

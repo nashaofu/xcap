@@ -35,8 +35,8 @@ pub enum XCapError {
     #[error(transparent)]
     StdTimeSystemTimeError(#[from] std::time::SystemTimeError),
     #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
-    #[error(transparent)]
-    LibwayshotError(#[from] libwayshot_xcap::Error),
+    #[error("Wayland error: {0}")]
+    WaylandError(String),
     #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     #[error(transparent)]
     UrlParseError(#[from] url::ParseError),

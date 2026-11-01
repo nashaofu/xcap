@@ -7,7 +7,7 @@ use ashpd::{
 use image::RgbaImage;
 use scopeguard::defer;
 
-use super::utils::png_to_rgba_image;
+use super::{utils::png_to_rgba_image, wayland_screencopy};
 use crate::{
     error::{XCapError, XCapResult},
     platform::utils::safe_uri_to_path,
@@ -81,39 +81,6 @@ async fn org_freedesktop_portal_screenshot(
 
 static DBUS_LOCK: Mutex<()> = Mutex::new(());
 
-fn wlroots_screenshot(
-    x_coordinate: i32,
-    y_coordinate: i32,
-    width: i32,
-    height: i32,
-) -> XCapResult<RgbaImage> {
-    let wayshot_connection = libwayshot_xcap::WayshotConnection::new()?;
-    let capture_region = libwayshot_xcap::region::LogicalRegion {
-        inner: libwayshot_xcap::region::Region {
-            position: libwayshot_xcap::region::Position {
-                x: x_coordinate,
-                y: y_coordinate,
-            },
-            size: libwayshot_xcap::region::Size {
-                width: width as u32,
-                height: height as u32,
-            },
-        },
-    };
-    let rgba_image = wayshot_connection.screenshot(capture_region, false)?;
-
-    // libwayshot returns image 0.24 RgbaImage
-    // we need image 0.25 RgbaImage
-    let image = image::RgbaImage::from_raw(
-        rgba_image.width(),
-        rgba_image.height(),
-        rgba_image.to_rgba8().into_vec(),
-    )
-    .expect("Conversion of PNG -> Raw -> PNG does not fail");
-
-    Ok(image)
-}
-
 pub fn wayland_capture(x: i32, y: i32, width: i32, height: i32) -> XCapResult<RgbaImage> {
     let lock = DBUS_LOCK.lock();
 
@@ -131,7 +98,7 @@ pub fn wayland_capture(x: i32, y: i32, width: i32, height: i32) -> XCapResult<Rg
     })
     .or_else(|e| {
         log::debug!("org_freedesktop_portal_screenshot failed {e}");
-        wlroots_screenshot(x, y, width, height)
+        wayland_screencopy::capture(x, y, width, height)
     });
 
     drop(lock);
