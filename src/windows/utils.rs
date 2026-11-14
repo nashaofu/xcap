@@ -352,6 +352,6 @@ pub(super) fn texture_to_frame(
 
         d3d_context.Unmap(Some(&resource), 0);
 
-        Ok(Frame::new(width, height, bgra_to_rgba(bgra.to_owned())))
+        Ok(Frame::new(width, height, bgra_to_rgba(bgra)))
     }
 }

@@ -5,294 +5,88 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, SyncSender, sync_channel},
     },
+    time::{Duration, Instant},
 };
 
+use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchQueueAttr};
 use objc2::{
-    AllocAnyThread, DefinedClass, define_class, msg_send, rc::Retained, runtime::ProtocolObject,
+    AnyThread, DefinedClass, define_class, msg_send,
+    rc::Retained,
+    runtime::{NSObjectProtocol, ProtocolObject},
 };
-use objc2_av_foundation::{
-    AVCaptureConnection, AVCaptureOutput, AVCaptureScreenInput, AVCaptureSession,
-    AVCaptureVideoDataOutput, AVCaptureVideoDataOutputSampleBufferDelegate,
-};
+use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_core_graphics::CGDirectDisplayID;
 use objc2_core_media::{CMSampleBuffer, CMTime};
 use objc2_core_video::{
-    CVPixelBufferGetBaseAddress, CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRow,
-    CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferGetDataSize, CVPixelBufferGetHeight,
-    CVPixelBufferGetHeightOfPlane, CVPixelBufferGetPixelFormatType, CVPixelBufferGetWidth,
-    CVPixelBufferGetWidthOfPlane, CVPixelBufferIsPlanar, CVPixelBufferLockBaseAddress,
-    CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress, kCVPixelBufferPixelFormatTypeKey,
-    kCVPixelFormatType_32ARGB, kCVPixelFormatType_32BGRA, kCVPixelFormatType_32RGBA,
-    kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
-    kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, kCVPixelFormatType_422YpCbCr8,
-    kCVPixelFormatType_422YpCbCr8_yuvs,
+    CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow, CVPixelBufferGetDataSize,
+    CVPixelBufferGetHeight, CVPixelBufferGetPixelFormatType, CVPixelBufferGetWidth,
+    CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
+    kCVPixelFormatType_32BGRA,
 };
-use objc2_foundation::{NSDictionary, NSNumber, NSObject, NSObjectProtocol, NSString};
+use objc2_foundation::{NSArray, NSError, NSObject};
+use objc2_screen_capture_kit::{
+    SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamOutput,
+    SCStreamOutputType, SCWindow,
+};
 use scopeguard::defer;
 
-use crate::{XCapError, XCapResult, video_recorder::Frame};
+use crate::{
+    XCapError, XCapResult,
+    video_recorder::{Frame, VideoRecorderOptions},
+};
 
-#[derive(Debug, Clone)]
-struct DataOutputSampleBufferDelegateVars {
-    tx: SyncSender<Frame>,
-    running: Arc<AtomicBool>,
+/// How long to wait for ScreenCaptureKit before giving up.
+const START_TIMEOUT: Duration = Duration::from_secs(5);
+
+fn error_message(error: &NSError) -> String {
+    error.localizedDescription().to_string()
 }
 
-impl DataOutputSampleBufferDelegateVars {
-    fn pixel_format_name(format_type: u32) -> &'static str {
-        if format_type == kCVPixelFormatType_32ARGB {
-            "kCVPixelFormatType_32ARGB"
-        } else if format_type == kCVPixelFormatType_32BGRA {
-            "kCVPixelFormatType_32BGRA"
-        } else if format_type == kCVPixelFormatType_32RGBA {
-            "kCVPixelFormatType_32RGBA"
-        } else if format_type == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange {
-            "kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange"
-        } else if format_type == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange {
-            "kCVPixelFormatType_420YpCbCr8BiPlanarFullRange"
-        } else if format_type == kCVPixelFormatType_422YpCbCr8 {
-            "kCVPixelFormatType_422YpCbCr8"
-        } else if format_type == kCVPixelFormatType_422YpCbCr8_yuvs {
-            "kCVPixelFormatType_422YpCbCr8_yuvs"
-        } else {
-            "unknown"
-        }
+/// Fetch the shareable content list, which is only available through a
+/// completion handler. Blocks the calling thread; that is the capture thread.
+fn shareable_content() -> XCapResult<Retained<SCShareableContent>> {
+    let (tx, rx) = sync_channel::<Result<Retained<SCShareableContent>, String>>(1);
+    let handler = RcBlock::new(
+        move |content: *mut SCShareableContent, error: *mut NSError| {
+            let result = if !error.is_null() {
+                Err(error_message(unsafe { &*error }))
+            } else if content.is_null() {
+                Err("ScreenCaptureKit returned no shareable content".into())
+            } else {
+                Ok(unsafe { Retained::retain(content) }.expect("shareable content is not null"))
+            };
+            let _ = tx.send(result);
+        },
+    );
+    unsafe { SCShareableContent::getShareableContentWithCompletionHandler(&handler) };
+
+    match rx.recv_timeout(START_TIMEOUT) {
+        Ok(Ok(content)) => Ok(content),
+        Ok(Err(message)) => Err(XCapError::new(message)),
+        Err(_) => Err(XCapError::new(
+            "ScreenCaptureKit did not return shareable content in time",
+        )),
     }
+}
 
-    fn is_supported_format(format_type: u32) -> bool {
-        [
-            kCVPixelFormatType_32ARGB,
-            kCVPixelFormatType_32BGRA,
-            kCVPixelFormatType_32RGBA,
-            kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
-            kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
-            kCVPixelFormatType_422YpCbCr8,
-            kCVPixelFormatType_422YpCbCr8_yuvs,
-        ]
-        .contains(&format_type)
-    }
+#[derive(Debug)]
+struct StreamOutputVars {
+    tx: SyncSender<Frame>,
+    running: Arc<AtomicBool>,
+    created: Instant,
+}
 
-    fn clamp_to_u8(value: i32) -> u8 {
-        value.clamp(0, 255) as u8
-    }
-
-    fn yuv_to_rgb_video_range(y: u8, u: u8, v: u8) -> (u8, u8, u8) {
-        let c = i32::from(y).saturating_sub(16);
-        let d = i32::from(u) - 128;
-        let e = i32::from(v) - 128;
-
-        let r = (298 * c + 409 * e + 128) >> 8;
-        let g = (298 * c - 100 * d - 208 * e + 128) >> 8;
-        let b = (298 * c + 516 * d + 128) >> 8;
-
-        (
-            Self::clamp_to_u8(r),
-            Self::clamp_to_u8(g),
-            Self::clamp_to_u8(b),
-        )
-    }
-
-    fn yuv_to_rgb_full_range(y: u8, u: u8, v: u8) -> (u8, u8, u8) {
-        let c = i32::from(y);
-        let d = i32::from(u) - 128;
-        let e = i32::from(v) - 128;
-
-        let r = c + ((359 * e + 128) >> 8);
-        let g = c - ((88 * d + 183 * e + 128) >> 8);
-        let b = c + ((454 * d + 128) >> 8);
-
-        (
-            Self::clamp_to_u8(r),
-            Self::clamp_to_u8(g),
-            Self::clamp_to_u8(b),
-        )
-    }
-
-    fn copy_packed_rows(width: usize, height: usize, bytes_per_row: usize, data: &[u8]) -> Vec<u8> {
-        let row_len = width * 4;
-
-        // When there is no row padding, a single contiguous copy is faster than row-by-row copy.
-        if bytes_per_row == row_len {
-            return data[..row_len * height].to_vec();
-        }
-
-        let mut buffer = vec![0; row_len * height];
-
-        for row_index in 0..height {
-            let src_row_start = row_index * bytes_per_row;
-            let dst_row_start = row_index * row_len;
-            let src_row = &data[src_row_start..src_row_start + row_len];
-            let dst_row = &mut buffer[dst_row_start..dst_row_start + row_len];
-            dst_row.copy_from_slice(src_row);
-        }
-
-        buffer
-    }
-
-    fn yuv422_to_rgba(width: usize, height: usize, bytes_per_row: usize, data: &[u8]) -> Vec<u8> {
-        let mut buffer = vec![0; width * height * 4];
-        let src_row_len = width * 2;
-        let dst_row_len = width * 4;
-
-        for row_index in 0..height {
-            let src_row_start = row_index * bytes_per_row;
-            let dst_row_start = row_index * dst_row_len;
-            let src_row = &data[src_row_start..src_row_start + src_row_len];
-            let dst_row = &mut buffer[dst_row_start..dst_row_start + dst_row_len];
-
-            for (src, dst) in src_row.chunks_exact(4).zip(dst_row.chunks_exact_mut(8)) {
-                let u = src[0];
-                let y0 = src[1];
-                let v = src[2];
-                let y1 = src[3];
-
-                let (r0, g0, b0) = Self::yuv_to_rgb_video_range(y0, u, v);
-                dst[0] = r0;
-                dst[1] = g0;
-                dst[2] = b0;
-                dst[3] = 255;
-
-                let (r1, g1, b1) = Self::yuv_to_rgb_video_range(y1, u, v);
-                dst[4] = r1;
-                dst[5] = g1;
-                dst[6] = b1;
-                dst[7] = 255;
-            }
-        }
-
-        buffer
-    }
-
-    fn yuyv422_to_rgba(width: usize, height: usize, bytes_per_row: usize, data: &[u8]) -> Vec<u8> {
-        let mut buffer = vec![0; width * height * 4];
-        let src_row_len = width * 2;
-        let dst_row_len = width * 4;
-
-        for row_index in 0..height {
-            let src_row_start = row_index * bytes_per_row;
-            let dst_row_start = row_index * dst_row_len;
-            let src_row = &data[src_row_start..src_row_start + src_row_len];
-            let dst_row = &mut buffer[dst_row_start..dst_row_start + dst_row_len];
-
-            for (src, dst) in src_row.chunks_exact(4).zip(dst_row.chunks_exact_mut(8)) {
-                let y0 = src[0];
-                let u = src[1];
-                let y1 = src[2];
-                let v = src[3];
-
-                let (r0, g0, b0) = Self::yuv_to_rgb_video_range(y0, u, v);
-                dst[0] = r0;
-                dst[1] = g0;
-                dst[2] = b0;
-                dst[3] = 255;
-
-                let (r1, g1, b1) = Self::yuv_to_rgb_video_range(y1, u, v);
-                dst[4] = r1;
-                dst[5] = g1;
-                dst[6] = b1;
-                dst[7] = 255;
-            }
-        }
-
-        buffer
-    }
-
-    fn bgra_to_rgba(width: usize, height: usize, bytes_per_row: usize, data: &[u8]) -> Vec<u8> {
-        let row_len = width * 4;
-        let mut buffer = vec![0; row_len * height];
-
-        for row_index in 0..height {
-            let src_row_start = row_index * bytes_per_row;
-            let dst_row_start = row_index * row_len;
-            let src_row = &data[src_row_start..src_row_start + row_len];
-            let dst_row = &mut buffer[dst_row_start..dst_row_start + row_len];
-
-            for (src, dst) in src_row.chunks_exact(4).zip(dst_row.chunks_exact_mut(4)) {
-                dst[0] = src[2];
-                dst[1] = src[1];
-                dst[2] = src[0];
-                dst[3] = src[3];
-            }
-        }
-
-        buffer
-    }
-
-    fn argb_to_rgba(width: usize, height: usize, bytes_per_row: usize, data: &[u8]) -> Vec<u8> {
-        let row_len = width * 4;
-        let mut buffer = vec![0; row_len * height];
-
-        for row_index in 0..height {
-            let src_row_start = row_index * bytes_per_row;
-            let dst_row_start = row_index * row_len;
-            let src_row = &data[src_row_start..src_row_start + row_len];
-            let dst_row = &mut buffer[dst_row_start..dst_row_start + row_len];
-
-            for (src, dst) in src_row.chunks_exact(4).zip(dst_row.chunks_exact_mut(4)) {
-                dst[0] = src[1];
-                dst[1] = src[2];
-                dst[2] = src[3];
-                dst[3] = src[0];
-            }
-        }
-
-        buffer
-    }
-
-    fn nv12_to_rgba(
-        width: usize,
-        height: usize,
-        y_bytes_per_row: usize,
-        uv_bytes_per_row: usize,
-        y_plane: &[u8],
-        uv_plane: &[u8],
-        full_range: bool,
-    ) -> Vec<u8> {
-        let mut buffer = vec![0; width * height * 4];
-
-        for row_index in 0..height {
-            let y_row_start = row_index * y_bytes_per_row;
-            let uv_row_start = (row_index / 2) * uv_bytes_per_row;
-            let dst_row_start = row_index * width * 4;
-
-            for column_index in 0..width {
-                let y = y_plane[y_row_start + column_index];
-                let uv_offset = uv_row_start + (column_index / 2) * 2;
-                let u = uv_plane[uv_offset];
-                let v = uv_plane[uv_offset + 1];
-
-                let (r, g, b) = if full_range {
-                    Self::yuv_to_rgb_full_range(y, u, v)
-                } else {
-                    Self::yuv_to_rgb_video_range(y, u, v)
-                };
-
-                let dst_offset = dst_row_start + column_index * 4;
-                buffer[dst_offset] = r;
-                buffer[dst_offset + 1] = g;
-                buffer[dst_offset + 2] = b;
-                buffer[dst_offset + 3] = 255;
-            }
-        }
-
-        buffer
-    }
-
-    fn capture(
-        &self,
-        _output: &AVCaptureOutput,
-        sample_buffer: &CMSampleBuffer,
-        _connection: &AVCaptureConnection,
-    ) {
+impl StreamOutputVars {
+    unsafe fn capture(&self, sample_buffer: &CMSampleBuffer) {
         if !self.running.load(Ordering::Acquire) {
             return;
         }
+        let timestamp = self.created.elapsed();
 
         unsafe {
-            let pixel_buffer = match CMSampleBuffer::image_buffer(sample_buffer) {
-                Some(pixel_buffer) => pixel_buffer,
-                None => return,
+            let Some(pixel_buffer) = CMSampleBuffer::image_buffer(sample_buffer) else {
+                return;
             };
 
             CVPixelBufferLockBaseAddress(&pixel_buffer, CVPixelBufferLockFlags::ReadOnly);
@@ -301,231 +95,205 @@ impl DataOutputSampleBufferDelegateVars {
             };
 
             let format_type = CVPixelBufferGetPixelFormatType(&pixel_buffer);
-
-            if !Self::is_supported_format(format_type) {
+            if format_type != kCVPixelFormatType_32BGRA {
                 log::error!(
-                    "pixel format type 0x{format_type:08X} ({}) is not supported",
-                    Self::pixel_format_name(format_type)
+                    "unexpected ScreenCaptureKit pixel format 0x{format_type:08X}, expected BGRA"
                 );
                 return;
             }
 
             let width = CVPixelBufferGetWidth(&pixel_buffer);
             let height = CVPixelBufferGetHeight(&pixel_buffer);
-            let buffer = if format_type == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-                || format_type == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+            let bytes_per_row = CVPixelBufferGetBytesPerRow(&pixel_buffer);
+            let size = CVPixelBufferGetDataSize(&pixel_buffer);
+            let base_address = CVPixelBufferGetBaseAddress(&pixel_buffer);
+            if base_address.is_null() || width == 0 || height == 0 {
+                return;
+            }
+            let data = slice::from_raw_parts(base_address.cast::<u8>(), size);
+
+            let row_len = width * 4;
+            let mut buffer = vec![0; row_len * height];
+            for (src_row, dst_row) in data
+                .chunks_exact(bytes_per_row)
+                .zip(buffer.chunks_exact_mut(row_len))
             {
-                if !CVPixelBufferIsPlanar(&pixel_buffer) {
-                    log::error!(
-                        "pixel format type 0x{format_type:08X} ({}) is expected to be planar",
-                        Self::pixel_format_name(format_type)
-                    );
-                    return;
+                for (src, dst) in src_row[..row_len]
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(dst_row.as_chunks_mut::<4>().0)
+                {
+                    dst[0] = src[2];
+                    dst[1] = src[1];
+                    dst[2] = src[0];
+                    dst[3] = src[3];
                 }
+            }
 
-                let y_width = CVPixelBufferGetWidthOfPlane(&pixel_buffer, 0);
-                let y_height = CVPixelBufferGetHeightOfPlane(&pixel_buffer, 0);
-                let uv_height = CVPixelBufferGetHeightOfPlane(&pixel_buffer, 1);
-                let y_bytes_per_row = CVPixelBufferGetBytesPerRowOfPlane(&pixel_buffer, 0);
-                let uv_bytes_per_row = CVPixelBufferGetBytesPerRowOfPlane(&pixel_buffer, 1);
-                let y_base_address = CVPixelBufferGetBaseAddressOfPlane(&pixel_buffer, 0);
-                let uv_base_address = CVPixelBufferGetBaseAddressOfPlane(&pixel_buffer, 1);
-
-                if y_base_address.is_null() || uv_base_address.is_null() {
-                    log::error!(
-                        "pixel format type 0x{format_type:08X} ({}) returned a null plane base address",
-                        Self::pixel_format_name(format_type)
-                    );
-                    return;
-                }
-
-                let y_plane =
-                    slice::from_raw_parts(y_base_address.cast::<u8>(), y_bytes_per_row * y_height);
-                let uv_plane = slice::from_raw_parts(
-                    uv_base_address.cast::<u8>(),
-                    uv_bytes_per_row * uv_height,
-                );
-
-                Self::nv12_to_rgba(
-                    y_width,
-                    y_height,
-                    y_bytes_per_row,
-                    uv_bytes_per_row,
-                    y_plane,
-                    uv_plane,
-                    format_type == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
-                )
-            } else {
-                let bytes_per_row = CVPixelBufferGetBytesPerRow(&pixel_buffer);
-                let base_address = CVPixelBufferGetBaseAddress(&pixel_buffer);
-                let size = CVPixelBufferGetDataSize(&pixel_buffer);
-
-                if base_address.is_null() {
-                    log::error!(
-                        "pixel format type 0x{format_type:08X} ({}) returned a null base address",
-                        Self::pixel_format_name(format_type)
-                    );
-                    return;
-                }
-
-                let data = slice::from_raw_parts(base_address.cast::<u8>(), size);
-
-                if format_type == kCVPixelFormatType_32RGBA {
-                    Self::copy_packed_rows(width, height, bytes_per_row, data)
-                } else if format_type == kCVPixelFormatType_32BGRA {
-                    Self::bgra_to_rgba(width, height, bytes_per_row, data)
-                } else if format_type == kCVPixelFormatType_32ARGB {
-                    Self::argb_to_rgba(width, height, bytes_per_row, data)
-                } else if format_type == kCVPixelFormatType_422YpCbCr8 {
-                    Self::yuv422_to_rgba(width, height, bytes_per_row, data)
-                } else if format_type == kCVPixelFormatType_422YpCbCr8_yuvs {
-                    Self::yuyv422_to_rgba(width, height, bytes_per_row, data)
-                } else {
-                    unreachable!()
-                }
-            };
-
-            // After stop, there may still be callbacks in the queue converting pixels; check again before sending.
+            // The stream may be stopped while this callback is converting.
             if !self.running.load(Ordering::Acquire) {
                 return;
             }
 
-            let _ = self.tx.send(Frame {
-                width: width as u32,
-                height: height as u32,
-                raw: buffer,
-            });
+            let _ = self.tx.send(Frame::new_at(
+                width as u32,
+                height as u32,
+                buffer,
+                timestamp,
+            ));
         }
     }
 }
 
 define_class!(
     #[unsafe(super(NSObject))]
-    #[name = "DataOutputSampleBufferDelegate"]
-    #[ivars = DataOutputSampleBufferDelegateVars]
+    #[name = "XCapStreamOutput"]
+    #[ivars = StreamOutputVars]
     #[derive(Debug)]
-    struct DataOutputSampleBufferDelegate;
+    struct StreamOutput;
 
-    unsafe impl AVCaptureVideoDataOutputSampleBufferDelegate for DataOutputSampleBufferDelegate {
-        #[unsafe(method(captureOutput:didOutputSampleBuffer:fromConnection:))]
-        unsafe fn capture_output_did_output_sample_buffer_from_connection(
+    unsafe impl NSObjectProtocol for StreamOutput {}
+
+    unsafe impl SCStreamOutput for StreamOutput {
+        #[unsafe(method(stream:didOutputSampleBuffer:ofType:))]
+        #[allow(non_snake_case)]
+        unsafe fn stream_didOutputSampleBuffer_ofType(
             &self,
-            output: &AVCaptureOutput,
+            _stream: &SCStream,
             sample_buffer: &CMSampleBuffer,
-            connection: &AVCaptureConnection,
+            of_type: SCStreamOutputType,
         ) {
-            self.ivars().capture(output, sample_buffer, connection);
+            if of_type == SCStreamOutputType::Screen {
+                unsafe { self.ivars().capture(sample_buffer) };
+            }
         }
     }
 );
 
-unsafe impl NSObjectProtocol for DataOutputSampleBufferDelegate {}
-
-impl DataOutputSampleBufferDelegate {
-    fn new(tx: SyncSender<Frame>, running: Arc<AtomicBool>) -> Retained<Self> {
-        let this = Self::alloc().set_ivars(DataOutputSampleBufferDelegateVars { tx, running });
+impl StreamOutput {
+    fn new(tx: SyncSender<Frame>, running: Arc<AtomicBool>, created: Instant) -> Retained<Self> {
+        let this = Self::alloc().set_ivars(StreamOutputVars {
+            tx,
+            running,
+            created,
+        });
         unsafe { msg_send![super(this), init] }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct ImplVideoRecorder {
-    session: Retained<AVCaptureSession>,
-    _input: Retained<AVCaptureScreenInput>,
-    _output: Retained<AVCaptureVideoDataOutput>,
-    _delegate: Retained<DataOutputSampleBufferDelegate>,
+    stream: Retained<SCStream>,
+    _output: Retained<StreamOutput>,
+    _queue: Retained<DispatchQueue>,
     running: Arc<AtomicBool>,
 }
 
 impl ImplVideoRecorder {
-    pub fn new(cg_direct_display_id: CGDirectDisplayID) -> XCapResult<(Self, Receiver<Frame>)> {
-        unsafe {
-            let session = AVCaptureSession::new();
-            let input = AVCaptureScreenInput::initWithDisplayID(
-                AVCaptureScreenInput::alloc(),
-                cg_direct_display_id,
-            )
-            .ok_or(XCapError::new(
-                "AVCaptureScreenInput::initWithDisplayID failed",
-            ))?;
-            input.setCapturesCursor(true);
-            input.setCapturesMouseClicks(true);
-            let min_frame_duration = CMTime::new(1, 60);
-            let _: () = msg_send![&input, setMinFrameDuration: min_frame_duration];
-
-            if session.canAddInput(&input) {
-                session.addInput(&input);
+    pub fn new(
+        cg_direct_display_id: CGDirectDisplayID,
+        display_width: u32,
+        display_height: u32,
+        scale_factor: f32,
+        options: VideoRecorderOptions,
+    ) -> XCapResult<(Self, Receiver<Frame>)> {
+        let created = Instant::now();
+        let content = shareable_content()?;
+        // Excluding the calling process's windows keeps the recorder itself out
+        // of the frames; ScreenCaptureKit filters by window objects.
+        let excluded: Vec<Retained<SCWindow>> = if options.excludes_own_windows {
+            let own_pid = std::process::id() as i32;
+            unsafe {
+                content
+                    .windows()
+                    .iter()
+                    .filter(|window| window.isOnScreen())
+                    .filter(|window| {
+                        window
+                            .owningApplication()
+                            .is_some_and(|app| app.processID() == own_pid)
+                    })
+                    .collect()
             }
+        } else {
+            Vec::new()
+        };
+        let excluded = NSArray::from_retained_slice(&excluded);
+        let display = unsafe {
+            content
+                .displays()
+                .iter()
+                .find(|display| display.displayID() == cg_direct_display_id)
+                .ok_or_else(|| XCapError::new("no shareable display with the requested id"))?
+        };
 
-            let output = AVCaptureVideoDataOutput::new();
-            output.setAlwaysDiscardsLateVideoFrames(true);
-            output.setAutomaticallyConfiguresOutputBufferDimensions(true);
+        let scale = if scale_factor > 0. { scale_factor } else { 1. };
+        let (source_rect, pixel_width, pixel_height) = match options.region {
+            Some(region) => (
+                CGRect::new(
+                    CGPoint::new(region.x as f64, region.y as f64),
+                    CGSize::new(region.width as f64, region.height as f64),
+                ),
+                (region.width as f32 * scale).round() as usize,
+                (region.height as f32 * scale).round() as usize,
+            ),
+            None => (
+                CGRect::new(
+                    CGPoint::new(0., 0.),
+                    CGSize::new(display_width as f64, display_height as f64),
+                ),
+                (display_width as f32 * scale).round() as usize,
+                (display_height as f32 * scale).round() as usize,
+            ),
+        };
+        if pixel_width == 0 || pixel_height == 0 {
+            return Err(XCapError::new("the recording region is empty"));
+        }
 
-            let format_type_key =
-                NSString::from_str(kCVPixelBufferPixelFormatTypeKey.to_string().as_str());
-            let available_format_types = output.availableVideoCVPixelFormatTypes();
-            let preferred_format_types = [
-                kCVPixelFormatType_32RGBA,
-                kCVPixelFormatType_32BGRA,
-                kCVPixelFormatType_32ARGB,
-                kCVPixelFormatType_422YpCbCr8,
-                kCVPixelFormatType_422YpCbCr8_yuvs,
-                kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
-                kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
-            ];
+        let (tx, rx) = sync_channel(0);
+        let running = Arc::new(AtomicBool::new(false));
+        let output = StreamOutput::new(tx, running.clone(), created);
+        let queue = DispatchQueue::new("XCapStreamOutput", DispatchQueueAttr::SERIAL);
 
-            let preferred_format_type = preferred_format_types
-                .into_iter()
-                .find(|format_type| {
-                    available_format_types.containsObject(&NSNumber::new_u32(*format_type))
-                })
-                .ok_or(XCapError::new(
-                    "no preferred pixel format type is supported by the output",
-                ))?;
-
-            log::info!(
-                "preferred pixel format type 0x{preferred_format_type:08X} ({}) is supported and will be used",
-                DataOutputSampleBufferDelegateVars::pixel_format_name(preferred_format_type)
+        unsafe {
+            let filter = SCContentFilter::initWithDisplay_excludingWindows(
+                SCContentFilter::alloc(),
+                &display,
+                &excluded,
             );
 
-            let format_type_value = NSNumber::new_u32(preferred_format_type);
+            let configuration = SCStreamConfiguration::new();
+            configuration.setWidth(pixel_width);
+            configuration.setHeight(pixel_height);
+            configuration.setPixelFormat(kCVPixelFormatType_32BGRA);
+            configuration.setSourceRect(source_rect);
+            configuration.setScalesToFit(false);
+            configuration.setShowsCursor(options.captures_cursor);
+            configuration.setQueueDepth(5);
+            configuration.setMinimumFrameInterval(CMTime::new(1, options.fps.clamp(1, 60) as i32));
 
-            // 创建 NSDictionary
-            let video_settings: Retained<NSDictionary<NSString>> =
-                NSDictionary::from_slices::<NSString>(
-                    &[format_type_key.as_ref()],
-                    &[format_type_value.as_ref()],
-                );
+            let stream = SCStream::initWithFilter_configuration_delegate(
+                SCStream::alloc(),
+                &filter,
+                &configuration,
+                None,
+            );
 
-            output.setVideoSettings(Some(&video_settings));
-
-            if session.canAddOutput(&output) {
-                session.addOutput(&output)
-            }
-
-            let (tx, rx) = sync_channel(0);
-            let running = Arc::new(AtomicBool::new(false));
-
-            let delegate = DataOutputSampleBufferDelegate::new(tx.clone(), running.clone());
-
-            let sample_buffer_delegate = ProtocolObject::<
-                dyn AVCaptureVideoDataOutputSampleBufferDelegate,
-            >::from_ref(&*delegate);
-
-            let queue =
-                DispatchQueue::new("DataOutputSampleBufferDelegate", DispatchQueueAttr::SERIAL);
-
-            let queue: &DispatchQueue = queue.as_ref();
-
-            let _: () =
-                msg_send![&output, setSampleBufferDelegate: sample_buffer_delegate, queue: queue];
+            let protocol: &ProtocolObject<dyn SCStreamOutput> = ProtocolObject::from_ref(&*output);
+            stream
+                .addStreamOutput_type_sampleHandlerQueue_error(
+                    protocol,
+                    SCStreamOutputType::Screen,
+                    Some(&queue),
+                )
+                .map_err(|error| XCapError::new(error_message(&error)))?;
 
             Ok((
                 ImplVideoRecorder {
-                    session,
+                    stream,
                     _output: output,
-                    _input: input,
-                    _delegate: delegate,
+                    _queue: queue.into(),
                     running,
                 },
                 rx,
@@ -535,13 +303,42 @@ impl ImplVideoRecorder {
 
     pub fn start(&self) -> XCapResult<()> {
         self.running.store(true, Ordering::Release);
-        unsafe { self.session.startRunning() };
-        Ok(())
+        let (tx, rx) = sync_channel::<Result<(), String>>(1);
+        let handler = RcBlock::new(move |error: *mut NSError| {
+            let result = if error.is_null() {
+                Ok(())
+            } else {
+                Err(error_message(unsafe { &*error }))
+            };
+            let _ = tx.send(result);
+        });
+        unsafe {
+            self.stream
+                .startCaptureWithCompletionHandler(Some(&handler))
+        };
+
+        match rx.recv_timeout(START_TIMEOUT) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(message)) => {
+                self.running.store(false, Ordering::Release);
+                Err(XCapError::new(message))
+            }
+            Err(_) => {
+                self.running.store(false, Ordering::Release);
+                Err(XCapError::new("ScreenCaptureKit did not start in time"))
+            }
+        }
     }
 
     pub fn stop(&self) -> XCapResult<()> {
         self.running.store(false, Ordering::Release);
-        unsafe { self.session.stopRunning() };
+        let (tx, rx) = sync_channel(1);
+        let handler = RcBlock::new(move |_: *mut NSError| {
+            let _ = tx.send(());
+        });
+        unsafe { self.stream.stopCaptureWithCompletionHandler(Some(&handler)) };
+        let _ = rx.recv_timeout(START_TIMEOUT);
+
         Ok(())
     }
 }
