@@ -4,6 +4,7 @@ use std::{
         mpsc::{Receiver, SyncSender, sync_channel},
     },
     thread,
+    time::{Duration, Instant},
 };
 
 use windows::{
@@ -23,7 +24,7 @@ use windows::{
 
 use crate::{
     XCapError, XCapResult,
-    video_recorder::{Frame, RecorderWaker},
+    video_recorder::{CaptureRegion, Frame, RecorderWaker, VideoRecorderOptions},
 };
 
 use super::utils::{create_d3d_device, texture_to_frame};
@@ -35,10 +36,17 @@ pub(crate) struct ImplVideoRecorder {
     duplication: IDXGIOutputDuplication,
     recorder_waker: Arc<RecorderWaker>,
     tx: SyncSender<Frame>,
+    region: Option<CaptureRegion>,
+    /// Minimum time between delivered frames, from the frame-rate cap.
+    interval: Duration,
+    created: Instant,
 }
 
 impl ImplVideoRecorder {
-    pub fn new(h_monitor: HMONITOR) -> XCapResult<(Self, Receiver<Frame>)> {
+    pub fn new(
+        h_monitor: HMONITOR,
+        options: VideoRecorderOptions,
+    ) -> XCapResult<(Self, Receiver<Frame>)> {
         unsafe {
             let d3d_device = create_d3d_device(
                 D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_SINGLETHREADED,
@@ -65,6 +73,9 @@ impl ImplVideoRecorder {
                         duplication,
                         recorder_waker: Arc::new(RecorderWaker::new()),
                         tx,
+                        region: options.region,
+                        interval: Duration::from_secs_f64(1.0 / options.fps.clamp(1, 60) as f64),
+                        created: Instant::now(),
                     };
                     s.on_frame()?;
                     return Ok((s, sx));
@@ -79,8 +90,12 @@ impl ImplVideoRecorder {
         let d3d_context = self.d3d_context.clone();
         let recorder_waker = self.recorder_waker.clone();
         let tx = self.tx.clone();
+        let region = self.region;
+        let interval = self.interval;
+        let created = self.created;
 
         thread::spawn(move || {
+            let mut last_frame_at: Option<Duration> = None;
             loop {
                 recorder_waker.wait()?;
 
@@ -106,15 +121,50 @@ impl ImplVideoRecorder {
                                 let mut source_texture_desc = D3D11_TEXTURE2D_DESC::default();
                                 source_texture.GetDesc(&mut source_texture_desc);
 
-                                let frame = texture_to_frame(
+                                let now = created.elapsed();
+                                if let Some(last) = last_frame_at {
+                                    // One millisecond of tolerance keeps a
+                                    // 60 Hz source from skipping every other
+                                    // frame at a 60 fps cap.
+                                    if now.saturating_sub(last) + Duration::from_millis(1)
+                                        < interval
+                                    {
+                                        let _ = duplication.ReleaseFrame();
+                                        continue;
+                                    }
+                                }
+
+                                let (x, y, width, height) = match region {
+                                    Some(region) => {
+                                        let x = region.x.min(source_texture_desc.Width - 1);
+                                        let y = region.y.min(source_texture_desc.Height - 1);
+                                        let width =
+                                            region.width.clamp(1, source_texture_desc.Width - x);
+                                        let height =
+                                            region.height.clamp(1, source_texture_desc.Height - y);
+                                        (x, y, width, height)
+                                    }
+                                    None => (
+                                        0,
+                                        0,
+                                        source_texture_desc.Width,
+                                        source_texture_desc.Height,
+                                    ),
+                                };
+
+                                let mut frame = texture_to_frame(
                                     &d3d_device,
                                     &d3d_context,
                                     &source_texture,
-                                    0,
-                                    0,
-                                    source_texture_desc.Width,
-                                    source_texture_desc.Height,
+                                    x,
+                                    y,
+                                    width,
+                                    height,
                                 )?;
+                                // Stamp capture time, not delivery time: the
+                                // conversion above can take longer than a frame.
+                                frame.timestamp = now;
+                                last_frame_at = Some(now);
                                 let _ = tx.send(frame);
                             }
 

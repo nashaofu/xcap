@@ -13,7 +13,7 @@ use objc2_foundation::{NSNumber, NSString};
 
 use crate::{
     error::{XCapError, XCapResult},
-    video_recorder::Frame,
+    video_recorder::{Frame, VideoRecorderOptions},
 };
 
 use super::{capture::capture, impl_video_recorder::ImplVideoRecorder};
@@ -241,7 +241,15 @@ impl ImplMonitor {
         capture(cg_rect, CGWindowListOption::OptionAll, 0)
     }
 
-    pub fn video_recorder(&self) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {
-        ImplVideoRecorder::new(self.cg_direct_display_id)
+    pub fn video_recorder(
+        &self,
+        options: VideoRecorderOptions,
+    ) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {
+        ImplVideoRecorder::new(
+            self.cg_direct_display_id,
+            self.width()?,
+            self.height()?,
+            options,
+        )
     }
 }

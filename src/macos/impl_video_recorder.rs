@@ -5,6 +5,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc::{Receiver, SyncSender, sync_channel},
     },
+    time::Instant,
 };
 
 use dispatch2::{DispatchQueue, DispatchQueueAttr};
@@ -21,9 +22,9 @@ use objc2_core_video::{
     CVPixelBufferGetBaseAddress, CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRow,
     CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferGetDataSize, CVPixelBufferGetHeight,
     CVPixelBufferGetHeightOfPlane, CVPixelBufferGetPixelFormatType, CVPixelBufferGetWidth,
-    CVPixelBufferGetWidthOfPlane, CVPixelBufferIsPlanar, CVPixelBufferLockBaseAddress,
-    CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress, kCVPixelBufferPixelFormatTypeKey,
-    kCVPixelFormatType_32ARGB, kCVPixelFormatType_32BGRA, kCVPixelFormatType_32RGBA,
+    CVPixelBufferIsPlanar, CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags,
+    CVPixelBufferUnlockBaseAddress, kCVPixelBufferPixelFormatTypeKey, kCVPixelFormatType_32ARGB,
+    kCVPixelFormatType_32BGRA, kCVPixelFormatType_32RGBA,
     kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
     kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, kCVPixelFormatType_422YpCbCr8,
     kCVPixelFormatType_422YpCbCr8_yuvs,
@@ -31,12 +32,29 @@ use objc2_core_video::{
 use objc2_foundation::{NSDictionary, NSNumber, NSObject, NSObjectProtocol, NSString};
 use scopeguard::defer;
 
-use crate::{XCapError, XCapResult, video_recorder::Frame};
+use crate::{
+    XCapError, XCapResult,
+    video_recorder::{CaptureRegion, Frame, VideoRecorderOptions},
+};
+
+/// Pixel rectangle inside a full-display buffer.
+#[derive(Debug, Clone, Copy)]
+struct Crop {
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+}
 
 #[derive(Debug, Clone)]
 struct DataOutputSampleBufferDelegateVars {
     tx: SyncSender<Frame>,
     running: Arc<AtomicBool>,
+    created: Instant,
+    region: Option<CaptureRegion>,
+    /// Monitor size in points, for scaling the region to buffer pixels.
+    display_width: u32,
+    display_height: u32,
 }
 
 impl DataOutputSampleBufferDelegateVars {
@@ -109,34 +127,46 @@ impl DataOutputSampleBufferDelegateVars {
         )
     }
 
-    fn copy_packed_rows(width: usize, height: usize, bytes_per_row: usize, data: &[u8]) -> Vec<u8> {
+    fn copy_packed_rows(crop: Crop, bytes_per_row: usize, data: &[u8]) -> Vec<u8> {
+        let Crop {
+            x,
+            y,
+            width,
+            height,
+        } = crop;
         let row_len = width * 4;
 
         // When there is no row padding, a single contiguous copy is faster than row-by-row copy.
-        if bytes_per_row == row_len {
-            return data[..row_len * height].to_vec();
+        if x == 0 && bytes_per_row == row_len {
+            let start = y * bytes_per_row;
+            return data[start..start + row_len * height].to_vec();
         }
 
         let mut buffer = vec![0; row_len * height];
 
         for row_index in 0..height {
-            let src_row_start = row_index * bytes_per_row;
+            let src_row_start = (y + row_index) * bytes_per_row + x * 4;
             let dst_row_start = row_index * row_len;
-            let src_row = &data[src_row_start..src_row_start + row_len];
-            let dst_row = &mut buffer[dst_row_start..dst_row_start + row_len];
-            dst_row.copy_from_slice(src_row);
+            buffer[dst_row_start..dst_row_start + row_len]
+                .copy_from_slice(&data[src_row_start..src_row_start + row_len]);
         }
 
         buffer
     }
 
-    fn yuv422_to_rgba(width: usize, height: usize, bytes_per_row: usize, data: &[u8]) -> Vec<u8> {
+    fn yuv422_to_rgba(crop: Crop, bytes_per_row: usize, data: &[u8]) -> Vec<u8> {
+        let Crop {
+            x,
+            y,
+            width,
+            height,
+        } = crop;
         let mut buffer = vec![0; width * height * 4];
         let src_row_len = width * 2;
         let dst_row_len = width * 4;
 
         for row_index in 0..height {
-            let src_row_start = row_index * bytes_per_row;
+            let src_row_start = (y + row_index) * bytes_per_row + x * 2;
             let dst_row_start = row_index * dst_row_len;
             let src_row = &data[src_row_start..src_row_start + src_row_len];
             let dst_row = &mut buffer[dst_row_start..dst_row_start + dst_row_len];
@@ -164,13 +194,19 @@ impl DataOutputSampleBufferDelegateVars {
         buffer
     }
 
-    fn yuyv422_to_rgba(width: usize, height: usize, bytes_per_row: usize, data: &[u8]) -> Vec<u8> {
+    fn yuyv422_to_rgba(crop: Crop, bytes_per_row: usize, data: &[u8]) -> Vec<u8> {
+        let Crop {
+            x,
+            y,
+            width,
+            height,
+        } = crop;
         let mut buffer = vec![0; width * height * 4];
         let src_row_len = width * 2;
         let dst_row_len = width * 4;
 
         for row_index in 0..height {
-            let src_row_start = row_index * bytes_per_row;
+            let src_row_start = (y + row_index) * bytes_per_row + x * 2;
             let dst_row_start = row_index * dst_row_len;
             let src_row = &data[src_row_start..src_row_start + src_row_len];
             let dst_row = &mut buffer[dst_row_start..dst_row_start + dst_row_len];
@@ -198,12 +234,18 @@ impl DataOutputSampleBufferDelegateVars {
         buffer
     }
 
-    fn bgra_to_rgba(width: usize, height: usize, bytes_per_row: usize, data: &[u8]) -> Vec<u8> {
+    fn bgra_to_rgba(crop: Crop, bytes_per_row: usize, data: &[u8]) -> Vec<u8> {
+        let Crop {
+            x,
+            y,
+            width,
+            height,
+        } = crop;
         let row_len = width * 4;
         let mut buffer = vec![0; row_len * height];
 
         for row_index in 0..height {
-            let src_row_start = row_index * bytes_per_row;
+            let src_row_start = (y + row_index) * bytes_per_row + x * 4;
             let dst_row_start = row_index * row_len;
             let src_row = &data[src_row_start..src_row_start + row_len];
             let dst_row = &mut buffer[dst_row_start..dst_row_start + row_len];
@@ -219,12 +261,18 @@ impl DataOutputSampleBufferDelegateVars {
         buffer
     }
 
-    fn argb_to_rgba(width: usize, height: usize, bytes_per_row: usize, data: &[u8]) -> Vec<u8> {
+    fn argb_to_rgba(crop: Crop, bytes_per_row: usize, data: &[u8]) -> Vec<u8> {
+        let Crop {
+            x,
+            y,
+            width,
+            height,
+        } = crop;
         let row_len = width * 4;
         let mut buffer = vec![0; row_len * height];
 
         for row_index in 0..height {
-            let src_row_start = row_index * bytes_per_row;
+            let src_row_start = (y + row_index) * bytes_per_row + x * 4;
             let dst_row_start = row_index * row_len;
             let src_row = &data[src_row_start..src_row_start + row_len];
             let dst_row = &mut buffer[dst_row_start..dst_row_start + row_len];
@@ -241,31 +289,36 @@ impl DataOutputSampleBufferDelegateVars {
     }
 
     fn nv12_to_rgba(
-        width: usize,
-        height: usize,
+        crop: Crop,
         y_bytes_per_row: usize,
         uv_bytes_per_row: usize,
         y_plane: &[u8],
         uv_plane: &[u8],
         full_range: bool,
     ) -> Vec<u8> {
+        let Crop {
+            x,
+            y,
+            width,
+            height,
+        } = crop;
         let mut buffer = vec![0; width * height * 4];
 
         for row_index in 0..height {
-            let y_row_start = row_index * y_bytes_per_row;
-            let uv_row_start = (row_index / 2) * uv_bytes_per_row;
+            let y_row_start = (y + row_index) * y_bytes_per_row + x;
+            let uv_row_start = ((y + row_index) / 2) * uv_bytes_per_row;
             let dst_row_start = row_index * width * 4;
 
             for column_index in 0..width {
-                let y = y_plane[y_row_start + column_index];
-                let uv_offset = uv_row_start + (column_index / 2) * 2;
+                let y_value = y_plane[y_row_start + column_index];
+                let uv_offset = uv_row_start + ((x + column_index) / 2) * 2;
                 let u = uv_plane[uv_offset];
                 let v = uv_plane[uv_offset + 1];
 
                 let (r, g, b) = if full_range {
-                    Self::yuv_to_rgb_full_range(y, u, v)
+                    Self::yuv_to_rgb_full_range(y_value, u, v)
                 } else {
-                    Self::yuv_to_rgb_video_range(y, u, v)
+                    Self::yuv_to_rgb_video_range(y_value, u, v)
                 };
 
                 let dst_offset = dst_row_start + column_index * 4;
@@ -279,6 +332,76 @@ impl DataOutputSampleBufferDelegateVars {
         buffer
     }
 
+    /// Pixel rectangle of the requested region inside a full-display buffer.
+    ///
+    /// `subsampled` marks chroma subsampling (horizontal, vertical). Those
+    /// formats need even offsets and sizes; rounding to the even grid shifts
+    /// the crop by at most one pixel. Packed formats are cropped exactly.
+    fn pixel_rect(
+        region: Option<CaptureRegion>,
+        buffer_width: usize,
+        buffer_height: usize,
+        display_width: u32,
+        display_height: u32,
+        subsampled: (bool, bool),
+    ) -> Crop {
+        let (align_x, align_y) = subsampled;
+        let Some(region) = region else {
+            return Crop {
+                x: 0,
+                y: 0,
+                width: buffer_width,
+                height: buffer_height,
+            };
+        };
+        let full = Crop {
+            x: 0,
+            y: 0,
+            width: buffer_width,
+            height: buffer_height,
+        };
+        if buffer_width == 0
+            || buffer_height == 0
+            || (align_x && buffer_width < 2)
+            || (align_y && buffer_height < 2)
+        {
+            return full;
+        }
+
+        let scale_x = buffer_width as f64 / display_width.max(1) as f64;
+        let scale_y = buffer_height as f64 / display_height.max(1) as f64;
+        let round =
+            |value: u32, scale: f64, max: usize| ((value as f64 * scale).round() as usize).min(max);
+        let mut x = round(region.x, scale_x, buffer_width - 1);
+        let mut y = round(region.y, scale_y, buffer_height - 1);
+        let mut width = round(region.width, scale_x, buffer_width - x);
+        let mut height = round(region.height, scale_y, buffer_height - y);
+        let min_width = if align_x { 2 } else { 1 };
+        let min_height = if align_y { 2 } else { 1 };
+        if align_x {
+            // Keep two pixels of room so the aligned rectangle stays in bounds.
+            if x + 2 > buffer_width {
+                x = (buffer_width - 2) & !1;
+            }
+            x &= !1;
+            width = (width.min(buffer_width - x) & !1).max(min_width);
+        }
+        if align_y {
+            if y + 2 > buffer_height {
+                y = (buffer_height - 2) & !1;
+            }
+            y &= !1;
+            height = (height.min(buffer_height - y) & !1).max(min_height);
+        }
+
+        Crop {
+            x,
+            y,
+            width: width.max(min_width),
+            height: height.max(min_height),
+        }
+    }
+
     fn capture(
         &self,
         _output: &AVCaptureOutput,
@@ -288,6 +411,7 @@ impl DataOutputSampleBufferDelegateVars {
         if !self.running.load(Ordering::Acquire) {
             return;
         }
+        let timestamp = self.created.elapsed();
 
         unsafe {
             let pixel_buffer = match CMSampleBuffer::image_buffer(sample_buffer) {
@@ -310,8 +434,28 @@ impl DataOutputSampleBufferDelegateVars {
                 return;
             }
 
-            let width = CVPixelBufferGetWidth(&pixel_buffer);
-            let height = CVPixelBufferGetHeight(&pixel_buffer);
+            let buffer_width = CVPixelBufferGetWidth(&pixel_buffer);
+            let buffer_height = CVPixelBufferGetHeight(&pixel_buffer);
+            let subsampled = if format_type == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+                || format_type == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+            {
+                (true, true)
+            } else if format_type == kCVPixelFormatType_422YpCbCr8
+                || format_type == kCVPixelFormatType_422YpCbCr8_yuvs
+            {
+                (true, false)
+            } else {
+                (false, false)
+            };
+            let crop = Self::pixel_rect(
+                self.region,
+                buffer_width,
+                buffer_height,
+                self.display_width,
+                self.display_height,
+                subsampled,
+            );
+
             let buffer = if format_type == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
                 || format_type == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
             {
@@ -323,7 +467,6 @@ impl DataOutputSampleBufferDelegateVars {
                     return;
                 }
 
-                let y_width = CVPixelBufferGetWidthOfPlane(&pixel_buffer, 0);
                 let y_height = CVPixelBufferGetHeightOfPlane(&pixel_buffer, 0);
                 let uv_height = CVPixelBufferGetHeightOfPlane(&pixel_buffer, 1);
                 let y_bytes_per_row = CVPixelBufferGetBytesPerRowOfPlane(&pixel_buffer, 0);
@@ -347,8 +490,7 @@ impl DataOutputSampleBufferDelegateVars {
                 );
 
                 Self::nv12_to_rgba(
-                    y_width,
-                    y_height,
+                    crop,
                     y_bytes_per_row,
                     uv_bytes_per_row,
                     y_plane,
@@ -371,15 +513,15 @@ impl DataOutputSampleBufferDelegateVars {
                 let data = slice::from_raw_parts(base_address.cast::<u8>(), size);
 
                 if format_type == kCVPixelFormatType_32RGBA {
-                    Self::copy_packed_rows(width, height, bytes_per_row, data)
+                    Self::copy_packed_rows(crop, bytes_per_row, data)
                 } else if format_type == kCVPixelFormatType_32BGRA {
-                    Self::bgra_to_rgba(width, height, bytes_per_row, data)
+                    Self::bgra_to_rgba(crop, bytes_per_row, data)
                 } else if format_type == kCVPixelFormatType_32ARGB {
-                    Self::argb_to_rgba(width, height, bytes_per_row, data)
+                    Self::argb_to_rgba(crop, bytes_per_row, data)
                 } else if format_type == kCVPixelFormatType_422YpCbCr8 {
-                    Self::yuv422_to_rgba(width, height, bytes_per_row, data)
+                    Self::yuv422_to_rgba(crop, bytes_per_row, data)
                 } else if format_type == kCVPixelFormatType_422YpCbCr8_yuvs {
-                    Self::yuyv422_to_rgba(width, height, bytes_per_row, data)
+                    Self::yuyv422_to_rgba(crop, bytes_per_row, data)
                 } else {
                     unreachable!()
                 }
@@ -390,11 +532,12 @@ impl DataOutputSampleBufferDelegateVars {
                 return;
             }
 
-            let _ = self.tx.send(Frame {
-                width: width as u32,
-                height: height as u32,
-                raw: buffer,
-            });
+            let _ = self.tx.send(Frame::new_at(
+                crop.width as u32,
+                crop.height as u32,
+                buffer,
+                timestamp,
+            ));
         }
     }
 }
@@ -422,8 +565,22 @@ define_class!(
 unsafe impl NSObjectProtocol for DataOutputSampleBufferDelegate {}
 
 impl DataOutputSampleBufferDelegate {
-    fn new(tx: SyncSender<Frame>, running: Arc<AtomicBool>) -> Retained<Self> {
-        let this = Self::alloc().set_ivars(DataOutputSampleBufferDelegateVars { tx, running });
+    fn new(
+        tx: SyncSender<Frame>,
+        running: Arc<AtomicBool>,
+        created: Instant,
+        region: Option<CaptureRegion>,
+        display_width: u32,
+        display_height: u32,
+    ) -> Retained<Self> {
+        let this = Self::alloc().set_ivars(DataOutputSampleBufferDelegateVars {
+            tx,
+            running,
+            created,
+            region,
+            display_width,
+            display_height,
+        });
         unsafe { msg_send![super(this), init] }
     }
 }
@@ -438,7 +595,13 @@ pub struct ImplVideoRecorder {
 }
 
 impl ImplVideoRecorder {
-    pub fn new(cg_direct_display_id: CGDirectDisplayID) -> XCapResult<(Self, Receiver<Frame>)> {
+    pub fn new(
+        cg_direct_display_id: CGDirectDisplayID,
+        display_width: u32,
+        display_height: u32,
+        options: VideoRecorderOptions,
+    ) -> XCapResult<(Self, Receiver<Frame>)> {
+        let created = Instant::now();
         unsafe {
             let session = AVCaptureSession::new();
             let input = AVCaptureScreenInput::initWithDisplayID(
@@ -448,9 +611,9 @@ impl ImplVideoRecorder {
             .ok_or(XCapError::new(
                 "AVCaptureScreenInput::initWithDisplayID failed",
             ))?;
-            input.setCapturesCursor(true);
-            input.setCapturesMouseClicks(true);
-            let min_frame_duration = CMTime::new(1, 60);
+            input.setCapturesCursor(options.captures_cursor);
+            input.setCapturesMouseClicks(options.captures_mouse_clicks);
+            let min_frame_duration = CMTime::new(1, options.fps.clamp(1, 60) as i32);
             let _: () = msg_send![&input, setMinFrameDuration: min_frame_duration];
 
             if session.canAddInput(&input) {
@@ -506,7 +669,14 @@ impl ImplVideoRecorder {
             let (tx, rx) = sync_channel(0);
             let running = Arc::new(AtomicBool::new(false));
 
-            let delegate = DataOutputSampleBufferDelegate::new(tx.clone(), running.clone());
+            let delegate = DataOutputSampleBufferDelegate::new(
+                tx.clone(),
+                running.clone(),
+                created,
+                options.region,
+                display_width,
+                display_height,
+            );
 
             let sample_buffer_delegate = ProtocolObject::<
                 dyn AVCaptureVideoDataOutputSampleBufferDelegate,
@@ -543,5 +713,96 @@ impl ImplVideoRecorder {
         self.running.store(false, Ordering::Release);
         unsafe { self.session.stopRunning() };
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pixel_rect(
+        region: CaptureRegion,
+        buffer_width: usize,
+        buffer_height: usize,
+        display_width: u32,
+        display_height: u32,
+        subsampled: (bool, bool),
+    ) -> Crop {
+        DataOutputSampleBufferDelegateVars::pixel_rect(
+            Some(region),
+            buffer_width,
+            buffer_height,
+            display_width,
+            display_height,
+            subsampled,
+        )
+    }
+
+    #[test]
+    fn no_region_crops_the_whole_buffer() {
+        let crop = DataOutputSampleBufferDelegateVars::pixel_rect(
+            None,
+            5120,
+            2880,
+            2560,
+            1440,
+            (true, true),
+        );
+        assert_eq!(
+            (crop.x, crop.y, crop.width, crop.height),
+            (0, 0, 5120, 2880)
+        );
+    }
+
+    #[test]
+    fn regions_scale_from_points_to_buffer_pixels() {
+        let region = CaptureRegion {
+            x: 100,
+            y: 50,
+            width: 200,
+            height: 120,
+        };
+        let crop = pixel_rect(region, 5120, 2880, 2560, 1440, (false, false));
+        assert_eq!(
+            (crop.x, crop.y, crop.width, crop.height),
+            (200, 100, 400, 240)
+        );
+    }
+
+    #[test]
+    fn packed_formats_keep_odd_offsets() {
+        let region = CaptureRegion {
+            x: 1,
+            y: 3,
+            width: 101,
+            height: 55,
+        };
+        let crop = pixel_rect(region, 1000, 800, 1000, 800, (false, false));
+        assert_eq!((crop.x, crop.y, crop.width, crop.height), (1, 3, 101, 55));
+    }
+
+    #[test]
+    fn chroma_crops_stay_even_and_in_bounds() {
+        for (x, y) in [(3, 3), (5, 7), (99, 99), (1000, 800)] {
+            let region = CaptureRegion {
+                x,
+                y,
+                width: 7,
+                height: 5,
+            };
+            for subsampled in [(true, false), (true, true)] {
+                let crop = pixel_rect(region, 1000, 800, 1000, 800, subsampled);
+                assert_eq!(crop.x % 2, 0, "{crop:?} for {region:?}");
+                assert_eq!(crop.width % 2, 0, "{crop:?} for {region:?}");
+                assert!(crop.width >= 2);
+                assert!(crop.x + crop.width <= 1000, "{crop:?} for {region:?}");
+                if subsampled.1 {
+                    assert_eq!(crop.y % 2, 0, "{crop:?} for {region:?}");
+                    assert_eq!(crop.height % 2, 0, "{crop:?} for {region:?}");
+                    assert!(crop.height >= 2);
+                    assert!(crop.y + crop.height <= 800, "{crop:?} for {region:?}");
+                }
+            }
+        }
     }
 }
