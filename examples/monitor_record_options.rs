@@ -210,7 +210,7 @@ Usage: cargo run --example monitor_record_options -- [OPTIONS]
                         size = (frame.width, frame.height);
                         first.get_or_insert(frame.timestamp);
                         last = Some(frame.timestamp);
-                        if count <= 3 || count % 30 == 0 {
+                        if count <= 3 || count.is_multiple_of(30) {
                             println!(
                                 "frame {count:>3}: {}x{}, timestamp {:?}",
                                 frame.width, frame.height, frame.timestamp
