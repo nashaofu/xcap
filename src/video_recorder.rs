@@ -25,8 +25,9 @@ pub struct VideoRecorderOptions {
     /// Draw the mouse cursor into the frames. macOS only; Windows always
     /// excludes it.
     pub captures_cursor: bool,
-    /// Draw a highlight around the cursor for mouse clicks. macOS only.
-    pub captures_mouse_clicks: bool,
+    /// Leave out the windows owned by the calling process. macOS only; Windows
+    /// callers exclude their own windows themselves.
+    pub excludes_own_windows: bool,
 }
 
 impl Default for VideoRecorderOptions {
@@ -35,7 +36,7 @@ impl Default for VideoRecorderOptions {
             fps: 60,
             region: None,
             captures_cursor: true,
-            captures_mouse_clicks: true,
+            excludes_own_windows: true,
         }
     }
 }
@@ -56,8 +57,8 @@ impl VideoRecorderOptions {
         self
     }
 
-    pub fn captures_mouse_clicks(mut self, captures_mouse_clicks: bool) -> Self {
-        self.captures_mouse_clicks = captures_mouse_clicks;
+    pub fn excludes_own_windows(mut self, excludes_own_windows: bool) -> Self {
+        self.excludes_own_windows = excludes_own_windows;
         self
     }
 }

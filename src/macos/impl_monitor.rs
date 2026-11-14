@@ -249,6 +249,7 @@ impl ImplMonitor {
             self.cg_direct_display_id,
             self.width()?,
             self.height()?,
+            self.scale_factor()?,
             options,
         )
     }
