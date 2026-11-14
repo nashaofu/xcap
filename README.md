@@ -143,6 +143,51 @@ fn main() {
 
 ```
 
+-   Screen Record with Options (macOS / Windows)
+
+`VideoRecorderOptions` caps the frame rate, records a sub-rectangle in monitor
+units, and controls the cursor and own-window exclusion. Every `Frame` carries a
+`timestamp` measured from when the recorder was created.
+
+```rust
+use std::time::{Duration, Instant};
+use xcap::{CaptureRegion, Monitor, VideoRecorderOptions};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let monitor = Monitor::from_point(100, 100)?;
+
+    let options = VideoRecorderOptions::default()
+        .fps(15)
+        .region(CaptureRegion {
+            x: 100,
+            y: 100,
+            width: 640,
+            height: 400,
+        })
+        .captures_cursor(false)
+        .excludes_own_windows(true);
+
+    let (recorder, frames) = monitor.video_recorder_with_options(options)?;
+
+    recorder.start()?;
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(3) {
+        let frame = frames.recv_timeout(Duration::from_secs(1))?;
+        println!(
+            "{}x{} at {:?}",
+            frame.width, frame.height, frame.timestamp
+        );
+    }
+    recorder.stop()?;
+
+    Ok(())
+}
+```
+
+`captures_cursor` and `excludes_own_windows` only take effect on macOS.
+`CaptureRegion` uses monitor units (points on macOS, physical pixels on
+Windows); frame dimensions are always physical pixels.
+
 -   Window Capture
 
 ```rust
@@ -199,7 +244,16 @@ fn main() {
 
 ```
 
-More examples in [examples](./examples)
+More examples in [examples](./examples). The recording examples can be run with:
+
+```sh
+# Region + frame-rate cap, saves target/examples/monitor_record_region.png
+cargo run --example monitor_record_region
+
+# Every option from the command line
+cargo run --example monitor_record_options -- --fps 10 --width 800 --height 600
+cargo run --example monitor_record_options -- --help
+```
 
 ## Linux System Requirements
 
