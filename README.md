@@ -147,11 +147,13 @@ fn main() {
 
 `VideoRecorderOptions` caps the frame rate, records a sub-rectangle in monitor
 units, and controls the cursor and own-window exclusion. Every `Frame` carries a
-`timestamp` measured from when the recorder was created.
+`timestamp` measured from when the recorder was created. `OutputSize::Logical`
+asks ScreenCaptureKit to deliver frames at the region's point size instead of
+its Retina pixel size; DXGI ignores it, so keep a CPU downscale as a fallback.
 
 ```rust
 use std::time::{Duration, Instant};
-use xcap::{CaptureRegion, Monitor, VideoRecorderOptions};
+use xcap::{CaptureRegion, Monitor, OutputSize, VideoRecorderOptions};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let monitor = Monitor::from_point(100, 100)?;
@@ -165,7 +167,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             height: 400,
         })
         .captures_cursor(false)
-        .excludes_own_windows(true);
+        .excludes_own_windows(true)
+        .output_size(OutputSize::Logical);
 
     let (recorder, frames) = monitor.video_recorder_with_options(options)?;
 

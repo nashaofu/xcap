@@ -47,6 +47,10 @@ impl ImplVideoRecorder {
         h_monitor: HMONITOR,
         options: VideoRecorderOptions,
     ) -> XCapResult<(Self, Receiver<Frame>)> {
+        // `VideoRecorderOptions::output_size` is a macOS compositor hint with
+        // no DXGI equivalent: `OutputSize::Logical` is deliberately ignored,
+        // this backend copies a sub-region at native resolution, and the
+        // caller downscales the delivered frames itself.
         unsafe {
             let d3d_device = create_d3d_device(
                 D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_SINGLETHREADED,

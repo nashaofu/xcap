@@ -38,7 +38,7 @@ mod app {
         thread,
         time::Duration,
     };
-    use xcap::{CaptureRegion, Monitor, VideoRecorderOptions, image::RgbaImage};
+    use xcap::{CaptureRegion, Monitor, OutputSize, VideoRecorderOptions, image::RgbaImage};
 
     const USAGE: &str = "\
 Usage: cargo run --example monitor_record_options -- [OPTIONS]
@@ -49,6 +49,8 @@ Usage: cargo run --example monitor_record_options -- [OPTIONS]
   --full                     Record the whole monitor (no region)
   --cursor <on|off>          Draw the cursor, macOS only (default on)
   --own-windows <on|off>     Exclude this process' windows, macOS only (default on)
+  --logical                  Deliver frames at the region's point size instead of
+                             Retina pixels, macOS only (default native)
   --seconds <n>              Recording duration (default 4)
   --out <path>               Where to save the first frame
                              (default target/examples/monitor_record_options.png)
@@ -65,6 +67,7 @@ Usage: cargo run --example monitor_record_options -- [OPTIONS]
         full: bool,
         cursor: bool,
         own_windows: bool,
+        logical: bool,
         seconds: u64,
         out: String,
     }
@@ -80,6 +83,7 @@ Usage: cargo run --example monitor_record_options -- [OPTIONS]
                 full: false,
                 cursor: true,
                 own_windows: true,
+                logical: false,
                 seconds: 4,
                 out: "target/examples/monitor_record_options.png".into(),
             }
@@ -131,6 +135,7 @@ Usage: cargo run --example monitor_record_options -- [OPTIONS]
                 "--full" => args.full = true,
                 "--cursor" => args.cursor = boolean(&mut iter, &flag)?,
                 "--own-windows" => args.own_windows = boolean(&mut iter, &flag)?,
+                "--logical" => args.logical = true,
                 "--seconds" => args.seconds = number(&mut iter, &flag)?,
                 "--out" => args.out = take(&mut iter, &flag)?,
                 other => return Err(format!("unknown argument: {other}\n\n{USAGE}")),
@@ -171,16 +176,22 @@ Usage: cargo run --example monitor_record_options -- [OPTIONS]
             })
         };
 
+        let output_size = if args.logical {
+            OutputSize::Logical
+        } else {
+            OutputSize::Native
+        };
         let mut options = VideoRecorderOptions::default()
             .fps(args.fps)
             .captures_cursor(args.cursor)
-            .excludes_own_windows(args.own_windows);
+            .excludes_own_windows(args.own_windows)
+            .output_size(output_size);
         if let Some(region) = region {
             options = options.region(region);
         }
 
         println!(
-            "monitor '{}' ({}x{} in monitor units, scale factor {}x), fps <= {}, region {:?}, cursor {}, exclude own windows {}, {}s",
+            "monitor '{}' ({}x{} in monitor units, scale factor {}x), fps <= {}, region {:?}, cursor {}, exclude own windows {}, output size {:?}, {}s",
             monitor.friendly_name()?,
             monitor_width,
             monitor_height,
@@ -189,6 +200,7 @@ Usage: cargo run --example monitor_record_options -- [OPTIONS]
             options.region,
             options.captures_cursor,
             options.excludes_own_windows,
+            options.output_size,
             args.seconds
         );
 

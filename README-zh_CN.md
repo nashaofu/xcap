@@ -147,10 +147,12 @@ fn main() {
 
 `VideoRecorderOptions` 可以限制帧率、只录制显示器中的一块区域，并控制光标与
 自身窗口的排除。每个 `Frame` 都带有 `timestamp`，表示从录制器创建起经过的时间。
+`OutputSize::Logical` 让 ScreenCaptureKit 直接输出选区的点尺寸而非 Retina 物理
+像素尺寸；DXGI 会忽略该选项，因此调用方仍需保留 CPU 降采样兜底。
 
 ```rust
 use std::time::{Duration, Instant};
-use xcap::{CaptureRegion, Monitor, VideoRecorderOptions};
+use xcap::{CaptureRegion, Monitor, OutputSize, VideoRecorderOptions};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let monitor = Monitor::from_point(100, 100)?;
@@ -164,7 +166,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             height: 400,
         })
         .captures_cursor(false)
-        .excludes_own_windows(true);
+        .excludes_own_windows(true)
+        .output_size(OutputSize::Logical);
 
     let (recorder, frames) = monitor.video_recorder_with_options(options)?;
 

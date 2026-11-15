@@ -31,5 +31,6 @@ pub use window::Window;
 
 pub use video_recorder::CaptureRegion;
 pub use video_recorder::Frame;
+pub use video_recorder::OutputSize;
 pub use video_recorder::VideoRecorder;
 pub use video_recorder::VideoRecorderOptions;

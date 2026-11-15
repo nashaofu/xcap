@@ -14,6 +14,28 @@ pub struct CaptureRegion {
     pub height: u32,
 }
 
+/// Which frame size a video recorder should deliver.
+///
+/// A capture region is expressed in monitor units (display points on macOS),
+/// while frames are always pixels. On a Retina display those differ by the
+/// monitor's scale factor, which is a platform detail callers do not know.
+/// This enum lets a caller state the intent instead of having to compute a
+/// pixel size itself.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum OutputSize {
+    /// Physical pixels: the source rectangle multiplied by the scale factor.
+    /// The default, and the only size DXGI can deliver.
+    #[default]
+    Native,
+    /// The source rectangle's size in monitor units. On macOS
+    /// ScreenCaptureKit downscales in the compositor before the sample buffer
+    /// reaches the callback, so a 2x display delivers a quarter of the pixels
+    /// and the height is simply the region height — no aspect-ratio maths.
+    /// macOS only: other platforms deliver `Native` frames instead, so callers
+    /// must keep their own downscale as a fallback.
+    Logical,
+}
+
 /// Options for [`crate::Monitor::video_recorder_with_options`].
 #[derive(Debug, Clone)]
 pub struct VideoRecorderOptions {
@@ -28,6 +50,11 @@ pub struct VideoRecorderOptions {
     /// Leave out the windows owned by the calling process. macOS only; Windows
     /// callers exclude their own windows themselves.
     pub excludes_own_windows: bool,
+    /// Which frame size to deliver. [`OutputSize::Logical`] is a macOS-only
+    /// best-effort hint; DXGI has no equivalent and always delivers
+    /// [`OutputSize::Native`] frames, so callers must keep their own downscale
+    /// as a fallback on every platform.
+    pub output_size: OutputSize,
 }
 
 impl Default for VideoRecorderOptions {
@@ -37,6 +64,7 @@ impl Default for VideoRecorderOptions {
             region: None,
             captures_cursor: true,
             excludes_own_windows: true,
+            output_size: OutputSize::Native,
         }
     }
 }
@@ -59,6 +87,13 @@ impl VideoRecorderOptions {
 
     pub fn excludes_own_windows(mut self, excludes_own_windows: bool) -> Self {
         self.excludes_own_windows = excludes_own_windows;
+        self
+    }
+
+    /// Ask for frames at the source rectangle's logical size. macOS only;
+    /// other platforms ignore it and keep delivering native-resolution frames.
+    pub fn output_size(mut self, output_size: OutputSize) -> Self {
+        self.output_size = output_size;
         self
     }
 }

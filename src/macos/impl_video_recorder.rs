@@ -33,7 +33,7 @@ use scopeguard::defer;
 
 use crate::{
     XCapError, XCapResult,
-    video_recorder::{Frame, VideoRecorderOptions},
+    video_recorder::{Frame, OutputSize, VideoRecorderOptions},
 };
 
 /// How long to wait for ScreenCaptureKit before giving up.
@@ -229,27 +229,54 @@ impl ImplVideoRecorder {
         };
 
         let scale = if scale_factor > 0. { scale_factor } else { 1. };
-        let (source_rect, pixel_width, pixel_height) = match options.region {
-            Some(region) => (
-                CGRect::new(
-                    CGPoint::new(region.x as f64, region.y as f64),
-                    CGSize::new(region.width as f64, region.height as f64),
+        // Keep both spaces side by side: `sourceRect` and the logical size are
+        // in display points, while the native frame is that rectangle scaled
+        // into pixels. Callers only ever supply the former.
+        let (source_rect, logical_width, logical_height, pixel_width, pixel_height) =
+            match options.region {
+                Some(region) => (
+                    CGRect::new(
+                        CGPoint::new(region.x as f64, region.y as f64),
+                        CGSize::new(region.width as f64, region.height as f64),
+                    ),
+                    region.width as usize,
+                    region.height as usize,
+                    (region.width as f32 * scale).round() as usize,
+                    (region.height as f32 * scale).round() as usize,
                 ),
-                (region.width as f32 * scale).round() as usize,
-                (region.height as f32 * scale).round() as usize,
-            ),
-            None => (
-                CGRect::new(
-                    CGPoint::new(0., 0.),
-                    CGSize::new(display_width as f64, display_height as f64),
+                None => (
+                    CGRect::new(
+                        CGPoint::new(0., 0.),
+                        CGSize::new(display_width as f64, display_height as f64),
+                    ),
+                    display_width as usize,
+                    display_height as usize,
+                    (display_width as f32 * scale).round() as usize,
+                    (display_height as f32 * scale).round() as usize,
                 ),
-                (display_width as f32 * scale).round() as usize,
-                (display_height as f32 * scale).round() as usize,
-            ),
-        };
+            };
         if pixel_width == 0 || pixel_height == 0 {
             return Err(XCapError::new("the recording region is empty"));
         }
+        // `width`/`height` are the *output* dimensions in pixels while
+        // `sourceRect` stays in display points. Asking for `Logical` means the
+        // output is exactly the source rectangle's point size, so the height
+        // needs no derivation: ScreenCaptureKit downscales in the compositor
+        // before the sample buffer reaches our callback, and the rest of the
+        // pipeline sees a quarter of the pixels on a 2x Retina display.
+        // `scalesToFit = false` keeps the frame from being letterboxed. Only
+        // shrink: at a scale factor of 1 there is nothing to downscale.
+        let (output_width, output_height) = match options.output_size {
+            OutputSize::Logical
+                if logical_width > 0
+                    && logical_height > 0
+                    && logical_width < pixel_width
+                    && logical_height < pixel_height =>
+            {
+                (logical_width, logical_height)
+            }
+            _ => (pixel_width, pixel_height),
+        };
 
         let (tx, rx) = sync_channel(0);
         let running = Arc::new(AtomicBool::new(false));
@@ -264,8 +291,8 @@ impl ImplVideoRecorder {
             );
 
             let configuration = SCStreamConfiguration::new();
-            configuration.setWidth(pixel_width);
-            configuration.setHeight(pixel_height);
+            configuration.setWidth(output_width);
+            configuration.setHeight(output_height);
             configuration.setPixelFormat(kCVPixelFormatType_32BGRA);
             configuration.setSourceRect(source_rect);
             configuration.setScalesToFit(false);
