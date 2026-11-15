@@ -1,5 +1,6 @@
 use std::ffi::c_void;
 
+use crate::{XCapError, error::XCapResult};
 use image::RgbaImage;
 use objc2_app_kit::NSWorkspace;
 use objc2_core_foundation::{
@@ -10,7 +11,6 @@ use objc2_core_graphics::{
     CGRectIntersectsRect, CGRectMakeWithDictionaryRepresentation, CGWindowListCopyWindowInfo,
     CGWindowListOption,
 };
-use crate::{XCapError, error::XCapResult};
 
 use super::{capture::capture, impl_monitor::ImplMonitor};
 
