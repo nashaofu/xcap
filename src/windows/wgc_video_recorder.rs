@@ -2,6 +2,7 @@ use std::sync::{
     Arc, Mutex,
     mpsc::{Receiver, SyncSender, sync_channel},
 };
+use std::time::{Duration, Instant};
 
 use windows::{
     Foundation::TypedEventHandler,
@@ -19,7 +20,10 @@ use windows::{
     core::{Error as WindowsError, IInspectable, Interface, factory},
 };
 
-use crate::{XCapResult, video_recorder::Frame};
+use crate::{
+    XCapResult,
+    video_recorder::{CaptureRegion, Frame, VideoRecorderOptions},
+};
 
 use super::wgc::{IDXGIDEVICE, get_next_frame};
 
@@ -56,11 +60,24 @@ pub(crate) struct ImplVideoRecorder {
     item: GraphicsCaptureItem,
     runtime: Arc<Mutex<Option<WgcRuntime>>>,
     tx: SyncSender<Frame>,
+    region: Option<CaptureRegion>,
+    interval: Duration,
+    created: Instant,
 }
 
 impl ImplVideoRecorder {
     fn create_runtime(&self) -> XCapResult<WgcRuntime> {
         let item_size = self.item.Size()?;
+        let (x, y, width, height) = match self.region {
+            Some(region) => {
+                let x = region.x.min(item_size.Width as u32 - 1);
+                let y = region.y.min(item_size.Height as u32 - 1);
+                let width = region.width.clamp(1, item_size.Width as u32 - x);
+                let height = region.height.clamp(1, item_size.Height as u32 - y);
+                (x, y, width, height)
+            }
+            None => (0, 0, item_size.Width as u32, item_size.Height as u32),
+        };
 
         let device = {
             let inspectable = unsafe { CreateDirect3D11DeviceFromDXGIDevice(&*IDXGIDEVICE)? };
@@ -75,21 +92,30 @@ impl ImplVideoRecorder {
         )?;
 
         let tx = self.tx.clone();
+        let interval = self.interval;
+        let created = self.created;
+        let last_frame_at = Arc::new(Mutex::new(None::<Duration>));
+        let callback_last_frame_at = last_frame_at.clone();
 
         frame_pool.FrameArrived(
             &TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new(
                 move |frame_pool, _| {
-                    let frame = get_next_frame(
-                        frame_pool,
-                        0,
-                        0,
-                        item_size.Width as u32,
-                        item_size.Height as u32,
-                    )
-                    .map_err(|error| {
-                        log::error!("wgc get_next_frame failed: {error}");
-                        WindowsError::empty()
-                    })?;
+                    let now = created.elapsed();
+                    if let Ok(mut last) = callback_last_frame_at.lock() {
+                        if last.is_some_and(|last| {
+                            now.saturating_sub(last) + Duration::from_millis(1) < interval
+                        }) {
+                            return Ok(());
+                        }
+                        *last = Some(now);
+                    }
+
+                    let mut frame =
+                        get_next_frame(frame_pool, x, y, width, height).map_err(|error| {
+                            log::error!("wgc get_next_frame failed: {error}");
+                            WindowsError::empty()
+                        })?;
+                    frame.timestamp = now;
 
                     let _ = tx.send(frame);
 
@@ -117,7 +143,10 @@ impl ImplVideoRecorder {
         })
     }
 
-    pub fn new(h_monitor: HMONITOR) -> XCapResult<(Self, Receiver<Frame>)> {
+    pub fn new(
+        h_monitor: HMONITOR,
+        options: VideoRecorderOptions,
+    ) -> XCapResult<(Self, Receiver<Frame>)> {
         let interop = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()?;
         let item = unsafe { interop.CreateForMonitor::<GraphicsCaptureItem>(h_monitor)? };
 
@@ -127,6 +156,9 @@ impl ImplVideoRecorder {
             item,
             runtime: Arc::new(Mutex::new(None)),
             tx,
+            region: options.region,
+            interval: Duration::from_secs_f64(1.0 / options.fps.clamp(1, 60) as f64),
+            created: Instant::now(),
         };
 
         Ok((recorder, rx))
