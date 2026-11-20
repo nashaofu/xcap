@@ -143,6 +143,53 @@ fn main() {
 
 ```
 
+-   带选项的屏幕录制（macOS / Windows）
+
+`VideoRecorderOptions` 可以限制帧率、只录制显示器中的一块区域，并控制光标与
+自身窗口的排除。每个 `Frame` 都带有 `timestamp`，表示从录制器创建起经过的时间。
+`OutputSize::Logical` 让 ScreenCaptureKit 直接输出选区的点尺寸而非 Retina 物理
+像素尺寸；DXGI 会忽略该选项，因此调用方仍需保留 CPU 降采样兜底。
+
+```rust
+use std::time::{Duration, Instant};
+use xcap::{CaptureRegion, Monitor, OutputSize, VideoRecorderOptions};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let monitor = Monitor::from_point(100, 100)?;
+
+    let options = VideoRecorderOptions::default()
+        .fps(15)
+        .region(CaptureRegion {
+            x: 100,
+            y: 100,
+            width: 640,
+            height: 400,
+        })
+        .captures_cursor(false)
+        .excludes_own_windows(true)
+        .output_size(OutputSize::Logical);
+
+    let (recorder, frames) = monitor.video_recorder_with_options(options)?;
+
+    recorder.start()?;
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(3) {
+        let frame = frames.recv_timeout(Duration::from_secs(1))?;
+        println!(
+            "{}x{} at {:?}",
+            frame.width, frame.height, frame.timestamp
+        );
+    }
+    recorder.stop()?;
+
+    Ok(())
+}
+```
+
+`captures_cursor` 与 `excludes_own_windows` 仅在 macOS 上生效。
+`CaptureRegion` 使用显示器单位（macOS 上是点，Windows 上是物理像素），
+而帧尺寸始终是物理像素。
+
 -   窗口截图
 
 ```rust
@@ -199,7 +246,16 @@ fn main() {
 
 ```
 
-更多例子可以在 [examples](./examples) 目录中找到。
+更多例子可以在 [examples](./examples) 目录中找到。录制示例可以这样运行：
+
+```sh
+# 区域录制 + 帧率上限，首帧保存到 target/examples/monitor_record_region.png
+cargo run --example monitor_record_region
+
+# 通过命令行配置全部选项
+cargo run --example monitor_record_options -- --fps 10 --width 800 --height 600
+cargo run --example monitor_record_options -- --help
+```
 
 ## Linux 系统要求
 

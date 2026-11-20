@@ -21,7 +21,7 @@ use windows::{
 
 use crate::{
     error::{XCapError, XCapResult},
-    video_recorder::Frame,
+    video_recorder::{Frame, VideoRecorderOptions},
 };
 
 use super::{
@@ -287,8 +287,11 @@ impl ImplMonitor {
         Ok(image)
     }
 
-    pub fn video_recorder(&self) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {
-        ImplVideoRecorder::new(self.h_monitor)
+    pub fn video_recorder(
+        &self,
+        options: VideoRecorderOptions,
+    ) -> XCapResult<(ImplVideoRecorder, Receiver<Frame>)> {
+        ImplVideoRecorder::new(self.h_monitor, options)
     }
 }
 

@@ -36,6 +36,7 @@ scopeguard = "1.2"
 thiserror = "2.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6.2"
 dispatch2 = "0.3.1"
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [
@@ -69,14 +70,16 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
     "NSString",
     "NSValue",
 ] }
-objc2-av-foundation = { version = "0.3.2", default-features = false, features = [
+objc2-screen-capture-kit = { version = "0.3.2", default-features = false, features = [
     "std",
+    "block2",
+    "dispatch2",
+    "libc",
+    "objc2-core-foundation",
     "objc2-core-graphics",
     "objc2-core-media",
-    "AVCaptureInput",
-    "AVCaptureOutputBase",
-    "AVCaptureSession",
-    "AVCaptureVideoDataOutput",
+    "SCShareableContent",
+    "SCStream",
 ] }
 objc2-core-media = { version = "0.3.2", default-features = false, features = [
     "std",

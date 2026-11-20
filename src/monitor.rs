@@ -2,6 +2,8 @@ use std::sync::mpsc::Receiver;
 
 use image::RgbaImage;
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use crate::video_recorder::VideoRecorderOptions;
 use crate::{
     VideoRecorder, error::XCapResult, platform::impl_monitor::ImplMonitor, video_recorder::Frame,
 };
@@ -97,9 +99,30 @@ impl Monitor {
     }
 
     pub fn video_recorder(&self) -> XCapResult<(VideoRecorder, Receiver<Frame>)> {
-        let (impl_video_recorder, sx) = self.impl_monitor.video_recorder()?;
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        {
+            self.video_recorder_with_options(VideoRecorderOptions::default())
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            let (impl_video_recorder, receiver) = self.impl_monitor.video_recorder()?;
+            Ok((VideoRecorder::new(impl_video_recorder), receiver))
+        }
+    }
 
-        Ok((VideoRecorder::new(impl_video_recorder), sx))
+    /// Create a video recorder with a region, frame-rate cap and cursor options.
+    ///
+    /// Only macOS and Windows implement the options; the other platforms keep
+    /// the plain [`Self::video_recorder`]. The cursor options are macOS-only;
+    /// Windows duplication does not include the cursor.
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    pub fn video_recorder_with_options(
+        &self,
+        options: VideoRecorderOptions,
+    ) -> XCapResult<(VideoRecorder, Receiver<Frame>)> {
+        let (impl_video_recorder, receiver) = self.impl_monitor.video_recorder(options)?;
+
+        Ok((VideoRecorder::new(impl_video_recorder), receiver))
     }
 }
 
