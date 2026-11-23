@@ -103,7 +103,10 @@ pub(super) fn capture_monitor(h_monitor: HMONITOR) -> XCapResult<HdrImage> {
 impl Session {
     pub(super) fn open(h_monitor: HMONITOR) -> XCapResult<Self> {
         let (adapter, output) = find_output(h_monitor)?;
-        if !is_hdr_color_space(output_color_space(&output)) {
+        let color_space = output_color_space(&output);
+        log::info!("xcap Windows HDR: output colorspace={color_space:?}");
+        if !is_hdr_color_space(color_space) {
+            log::info!("xcap Windows HDR: colorspace not a supported HDR encoding -> NotSupported (SDR fallback)");
             return Err(XCapError::NotSupported);
         }
         let adapter: IDXGIAdapter = adapter.cast()?;
@@ -131,19 +134,25 @@ impl Session {
         // formats, so the actual encoding is read back from the description.
         let output5 = output.cast::<IDXGIOutput5>().ok();
         let mut duplication = None;
+        let mut format_choice = "none";
         if let Some(output5) = output5 {
             unsafe {
                 if let Ok(dup) =
                     output5.DuplicateOutput1(&dxgi_device, 0, &[DXGI_FORMAT_R16G16B16A16_FLOAT])
                 {
                     duplication = Some(dup);
+                    format_choice = "R16G16B16A16_FLOAT (scRGB)";
                 } else if let Ok(dup) =
                     output5.DuplicateOutput1(&dxgi_device, 0, &[DXGI_FORMAT_R10G10B10A2_UNORM])
                 {
                     duplication = Some(dup);
+                    format_choice = "R10G10B10A2_UNORM (HDR10 PQ)";
                 }
             }
+        } else {
+            log::info!("xcap Windows HDR: IDXGIOutput5 unavailable (no DuplicateOutput1)");
         }
+        log::info!("xcap Windows HDR: accepted desktop duplication format={format_choice}");
         let duplication = duplication.ok_or(XCapError::NotSupported)?;
 
         let desc = unsafe { duplication.GetDesc() };
@@ -151,14 +160,17 @@ impl Session {
         // desktop image rotated inside it, so a rotated display would not line
         // up with the selection. The GDI grab is correctly oriented.
         if desc.Rotation != DXGI_MODE_ROTATION_IDENTITY {
+            log::info!("xcap Windows HDR: rotated desktop {:?} -> NotSupported", desc.Rotation);
             return Err(XCapError::NotSupported);
         }
 
+        let white = sdr_white_nits(h_monitor);
+        log::info!("xcap Windows HDR: session ready, sdr_white_nits={white}");
         Ok(Self {
             device,
             context,
             duplication,
-            sdr_white_nits: sdr_white_nits(h_monitor),
+            sdr_white_nits: white,
         })
     }
 
@@ -193,8 +205,14 @@ impl Session {
             return Ok(None);
         };
         let image = match mode_for_format(frame.format) {
-            Some(HdrMode::Float) => float_to_scrgb(&frame.raw, frame.width, frame.height),
-            Some(HdrMode::Pq) => pq_to_scrgb(&frame.raw, frame.width, frame.height),
+            Some(HdrMode::Float) => {
+                log::info!("xcap Windows HDR: decoding frame as scRGB float");
+                float_to_scrgb(&frame.raw, frame.width, frame.height)
+            }
+            Some(HdrMode::Pq) => {
+                log::info!("xcap Windows HDR: decoding frame as HDR10 PQ 10-bit");
+                pq_to_scrgb(&frame.raw, frame.width, frame.height)
+            }
             None => {
                 return Err(XCapError::new(format!(
                     "DXGI returned an unsupported desktop frame format {:?}",

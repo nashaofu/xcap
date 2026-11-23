@@ -72,6 +72,7 @@ fn shareable_content() -> XCapResult<Retained<SCShareableContent>> {
 
 pub fn capture(display_id: CGDirectDisplayID) -> XCapResult<HdrImage> {
     if !supported() {
+        log::info!("xcap macOS HDR: unsupported (need aarch64 + macOS 15+)");
         return Err(XCapError::NotSupported);
     }
     let content = shareable_content()?;
@@ -82,17 +83,29 @@ pub fn capture(display_id: CGDirectDisplayID) -> XCapResult<HdrImage> {
             .find(|display| display.displayID() == display_id)
             .ok_or_else(|| XCapError::new("no shareable display with the requested id"))?
     };
+    log::info!(
+        "xcap macOS HDR: display {display_id}, config dynamicRange=SDRAndHDR showsCursor=false"
+    );
 
     let (tx, rx) = sync_channel::<Result<HdrImage, String>>(1);
     let handler = RcBlock::new(
         move |output: *mut SCScreenshotOutput, error: *mut NSError| {
             let result = if !error.is_null() {
-                Err(error_message(unsafe { &*error }))
+                let msg = error_message(unsafe { &*error });
+                log::warn!("xcap macOS HDR: completion error: {msg}");
+                Err(msg)
             } else if output.is_null() {
+                log::warn!("xcap macOS HDR: completion returned no output");
                 Err("ScreenCaptureKit returned no screenshot".into())
             } else {
                 let output = unsafe { &*output };
-                match unsafe { output.hdrImage() } {
+                let hdr = unsafe { output.hdrImage() };
+                log::info!(
+                    "xcap macOS HDR: output hdrImage={} sdrImage={}",
+                    if hdr.is_some() { "present" } else { "nil" },
+                    if unsafe { output.sdrImage() }.is_some() { "present" } else { "nil" }
+                );
+                match hdr {
                     Some(image) => hdr_from_cg_image(&image),
                     None => Err("the screenshot came back without an HDR image".into()),
                 }
@@ -108,7 +121,9 @@ pub fn capture(display_id: CGDirectDisplayID) -> XCapResult<HdrImage> {
             &NSArray::new(),
         );
         let configuration = SCScreenshotConfiguration::new();
-        configuration.setDynamicRange(SCScreenshotDynamicRange::HDR);
+        // `HDR` alone leaves `hdrImage` nil on some systems; Apple's own
+        // examples ask for both and read `hdrImage` from that output.
+        configuration.setDynamicRange(SCScreenshotDynamicRange::SDRAndHDR);
         configuration.setShowsCursor(false);
         SCScreenshotManager::captureScreenshotWithFilter_configuration_completionHandler(
             &filter,
