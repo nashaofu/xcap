@@ -20,6 +20,7 @@ use windows::{
 };
 
 use crate::{
+    HdrImage,
     error::{XCapError, XCapResult},
     video_recorder::{Frame, VideoRecorderOptions},
 };
@@ -285,6 +286,10 @@ impl ImplMonitor {
     pub fn capture_region(&self, x: u32, y: u32, width: u32, height: u32) -> XCapResult<RgbaImage> {
         let image = capture_monitor(self, Some(x), Some(y), Some(width), Some(height))?;
         Ok(image)
+    }
+
+    pub fn capture_image_hdr(&self) -> XCapResult<HdrImage> {
+        super::dxgi::capture_monitor(self.h_monitor)
     }
 
     pub fn video_recorder(

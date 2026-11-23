@@ -3,6 +3,8 @@ use std::sync::mpsc::Receiver;
 use image::RgbaImage;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
+use crate::HdrImage;
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::video_recorder::VideoRecorderOptions;
 use crate::{
     VideoRecorder, error::XCapResult, platform::impl_monitor::ImplMonitor, video_recorder::Frame,
@@ -96,6 +98,15 @@ impl Monitor {
 
     pub fn capture_region(&self, x: u32, y: u32, width: u32, height: u32) -> XCapResult<RgbaImage> {
         self.impl_monitor.capture_region(x, y, width, height)
+    }
+
+    /// Capture the monitor as half-float scRGB pixels.
+    ///
+    /// Returns [`XCapError::NotSupported`] when the display is not currently
+    /// in HDR mode. Only macOS and Windows implement this.
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    pub fn capture_image_hdr(&self) -> XCapResult<HdrImage> {
+        self.impl_monitor.capture_image_hdr()
     }
 
     pub fn video_recorder(&self) -> XCapResult<(VideoRecorder, Receiver<Frame>)> {

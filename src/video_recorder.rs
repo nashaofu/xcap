@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use crate::{XCapResult, platform::impl_video_recorder::ImplVideoRecorder};
+use crate::{HdrImage, XCapResult, platform::impl_video_recorder::ImplVideoRecorder};
 
 /// A rectangle in monitor units, the same space as [`crate::Monitor::capture_region`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,6 +36,19 @@ pub enum OutputSize {
     Logical,
 }
 
+/// Which range a video recorder should deliver.
+///
+/// [`Hdr`](Self::Hdr) is a request, not a guarantee: the display has to be
+/// composited in HDR mode and the platform has to expose extended-range frames.
+/// When either is missing the recorder delivers ordinary SDR frames, so callers
+/// must look at each [`Frame`] instead of assuming what they asked for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DynamicRange {
+    #[default]
+    Sdr,
+    Hdr,
+}
+
 /// Options for [`crate::Monitor::video_recorder_with_options`].
 #[derive(Debug, Clone)]
 pub struct VideoRecorderOptions {
@@ -55,6 +68,8 @@ pub struct VideoRecorderOptions {
     /// [`OutputSize::Native`] frames, so callers must keep their own downscale
     /// as a fallback on every platform.
     pub output_size: OutputSize,
+    /// Ask for extended-range frames. See [`DynamicRange`].
+    pub dynamic_range: DynamicRange,
 }
 
 impl Default for VideoRecorderOptions {
@@ -65,6 +80,7 @@ impl Default for VideoRecorderOptions {
             captures_cursor: true,
             excludes_own_windows: true,
             output_size: OutputSize::Native,
+            dynamic_range: DynamicRange::Sdr,
         }
     }
 }
@@ -96,14 +112,22 @@ impl VideoRecorderOptions {
         self.output_size = output_size;
         self
     }
+
+    pub fn dynamic_range(mut self, dynamic_range: DynamicRange) -> Self {
+        self.dynamic_range = dynamic_range;
+        self
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct Frame {
     pub width: u32,
     pub height: u32,
-    /// RGBA pixels, `width * height * 4` bytes.
+    /// RGBA pixels, `width * height * 4` bytes. Empty for an HDR frame.
     pub raw: Vec<u8>,
+    /// The same frame as linear scRGB half-float samples, when the recorder
+    /// actually delivered extended-range frames.
+    pub hdr: Option<HdrImage>,
     /// Time since the recorder was created.
     pub timestamp: Duration,
 }
@@ -114,6 +138,7 @@ impl Frame {
             width,
             height,
             raw,
+            hdr: None,
             timestamp: Duration::ZERO,
         }
     }
@@ -123,6 +148,17 @@ impl Frame {
             width,
             height,
             raw,
+            hdr: None,
+            timestamp,
+        }
+    }
+
+    pub fn new_hdr(width: u32, height: u32, hdr: HdrImage, timestamp: Duration) -> Self {
+        Self {
+            width,
+            height,
+            raw: Vec::new(),
+            hdr: Some(hdr),
             timestamp,
         }
     }

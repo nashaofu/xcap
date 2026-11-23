@@ -16,24 +16,25 @@ use objc2::{
     runtime::{NSObjectProtocol, ProtocolObject},
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-use objc2_core_graphics::CGDirectDisplayID;
+use objc2_core_graphics::{CGColorSpace, CGDirectDisplayID};
 use objc2_core_media::{CMSampleBuffer, CMTime};
 use objc2_core_video::{
     CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow, CVPixelBufferGetDataSize,
     CVPixelBufferGetHeight, CVPixelBufferGetPixelFormatType, CVPixelBufferGetWidth,
     CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
-    kCVPixelFormatType_32BGRA,
+    kCVImageBufferCGColorSpaceKey, kCVPixelFormatType_32BGRA, kCVPixelFormatType_64RGBAHalf,
 };
 use objc2_foundation::{NSArray, NSError, NSObject};
 use objc2_screen_capture_kit::{
-    SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamOutput,
-    SCStreamOutputType, SCWindow,
+    SCCaptureDynamicRange, SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration,
+    SCStreamOutput, SCStreamOutputType, SCWindow,
 };
 use scopeguard::defer;
 
+use super::hdr;
 use crate::{
-    XCapError, XCapResult,
-    video_recorder::{Frame, OutputSize, VideoRecorderOptions},
+    HdrImage, XCapError, XCapResult,
+    video_recorder::{DynamicRange, Frame, OutputSize, VideoRecorderOptions},
 };
 
 /// How long to wait for ScreenCaptureKit before giving up.
@@ -59,7 +60,16 @@ fn shareable_content() -> XCapResult<Retained<SCShareableContent>> {
             let _ = tx.send(result);
         },
     );
-    unsafe { SCShareableContent::getShareableContentWithCompletionHandler(&handler) };
+    // Restrict enumeration to on-screen, non-desktop windows: on a busy
+    // desktop the full list carries ~150 off-screen windows we immediately
+    // discard, and the extra marshalling costs ~15 ms on every call (much
+    // more under load). `displays()` is unaffected, and the caller's own
+    // windows are on-screen, so the exclusion list stays identical.
+    unsafe {
+        SCShareableContent::getShareableContentExcludingDesktopWindows_onScreenWindowsOnly_completionHandler(
+            true, true, &handler,
+        )
+    };
 
     match rx.recv_timeout(START_TIMEOUT) {
         Ok(Ok(content)) => Ok(content),
@@ -75,6 +85,11 @@ struct StreamOutputVars {
     tx: SyncSender<Frame>,
     running: Arc<AtomicBool>,
     created: Instant,
+    /// Whether the stream was asked for extended range, i.e. whether an RGhA
+    /// buffer is expected at all.
+    hdr: bool,
+    /// Extended sRGB → linear lookup, built once per recording.
+    srgb_lut: Option<Box<[u16; 65_536]>>,
 }
 
 impl StreamOutputVars {
@@ -95,13 +110,6 @@ impl StreamOutputVars {
             };
 
             let format_type = CVPixelBufferGetPixelFormatType(&pixel_buffer);
-            if format_type != kCVPixelFormatType_32BGRA {
-                log::error!(
-                    "unexpected ScreenCaptureKit pixel format 0x{format_type:08X}, expected BGRA"
-                );
-                return;
-            }
-
             let width = CVPixelBufferGetWidth(&pixel_buffer);
             let height = CVPixelBufferGetHeight(&pixel_buffer);
             let bytes_per_row = CVPixelBufferGetBytesPerRow(&pixel_buffer);
@@ -112,36 +120,71 @@ impl StreamOutputVars {
             }
             let data = slice::from_raw_parts(base_address.cast::<u8>(), size);
 
-            let row_len = width * 4;
-            let mut buffer = vec![0; row_len * height];
-            for (src_row, dst_row) in data
-                .chunks_exact(bytes_per_row)
-                .zip(buffer.chunks_exact_mut(row_len))
-            {
-                for (src, dst) in src_row[..row_len]
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .zip(dst_row.as_chunks_mut::<4>().0)
-                {
-                    dst[0] = src[2];
-                    dst[1] = src[1];
-                    dst[2] = src[0];
-                    dst[3] = src[3];
+            let frame = match format_type {
+                kCVPixelFormatType_32BGRA => {
+                    let row_len = width * 4;
+                    let mut buffer = vec![0; row_len * height];
+                    for (src_row, dst_row) in data
+                        .chunks_exact(bytes_per_row)
+                        .zip(buffer.chunks_exact_mut(row_len))
+                    {
+                        for (src, dst) in src_row[..row_len]
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
+                            .zip(dst_row.as_chunks_mut::<4>().0)
+                        {
+                            dst[0] = src[2];
+                            dst[1] = src[1];
+                            dst[2] = src[0];
+                            dst[3] = src[3];
+                        }
+                    }
+                    Frame::new_at(width as u32, height as u32, buffer, timestamp)
                 }
-            }
+                kCVPixelFormatType_64RGBAHalf if self.hdr => {
+                    let linear = pixel_buffer
+                        .attachment(kCVImageBufferCGColorSpaceKey, std::ptr::null_mut())
+                        .and_then(|space| space.downcast::<CGColorSpace>().ok())
+                        .is_some_and(|space| hdr::is_linear(Some(&space)));
+                    let row_len = width * 8;
+                    let mut pixels = Vec::with_capacity(width * height * 6);
+                    for src_row in data.chunks_exact(bytes_per_row).take(height) {
+                        for pixel in src_row[..row_len].chunks_exact(8).take(width) {
+                            for bytes in pixel.as_chunks::<2>().0.iter().take(3) {
+                                let bits = u16::from_le_bytes(*bytes);
+                                let out = if linear {
+                                    bits
+                                } else {
+                                    self.srgb_lut
+                                        .as_ref()
+                                        .map_or(bits, |lut| lut[bits as usize])
+                                };
+                                pixels.extend_from_slice(&out.to_le_bytes());
+                            }
+                        }
+                    }
+                    Frame::new_hdr(
+                        width as u32,
+                        height as u32,
+                        HdrImage::new(width as u32, height as u32, pixels, 203.0),
+                        timestamp,
+                    )
+                }
+                _ => {
+                    log::error!(
+                        "unexpected ScreenCaptureKit pixel format 0x{format_type:08X}, expected BGRA or RGhA"
+                    );
+                    return;
+                }
+            };
 
             // The stream may be stopped while this callback is converting.
             if !self.running.load(Ordering::Acquire) {
                 return;
             }
 
-            let _ = self.tx.send(Frame::new_at(
-                width as u32,
-                height as u32,
-                buffer,
-                timestamp,
-            ));
+            let _ = self.tx.send(frame);
         }
     }
 }
@@ -172,11 +215,19 @@ define_class!(
 );
 
 impl StreamOutput {
-    fn new(tx: SyncSender<Frame>, running: Arc<AtomicBool>, created: Instant) -> Retained<Self> {
+    fn new(
+        tx: SyncSender<Frame>,
+        running: Arc<AtomicBool>,
+        created: Instant,
+        hdr: bool,
+        srgb_lut: Option<Box<[u16; 65_536]>>,
+    ) -> Retained<Self> {
         let this = Self::alloc().set_ivars(StreamOutputVars {
             tx,
             running,
             created,
+            hdr,
+            srgb_lut,
         });
         unsafe { msg_send![super(this), init] }
     }
@@ -280,7 +331,12 @@ impl ImplVideoRecorder {
 
         let (tx, rx) = sync_channel(0);
         let running = Arc::new(AtomicBool::new(false));
-        let output = StreamOutput::new(tx, running.clone(), created);
+        // HDR streaming needs Apple Silicon and macOS 15; asking on an older
+        // Mac silently keeps the SDR stream, so only build the lookup when the
+        // frames can actually arrive as RGhA.
+        let hdr_enabled = options.dynamic_range == DynamicRange::Hdr && hdr::supported();
+        let srgb_lut = hdr_enabled.then(hdr::srgb_to_linear_lut);
+        let output = StreamOutput::new(tx, running.clone(), created, hdr_enabled, srgb_lut);
         let queue = DispatchQueue::new("XCapStreamOutput", DispatchQueueAttr::SERIAL);
 
         unsafe {
@@ -293,7 +349,13 @@ impl ImplVideoRecorder {
             let configuration = SCStreamConfiguration::new();
             configuration.setWidth(output_width);
             configuration.setHeight(output_height);
-            configuration.setPixelFormat(kCVPixelFormatType_32BGRA);
+            if hdr_enabled {
+                // The configuration picks the RGhA pixel format and the
+                // extended-range color space for us.
+                configuration.setCaptureDynamicRange(SCCaptureDynamicRange::HDRLocalDisplay);
+            } else {
+                configuration.setPixelFormat(kCVPixelFormatType_32BGRA);
+            }
             configuration.setSourceRect(source_rect);
             configuration.setScalesToFit(false);
             configuration.setShowsCursor(options.captures_cursor);
