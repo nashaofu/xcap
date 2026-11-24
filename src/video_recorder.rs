@@ -6,6 +6,9 @@ use std::{
     time::Duration,
 };
 
+#[cfg(any(target_os = "windows", test))]
+use std::sync::{Arc, atomic::AtomicUsize};
+
 use crate::{HdrImage, XCapResult, platform::impl_video_recorder::ImplVideoRecorder};
 
 /// A rectangle in monitor units, the same space as [`crate::Monitor::capture_region`].
@@ -122,7 +125,7 @@ impl VideoRecorderOptions {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Frame {
     pub width: u32,
     pub height: u32,
@@ -133,6 +136,67 @@ pub struct Frame {
     pub hdr: Option<HdrImage>,
     /// Time since the recorder was created.
     pub timestamp: Duration,
+    /// Released when the receiver drops the frame, including decode failures.
+    #[cfg(any(target_os = "windows", test))]
+    queue_permit: Option<QueuePermit>,
+}
+
+impl Clone for Frame {
+    fn clone(&self) -> Self {
+        Self {
+            width: self.width,
+            height: self.height,
+            raw: self.raw.clone(),
+            hdr: self.hdr.clone(),
+            timestamp: self.timestamp,
+            #[cfg(any(target_os = "windows", test))]
+            queue_permit: self.queue_permit.clone(),
+        }
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+#[derive(Debug)]
+pub(crate) struct QueuePermit {
+    depth: Arc<AtomicUsize>,
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl QueuePermit {
+    pub(crate) fn acquire(depth: Arc<AtomicUsize>, capacity: usize) -> Option<Self> {
+        let mut current = depth.load(Ordering::Relaxed);
+        loop {
+            if current >= capacity {
+                return None;
+            }
+            match depth.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Some(Self { depth }),
+                Err(actual) => current = actual,
+            }
+        }
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl Clone for QueuePermit {
+    fn clone(&self) -> Self {
+        self.depth.fetch_add(1, Ordering::Relaxed);
+        Self {
+            depth: self.depth.clone(),
+        }
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl Drop for QueuePermit {
+    fn drop(&mut self) {
+        self.depth.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 impl Frame {
@@ -143,6 +207,8 @@ impl Frame {
             raw,
             hdr: None,
             timestamp: Duration::ZERO,
+            #[cfg(any(target_os = "windows", test))]
+            queue_permit: None,
         }
     }
 
@@ -153,6 +219,8 @@ impl Frame {
             raw,
             hdr: None,
             timestamp,
+            #[cfg(any(target_os = "windows", test))]
+            queue_permit: None,
         }
     }
 
@@ -163,7 +231,15 @@ impl Frame {
             raw: Vec::new(),
             hdr: Some(hdr),
             timestamp,
+            #[cfg(any(target_os = "windows", test))]
+            queue_permit: None,
         }
+    }
+
+    #[cfg(any(target_os = "windows", test))]
+    pub(crate) fn with_queue_permit(mut self, permit: QueuePermit) -> Self {
+        self.queue_permit = Some(permit);
+        self
     }
 }
 
@@ -243,5 +319,35 @@ impl VideoRecorder {
     }
     pub fn stop(&self) -> XCapResult<()> {
         self.impl_video_recorder.stop()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn queue_permits_track_queued_and_cloned_frames() {
+        let depth = Arc::new(AtomicUsize::new(0));
+        let first = QueuePermit::acquire(depth.clone(), 2).unwrap();
+        let second = QueuePermit::acquire(depth.clone(), 2).unwrap();
+        assert!(QueuePermit::acquire(depth.clone(), 2).is_none());
+        let cloned = second.clone();
+        drop(second);
+        assert_eq!(depth.load(Ordering::Relaxed), 2);
+        drop(cloned);
+        assert_eq!(depth.load(Ordering::Relaxed), 1);
+        drop(first);
+        assert_eq!(depth.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn receiving_a_frame_releases_its_queue_permit() {
+        let depth = Arc::new(AtomicUsize::new(0));
+        let permit = QueuePermit::acquire(depth.clone(), 1).unwrap();
+        let frame = Frame::new(1, 1, vec![0; 4]).with_queue_permit(permit);
+        assert_eq!(depth.load(Ordering::Relaxed), 1);
+        drop(frame);
+        assert_eq!(depth.load(Ordering::Relaxed), 0);
     }
 }

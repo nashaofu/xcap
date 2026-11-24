@@ -2,8 +2,8 @@ use std::{
     slice,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{Receiver, SyncSender, sync_channel},
+        atomic::{AtomicBool, AtomicU32, Ordering},
+        mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel},
     },
     time::{Duration, Instant},
 };
@@ -15,14 +15,18 @@ use objc2::{
     rc::Retained,
     runtime::{NSObjectProtocol, ProtocolObject},
 };
-use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+use objc2_core_foundation::{CFString, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::{CGColorSpace, CGDirectDisplayID};
 use objc2_core_media::{CMSampleBuffer, CMTime};
 use objc2_core_video::{
-    CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow, CVPixelBufferGetDataSize,
+    CVPixelBuffer, CVPixelBufferGetBaseAddress, CVPixelBufferGetBaseAddressOfPlane,
+    CVPixelBufferGetBytesPerRow, CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferGetDataSize,
     CVPixelBufferGetHeight, CVPixelBufferGetPixelFormatType, CVPixelBufferGetWidth,
     CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
-    kCVImageBufferCGColorSpaceKey, kCVPixelFormatType_32BGRA, kCVPixelFormatType_64RGBAHalf,
+    kCVImageBufferCGColorSpaceKey, kCVImageBufferYCbCrMatrix_ITU_R_601_4,
+    kCVImageBufferYCbCrMatrixKey, kCVPixelFormatType_32BGRA as PIXEL_FORMAT_32BGRA,
+    kCVPixelFormatType_64RGBAHalf as PIXEL_FORMAT_64RGBA_HALF,
+    kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange as PIXEL_FORMAT_420V,
 };
 use objc2_foundation::{NSArray, NSError, NSObject};
 use objc2_screen_capture_kit::{
@@ -80,16 +84,87 @@ fn shareable_content() -> XCapResult<Retained<SCShareableContent>> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum YcbcrMatrix {
+    Bt601,
+    Bt709,
+}
+
+fn ycbcr_matrix(pixel_buffer: &CVPixelBuffer) -> YcbcrMatrix {
+    let matrix = unsafe {
+        pixel_buffer
+            .attachment(kCVImageBufferYCbCrMatrixKey, std::ptr::null_mut())
+            .and_then(|value| value.downcast::<CFString>().ok())
+    };
+    let bt601 = unsafe { kCVImageBufferYCbCrMatrix_ITU_R_601_4 };
+    if matrix
+        .as_deref()
+        .is_some_and(|value| value.to_string() == bt601.to_string())
+    {
+        YcbcrMatrix::Bt601
+    } else {
+        YcbcrMatrix::Bt709
+    }
+}
+
+fn rgba_from_420v(
+    width: usize,
+    height: usize,
+    luma: &[u8],
+    luma_stride: usize,
+    chroma: &[u8],
+    chroma_stride: usize,
+    matrix: YcbcrMatrix,
+) -> Vec<u8> {
+    let (cb_green, cb_blue, cr_red, cr_green) = match matrix {
+        YcbcrMatrix::Bt601 => (-0.391_762_3, 2.017_232_1, 1.596_026_8, -0.812_967_6),
+        YcbcrMatrix::Bt709 => (-0.187_324_3, 2.112_401_8, 1.792_741_1, -0.532_909_3),
+    };
+    let mut luma_lut = [0i32; 256];
+    let mut cb_green_lut = [0i32; 256];
+    let mut cb_blue_lut = [0i32; 256];
+    let mut cr_red_lut = [0i32; 256];
+    let mut cr_green_lut = [0i32; 256];
+    for value in 0..256 {
+        luma_lut[value] = ((value as f32 - 16.0) * 1.164_383_6).round() as i32;
+        let chroma_value = value as f32 - 128.0;
+        cb_green_lut[value] = (chroma_value * cb_green).round() as i32;
+        cb_blue_lut[value] = (chroma_value * cb_blue).round() as i32;
+        cr_red_lut[value] = (chroma_value * cr_red).round() as i32;
+        cr_green_lut[value] = (chroma_value * cr_green).round() as i32;
+    }
+
+    let chroma_width = width.div_ceil(2);
+    let mut rgba = vec![0; width * height * 4];
+    for y in 0..height {
+        let luma_row = &luma[y * luma_stride..y * luma_stride + width];
+        let chroma_row =
+            &chroma[(y / 2) * chroma_stride..(y / 2) * chroma_stride + chroma_width * 2];
+        for x in 0..width {
+            let cb = chroma_row[(x / 2) * 2] as usize;
+            let cr = chroma_row[(x / 2) * 2 + 1] as usize;
+            let luma = luma_lut[luma_row[x] as usize];
+            let out = &mut rgba[(y * width + x) * 4..(y * width + x + 1) * 4];
+            out[0] = (luma + cr_red_lut[cr]).clamp(0, 255) as u8;
+            out[1] = (luma + cb_green_lut[cb] + cr_green_lut[cr]).clamp(0, 255) as u8;
+            out[2] = (luma + cb_blue_lut[cb]).clamp(0, 255) as u8;
+            out[3] = 255;
+        }
+    }
+    rgba
+}
+
 #[derive(Debug)]
 struct StreamOutputVars {
     tx: SyncSender<Frame>,
     running: Arc<AtomicBool>,
     created: Instant,
-    /// Whether the stream was asked for extended range, i.e. whether an RGhA
-    /// buffer is expected at all.
+    /// Whether RGhA frames should be decoded as extended-range sRGB.
     hdr: bool,
     /// Extended sRGB → linear lookup, built once per recording.
     srgb_lut: Option<Box<[u16; 65_536]>>,
+    biplanar_logged: AtomicBool,
+    unsupported_format_logged: AtomicU32,
 }
 
 impl StreamOutputVars {
@@ -104,7 +179,9 @@ impl StreamOutputVars {
                 return;
             };
 
-            CVPixelBufferLockBaseAddress(&pixel_buffer, CVPixelBufferLockFlags::ReadOnly);
+            if CVPixelBufferLockBaseAddress(&pixel_buffer, CVPixelBufferLockFlags::ReadOnly) != 0 {
+                return;
+            }
             defer! {
                 CVPixelBufferUnlockBaseAddress(&pixel_buffer, CVPixelBufferLockFlags::ReadOnly);
             };
@@ -121,7 +198,7 @@ impl StreamOutputVars {
             let data = slice::from_raw_parts(base_address.cast::<u8>(), size);
 
             let frame = match format_type {
-                kCVPixelFormatType_32BGRA => {
+                PIXEL_FORMAT_32BGRA => {
                     let row_len = width * 4;
                     let mut buffer = vec![0; row_len * height];
                     for (src_row, dst_row) in data
@@ -142,7 +219,46 @@ impl StreamOutputVars {
                     }
                     Frame::new_at(width as u32, height as u32, buffer, timestamp)
                 }
-                kCVPixelFormatType_64RGBAHalf if self.hdr => {
+                PIXEL_FORMAT_420V => {
+                    let matrix = ycbcr_matrix(&pixel_buffer);
+                    if self
+                        .biplanar_logged
+                        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                        .is_ok()
+                    {
+                        log::info!(
+                            "ScreenCaptureKit delivered SDR 420v; recording as SDR (hdr_requested={} matrix={matrix:?})",
+                            self.hdr
+                        );
+                    }
+                    let chroma_width = width.div_ceil(2);
+                    let chroma_height = height.div_ceil(2);
+                    let luma_stride = CVPixelBufferGetBytesPerRowOfPlane(&pixel_buffer, 0);
+                    let chroma_stride = CVPixelBufferGetBytesPerRowOfPlane(&pixel_buffer, 1);
+                    let chroma_address = CVPixelBufferGetBaseAddressOfPlane(&pixel_buffer, 1);
+                    if chroma_address.is_null() {
+                        return;
+                    }
+                    let luma_len = luma_stride * height;
+                    let chroma_len = (chroma_height - 1) * chroma_stride + chroma_width * 2;
+                    let luma = slice::from_raw_parts(base_address.cast::<u8>(), luma_len);
+                    let chroma = slice::from_raw_parts(chroma_address.cast::<u8>(), chroma_len);
+                    Frame::new_at(
+                        width as u32,
+                        height as u32,
+                        rgba_from_420v(
+                            width,
+                            height,
+                            luma,
+                            luma_stride,
+                            chroma,
+                            chroma_stride,
+                            matrix,
+                        ),
+                        timestamp,
+                    )
+                }
+                PIXEL_FORMAT_64RGBA_HALF if self.hdr => {
                     let linear = pixel_buffer
                         .attachment(kCVImageBufferCGColorSpaceKey, std::ptr::null_mut())
                         .and_then(|space| space.downcast::<CGColorSpace>().ok())
@@ -172,9 +288,15 @@ impl StreamOutputVars {
                     )
                 }
                 _ => {
-                    log::error!(
-                        "unexpected ScreenCaptureKit pixel format 0x{format_type:08X}, expected BGRA or RGhA"
-                    );
+                    if self
+                        .unsupported_format_logged
+                        .compare_exchange(0, format_type, Ordering::Acquire, Ordering::Relaxed)
+                        .is_ok()
+                    {
+                        log::error!(
+                            "unexpected ScreenCaptureKit pixel format 0x{format_type:08X}, expected BGRA, 420v or RGhA"
+                        );
+                    }
                     return;
                 }
             };
@@ -229,6 +351,8 @@ impl StreamOutput {
             created,
             hdr,
             srgb_lut,
+            biplanar_logged: AtomicBool::new(false),
+            unsupported_format_logged: AtomicU32::new(0),
         });
         unsafe { msg_send![super(this), init] }
     }
@@ -355,7 +479,7 @@ impl ImplVideoRecorder {
                 // extended-range color space for us.
                 configuration.setCaptureDynamicRange(SCCaptureDynamicRange::HDRLocalDisplay);
             } else {
-                configuration.setPixelFormat(kCVPixelFormatType_32BGRA);
+                configuration.setPixelFormat(PIXEL_FORMAT_32BGRA);
             }
             configuration.setSourceRect(source_rect);
             configuration.setScalesToFit(false);
@@ -423,12 +547,120 @@ impl ImplVideoRecorder {
     pub fn stop(&self) -> XCapResult<()> {
         self.running.store(false, Ordering::Release);
         let (tx, rx) = sync_channel(1);
-        let handler = RcBlock::new(move |_: *mut NSError| {
-            let _ = tx.send(());
+        let handler = RcBlock::new(move |error: *mut NSError| {
+            let result = if error.is_null() {
+                Ok(())
+            } else {
+                Err(error_message(unsafe { &*error }))
+            };
+            let _ = tx.send(result);
         });
         unsafe { self.stream.stopCaptureWithCompletionHandler(Some(&handler)) };
-        let _ = rx.recv_timeout(START_TIMEOUT);
+        match rx.recv_timeout(START_TIMEOUT) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(message)) => Err(XCapError::new(message)),
+            Err(RecvTimeoutError::Timeout) => {
+                Err(XCapError::new("ScreenCaptureKit did not stop in time"))
+            }
+            Err(RecvTimeoutError::Disconnected) => Err(XCapError::new(
+                "ScreenCaptureKit stop completion was dropped",
+            )),
+        }
+    }
+}
 
-        Ok(())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn biplanar_video_range_black_white_and_neutral_decode_to_rgba() {
+        let mut luma = vec![0; 8 * 2];
+        luma[..4].copy_from_slice(&[16, 16, 16, 16]);
+        luma[8..12].copy_from_slice(&[235, 235, 235, 235]);
+        let rgba = rgba_from_420v(4, 2, &luma, 8, &[128, 128, 128, 128], 6, YcbcrMatrix::Bt709);
+        assert_eq!(&rgba[..16], &[0, 0, 0, 255].repeat(4));
+        assert_eq!(&rgba[16..], &[255, 255, 255, 255].repeat(4));
+
+        let neutral = rgba_from_420v(
+            2,
+            2,
+            &[126, 126, 126, 126],
+            2,
+            &[128, 128],
+            2,
+            YcbcrMatrix::Bt709,
+        );
+        assert_eq!(neutral, [128, 128, 128, 255].repeat(4));
+    }
+
+    #[test]
+    fn each_chroma_pair_colours_its_two_by_two_block() {
+        let luma = [63; 16];
+        let rgba = rgba_from_420v(
+            4,
+            4,
+            &luma,
+            4,
+            &[90, 240, 90, 240, 90, 240, 90, 240],
+            4,
+            YcbcrMatrix::Bt709,
+        );
+        for y in 0..4 {
+            for x in 0..2 {
+                let at = (y * 4 + x) * 4;
+                let pixel = &rgba[at..at + 3];
+                assert!(pixel[0] > 250 && pixel[1] < 5 && pixel[2] < 5);
+            }
+        }
+    }
+
+    #[test]
+    fn bt601_matrix_decodes_its_reference_colours() {
+        let rgba = rgba_from_420v(
+            6,
+            1,
+            &[81, 81, 145, 145, 41, 41],
+            6,
+            &[90, 240, 54, 30, 240, 110],
+            6,
+            YcbcrMatrix::Bt601,
+        );
+        let expected = [
+            [255, 0, 0, 255],
+            [255, 0, 0, 255],
+            [0, 255, 1, 255],
+            [0, 255, 1, 255],
+            [0, 0, 255, 255],
+            [0, 0, 255, 255],
+        ];
+        for (pixel, expected) in rgba.as_chunks::<4>().0.iter().zip(expected) {
+            for (value, expected) in pixel.iter().zip(expected) {
+                assert!(
+                    (i32::from(*value) - expected).abs() <= 2,
+                    "{pixel:?} component {value} != {expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn odd_dimensions_use_rounded_up_chroma_planes() {
+        let rgba = rgba_from_420v(
+            3,
+            3,
+            &[126; 9],
+            3,
+            &[128, 128, 128, 128, 128, 128, 128, 128],
+            4,
+            YcbcrMatrix::Bt709,
+        );
+        assert_eq!(rgba.len(), 3 * 3 * 4);
+        assert!(
+            rgba.as_chunks::<4>()
+                .0
+                .iter()
+                .all(|p| p == &[128, 128, 128, 255])
+        );
     }
 }

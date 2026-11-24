@@ -6,7 +6,10 @@
 //! Everything here is best-effort: any failure means the caller keeps the GDI
 //! result, so ordinary SDR desktops never touch a D3D device.
 
-use std::time::{Duration, Instant};
+use std::{
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 
 use scopeguard::defer;
 use windows::{
@@ -67,6 +70,20 @@ pub(super) struct Session {
     context: ID3D11DeviceContext,
     duplication: IDXGIOutputDuplication,
     sdr_white_nits: f32,
+    buffers: std::sync::Arc<Mutex<Buffers>>,
+}
+
+#[derive(Default)]
+struct Buffers {
+    staging: Option<Staging>,
+    raw: Vec<u8>,
+}
+
+struct Staging {
+    texture: ID3D11Texture2D,
+    width: u32,
+    height: u32,
+    format: DXGI_FORMAT,
 }
 
 impl std::fmt::Debug for Session {
@@ -84,14 +101,6 @@ pub(super) struct Crop {
     pub y: u32,
     pub width: u32,
     pub height: u32,
-}
-
-/// One desktop frame copied out of the duplication surface.
-struct DesktopFrame {
-    width: u32,
-    height: u32,
-    format: DXGI_FORMAT,
-    raw: Vec<u8>,
 }
 
 pub(super) fn capture_monitor(h_monitor: HMONITOR) -> XCapResult<HdrImage> {
@@ -161,6 +170,7 @@ impl Session {
             context,
             duplication,
             sdr_white_nits: white,
+            buffers: std::sync::Arc::new(Mutex::new(Buffers::default())),
         })
     }
 
@@ -191,22 +201,25 @@ impl Session {
         crop: Option<Crop>,
         timeout: Duration,
     ) -> XCapResult<Option<HdrImage>> {
-        let Some(frame) = self.read_frame(crop, timeout)? else {
+        let mut buffers = self
+            .buffers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some((width, height, format)) = self.read_frame(&mut buffers, crop, timeout)? else {
             return Ok(None);
         };
-        let image = match mode_for_format(frame.format) {
+        let image = match mode_for_format(format) {
             Some(HdrMode::Float) => {
-                log::info!("xcap Windows HDR: decoding frame as scRGB float");
-                float_to_scrgb(&frame.raw, frame.width, frame.height)
+                log::debug!("xcap Windows HDR: decoding frame as scRGB float");
+                float_to_scrgb(&buffers.raw, width, height)
             }
             Some(HdrMode::Pq) => {
-                log::info!("xcap Windows HDR: decoding frame as HDR10 PQ 10-bit");
-                pq_to_scrgb(&frame.raw, frame.width, frame.height)
+                log::debug!("xcap Windows HDR: decoding frame as HDR10 PQ 10-bit");
+                pq_to_scrgb(&buffers.raw, width, height)
             }
             None => {
                 return Err(XCapError::new(format!(
-                    "DXGI returned an unsupported desktop frame format {:?}",
-                    frame.format
+                    "DXGI returned an unsupported desktop frame format {format:?}"
                 )));
             }
         };
@@ -219,9 +232,10 @@ impl Session {
     /// an uninitialised buffer on the first frame after `DuplicateOutput1`.
     fn read_frame(
         &self,
+        buffers: &mut Buffers,
         crop: Option<Crop>,
         timeout: Duration,
-    ) -> XCapResult<Option<DesktopFrame>> {
+    ) -> XCapResult<Option<(u32, u32, DXGI_FORMAT)>> {
         unsafe {
             let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
             let mut resource: Option<IDXGIResource> = None;
@@ -278,7 +292,23 @@ impl Session {
                 }
             };
 
-            let staging = self.create_staging(width, height, desc.Format)?;
+            let needs_staging = buffers.staging.as_ref().is_none_or(|staging| {
+                staging.width != width || staging.height != height || staging.format != desc.Format
+            });
+            if needs_staging {
+                buffers.staging = Some(Staging {
+                    texture: self.create_staging(width, height, desc.Format)?,
+                    width,
+                    height,
+                    format: desc.Format,
+                });
+            }
+            let staging = buffers
+                .staging
+                .as_ref()
+                .expect("staging texture was created above")
+                .texture
+                .clone();
             let region = D3D11_BOX {
                 left: x,
                 top: y,
@@ -315,24 +345,20 @@ impl Session {
             if mapped.pData.is_null() || (mapped.RowPitch as usize) < row_bytes {
                 return Err(XCapError::new("DXGI mapped an unusable desktop frame"));
             }
-            let mut raw = vec![0u8; row_bytes * height as usize];
+            let raw_len = row_bytes * height as usize;
+            buffers.raw.resize(raw_len, 0);
             let src = mapped.pData as *const u8;
             for row in 0..height as usize {
                 std::ptr::copy_nonoverlapping(
                     src.add(row * mapped.RowPitch as usize),
-                    raw.as_mut_ptr().add(row * row_bytes),
+                    buffers.raw.as_mut_ptr().add(row * row_bytes),
                     row_bytes,
                 );
             }
-            if raw.iter().all(|&byte| byte == 0) {
+            if buffers.raw.iter().all(|&byte| byte == 0) {
                 return Ok(None);
             }
-            Ok(Some(DesktopFrame {
-                width,
-                height,
-                format: desc.Format,
-                raw,
-            }))
+            Ok(Some((width, height, desc.Format)))
         }
     }
 

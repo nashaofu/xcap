@@ -1,6 +1,7 @@
 use std::{
     sync::{
         Arc,
+        atomic::AtomicUsize,
         mpsc::{Receiver, SyncSender, TrySendError, sync_channel},
     },
     thread,
@@ -28,13 +29,17 @@ use windows::{
 
 use crate::{
     XCapError, XCapResult,
-    video_recorder::{CaptureRegion, DynamicRange, Frame, RecorderWaker, VideoRecorderOptions},
+    video_recorder::{
+        CaptureRegion, DynamicRange, Frame, QueuePermit, RecorderWaker, VideoRecorderOptions,
+    },
 };
 
 use super::{
     dxgi,
     utils::{create_d3d_device, texture_to_frame},
 };
+
+const FRAME_QUEUE_CAPACITY: usize = 4;
 
 /// Where frames come from: ordinary BGRA duplication, or an HDR duplication
 /// session that decodes scRGB. The HDR variant is only chosen when the display
@@ -55,6 +60,7 @@ pub(crate) struct ImplVideoRecorder {
     backend: Backend,
     recorder_waker: Arc<RecorderWaker>,
     tx: SyncSender<Frame>,
+    queue_depth: Arc<AtomicUsize>,
     region: Option<CaptureRegion>,
     /// Minimum time between delivered frames, from the frame-rate cap.
     interval: Duration,
@@ -85,11 +91,13 @@ impl ImplVideoRecorder {
             Self::open_sdr(h_monitor)?
         };
 
-        let (tx, rx) = sync_channel(4);
+        let (tx, rx) = sync_channel(FRAME_QUEUE_CAPACITY);
+        let queue_depth = Arc::new(AtomicUsize::new(0));
         let recorder = Self {
             backend,
             recorder_waker: Arc::new(RecorderWaker::new()),
             tx,
+            queue_depth,
             region: options.region,
             interval: Duration::from_secs_f64(1.0 / options.fps.clamp(1, 60) as f64),
             created: Instant::now(),
@@ -124,6 +132,7 @@ impl ImplVideoRecorder {
     pub fn on_frame(&self) -> XCapResult<()> {
         let recorder_waker = self.recorder_waker.clone();
         let tx = self.tx.clone();
+        let queue_depth = self.queue_depth.clone();
         let region = self.region;
         let interval = self.interval;
         let created = self.created;
@@ -145,9 +154,15 @@ impl ImplVideoRecorder {
                     interval,
                     created,
                 ),
-                Backend::Hdr(session) => {
-                    run_hdr(session, recorder_waker, tx, region, interval, created)
-                }
+                Backend::Hdr(session) => run_hdr(
+                    session,
+                    recorder_waker,
+                    tx,
+                    queue_depth.clone(),
+                    region,
+                    interval,
+                    created,
+                ),
             };
             if let Err(err) = result {
                 log::warn!("the DXGI video recorder stopped: {err}");
@@ -334,6 +349,7 @@ fn run_hdr(
     session: dxgi::Session,
     recorder_waker: Arc<RecorderWaker>,
     tx: SyncSender<Frame>,
+    queue_depth: Arc<AtomicUsize>,
     region: Option<CaptureRegion>,
     interval: Duration,
     created: Instant,
@@ -358,6 +374,12 @@ fn run_hdr(
                 thread::sleep(wait);
             }
         }
+        let Some(permit) = QueuePermit::acquire(queue_depth.clone(), FRAME_QUEUE_CAPACITY) else {
+            // The receiver has not made room yet. Skip before DXGI grab and
+            // HDR decode rather than paying for a frame that would be dropped.
+            thread::sleep(interval);
+            continue;
+        };
         let captured_at = created.elapsed();
         let Some(image) = session.grab(crop, Duration::from_millis(200))? else {
             continue;
@@ -365,7 +387,8 @@ fn run_hdr(
         last_frame_at = Some(captured_at);
         let width = image.width();
         let height = image.height();
-        match tx.try_send(Frame::new_hdr(width, height, image, captured_at)) {
+        let frame = Frame::new_hdr(width, height, image, captured_at).with_queue_permit(permit);
+        match tx.try_send(frame) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) => {}
             Err(TrySendError::Disconnected(_)) => {
