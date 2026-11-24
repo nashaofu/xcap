@@ -13,7 +13,7 @@ use windows::{
         },
         Foundation::{CloseHandle, FreeLibrary, GetLastError, HANDLE, HMODULE, HWND, RECT},
         Graphics::{
-            Direct3D::D3D_DRIVER_TYPE_HARDWARE,
+            Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_UNKNOWN},
             Direct3D11::{
                 D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_FLAG, D3D11_MAP_READ,
                 D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
@@ -21,6 +21,7 @@ use windows::{
                 ID3D11Resource, ID3D11Texture2D,
             },
             Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute},
+            Dxgi::IDXGIAdapter,
             Gdi::MONITORINFOEXW,
         },
         System::{
@@ -253,12 +254,19 @@ pub(super) fn get_window_bounds(hwnd: HWND) -> XCapResult<RECT> {
     Ok(rect)
 }
 
-pub(super) fn create_d3d_device(flag: D3D11_CREATE_DEVICE_FLAG) -> XCapResult<ID3D11Device> {
+pub(super) fn create_d3d_device(
+    flag: D3D11_CREATE_DEVICE_FLAG,
+    adapter: Option<&IDXGIAdapter>,
+) -> XCapResult<ID3D11Device> {
     unsafe {
         let mut d3d_device = None;
         D3D11CreateDevice(
-            None,
-            D3D_DRIVER_TYPE_HARDWARE,
+            adapter,
+            if adapter.is_some() {
+                D3D_DRIVER_TYPE_UNKNOWN
+            } else {
+                D3D_DRIVER_TYPE_HARDWARE
+            },
             HMODULE::default(),
             flag,
             None,

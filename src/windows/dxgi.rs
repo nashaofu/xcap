@@ -18,14 +18,12 @@ use windows::{
             DISPLAYCONFIG_SOURCE_DEVICE_NAME, DisplayConfigGetDeviceInfo,
             GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
         },
-        Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS, HMODULE},
+        Foundation::{ERROR_INSUFFICIENT_BUFFER, ERROR_SUCCESS},
         Graphics::{
-            Direct3D::D3D_DRIVER_TYPE_UNKNOWN,
             Direct3D11::{
                 D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ,
-                D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
-                D3D11_USAGE_STAGING, D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext,
-                ID3D11Resource, ID3D11Texture2D,
+                D3D11_MAPPED_SUBRESOURCE, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, ID3D11Device,
+                ID3D11DeviceContext, ID3D11Resource, ID3D11Texture2D,
             },
             Dxgi::Common::{
                 DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709,
@@ -106,25 +104,14 @@ impl Session {
         let color_space = output_color_space(&output);
         log::info!("xcap Windows HDR: output colorspace={color_space:?}");
         if !is_hdr_color_space(color_space) {
-            log::info!("xcap Windows HDR: colorspace not a supported HDR encoding -> NotSupported (SDR fallback)");
+            log::info!(
+                "xcap Windows HDR: colorspace not a supported HDR encoding -> NotSupported (SDR fallback)"
+            );
             return Err(XCapError::NotSupported);
         }
         let adapter: IDXGIAdapter = adapter.cast()?;
-        let device = unsafe {
-            let mut device = None;
-            D3D11CreateDevice(
-                Some(&adapter),
-                D3D_DRIVER_TYPE_UNKNOWN,
-                HMODULE::default(),
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                None,
-                D3D11_SDK_VERSION,
-                Some(&mut device),
-                None,
-                None,
-            )?;
-            device.ok_or_else(|| XCapError::new("D3D11CreateDevice returned no device"))?
-        };
+        let device =
+            super::utils::create_d3d_device(D3D11_CREATE_DEVICE_BGRA_SUPPORT, Some(&adapter))?;
         let context = unsafe { device.GetImmediateContext() }?;
         let dxgi_device = device.cast::<IDXGIDevice>()?;
 
@@ -160,7 +147,10 @@ impl Session {
         // desktop image rotated inside it, so a rotated display would not line
         // up with the selection. The GDI grab is correctly oriented.
         if desc.Rotation != DXGI_MODE_ROTATION_IDENTITY {
-            log::info!("xcap Windows HDR: rotated desktop {:?} -> NotSupported", desc.Rotation);
+            log::info!(
+                "xcap Windows HDR: rotated desktop {:?} -> NotSupported",
+                desc.Rotation
+            );
             return Err(XCapError::NotSupported);
         }
 
@@ -523,7 +513,7 @@ fn trim_utf16(value: &[u16]) -> &[u16] {
     &value[..len]
 }
 
-fn find_output(
+pub(super) fn find_output(
     h_monitor: HMONITOR,
 ) -> XCapResult<(IDXGIAdapter1, windows::Win32::Graphics::Dxgi::IDXGIOutput)> {
     unsafe {

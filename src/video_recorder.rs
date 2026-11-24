@@ -1,5 +1,8 @@
 use std::{
-    sync::{Condvar, Mutex},
+    sync::{
+        Condvar, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -168,6 +171,7 @@ impl Frame {
 #[derive(Debug)]
 pub(crate) struct RecorderWaker {
     parking: Mutex<bool>,
+    stopped: AtomicBool,
     condvar: Condvar,
 }
 
@@ -176,6 +180,7 @@ impl RecorderWaker {
     pub fn new() -> Self {
         Self {
             parking: Mutex::new(true),
+            stopped: AtomicBool::new(false),
             condvar: Condvar::new(),
         }
     }
@@ -195,13 +200,27 @@ impl RecorderWaker {
         Ok(())
     }
     #[allow(dead_code)]
+    pub fn shutdown(&self) -> XCapResult<()> {
+        let mut parking = self.parking.lock()?;
+        *parking = false;
+        self.stopped.store(true, Ordering::Release);
+        self.condvar.notify_all();
+
+        Ok(())
+    }
+    #[allow(dead_code)]
     pub fn wait(&self) -> XCapResult<()> {
         let mut parking = self.parking.lock()?;
-        while *parking {
+        while *parking && !self.stopped.load(Ordering::Acquire) {
             parking = self.condvar.wait(parking)?;
         }
 
         Ok(())
+    }
+    #[allow(dead_code)]
+    pub fn wait_active(&self) -> XCapResult<bool> {
+        self.wait()?;
+        Ok(!self.stopped.load(Ordering::Acquire))
     }
 }
 

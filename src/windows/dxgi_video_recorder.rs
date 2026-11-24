@@ -1,7 +1,7 @@
 use std::{
     sync::{
         Arc,
-        mpsc::{Receiver, SyncSender, sync_channel},
+        mpsc::{Receiver, SyncSender, TrySendError, sync_channel},
     },
     thread,
     time::{Duration, Instant},
@@ -14,8 +14,12 @@ use windows::{
             D3D11_TEXTURE2D_DESC, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
         },
         Dxgi::{
-            DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO, IDXGIDevice, IDXGIOutput1,
-            IDXGIOutputDuplication, IDXGIResource,
+            Common::{
+                DXGI_MODE_ROTATION, DXGI_MODE_ROTATION_ROTATE90, DXGI_MODE_ROTATION_ROTATE180,
+                DXGI_MODE_ROTATION_ROTATE270,
+            },
+            DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO, IDXGIAdapter, IDXGIDevice,
+            IDXGIOutput1, IDXGIOutputDuplication, IDXGIResource,
         },
         Gdi::HMONITOR,
     },
@@ -81,7 +85,7 @@ impl ImplVideoRecorder {
             Self::open_sdr(h_monitor)?
         };
 
-        let (tx, rx) = sync_channel(0);
+        let (tx, rx) = sync_channel(4);
         let recorder = Self {
             backend,
             recorder_waker: Arc::new(RecorderWaker::new()),
@@ -95,33 +99,26 @@ impl ImplVideoRecorder {
     }
 
     fn open_sdr(h_monitor: HMONITOR) -> XCapResult<Backend> {
-        unsafe {
-            let d3d_device = create_d3d_device(
-                D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_SINGLETHREADED,
-            )?;
-            let dxgi_device = d3d_device.cast::<IDXGIDevice>()?;
-            let d3d_context = d3d_device.GetImmediateContext()?;
-
-            let adapter = dxgi_device.GetAdapter()?;
-
-            let mut output_index = 0;
-            loop {
-                let output = adapter.EnumOutputs(output_index)?;
-                output_index += 1;
-                let output_desc = output.GetDesc()?;
-
-                let output1 = output.cast::<IDXGIOutput1>()?;
-                let duplication = output1.DuplicateOutput(&dxgi_device)?;
-
-                if output_desc.Monitor == h_monitor {
-                    return Ok(Backend::Sdr {
-                        d3d_device,
-                        d3d_context,
-                        duplication,
-                    });
-                }
-            }
+        let (adapter, output) = dxgi::find_output(h_monitor)?;
+        let output_desc = unsafe { output.GetDesc()? };
+        if output_desc.Monitor != h_monitor {
+            return Err(XCapError::NotSupported);
         }
+        let adapter = adapter.cast::<IDXGIAdapter>()?;
+        let d3d_device = create_d3d_device(
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_SINGLETHREADED,
+            Some(&adapter),
+        )?;
+        let dxgi_device = d3d_device.cast::<IDXGIDevice>()?;
+        let d3d_context = unsafe { d3d_device.GetImmediateContext()? };
+        let output1 = output.cast::<IDXGIOutput1>()?;
+        let duplication = unsafe { output1.DuplicateOutput(&dxgi_device)? };
+
+        Ok(Backend::Sdr {
+            d3d_device,
+            d3d_context,
+            duplication,
+        })
     }
 
     pub fn on_frame(&self) -> XCapResult<()> {
@@ -167,7 +164,7 @@ impl ImplVideoRecorder {
     }
 
     pub fn stop(&self) -> XCapResult<()> {
-        self.recorder_waker.sleep()?;
+        self.recorder_waker.shutdown()?;
 
         Ok(())
     }
@@ -185,8 +182,11 @@ fn run_sdr(
     created: Instant,
 ) -> XCapResult<()> {
     let mut last_frame_at: Option<Duration> = None;
+    let rotation = unsafe { duplication.GetDesc().Rotation };
     loop {
-        recorder_waker.wait()?;
+        if !recorder_waker.wait_active()? {
+            return Ok(());
+        }
 
         let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
         let mut resource: Option<IDXGIResource> = None;
@@ -218,31 +218,37 @@ fn run_sdr(
                             }
                         }
 
-                        let (x, y, width, height) = match region {
-                            Some(region) => {
-                                let x = region.x.min(source_texture_desc.Width - 1);
-                                let y = region.y.min(source_texture_desc.Height - 1);
-                                let width = region.width.clamp(1, source_texture_desc.Width - x);
-                                let height = region.height.clamp(1, source_texture_desc.Height - y);
-                                (x, y, width, height)
-                            }
-                            None => (0, 0, source_texture_desc.Width, source_texture_desc.Height),
-                        };
-
-                        let mut frame = texture_to_frame(
-                            &d3d_device,
-                            &d3d_context,
-                            &source_texture,
-                            x,
-                            y,
-                            width,
-                            height,
+                        let (x, y, width, height) = sdr_crop(
+                            region,
+                            source_texture_desc.Width,
+                            source_texture_desc.Height,
+                            rotation,
                         )?;
+
+                        let mut frame = orient_frame(
+                            texture_to_frame(
+                                &d3d_device,
+                                &d3d_context,
+                                &source_texture,
+                                x,
+                                y,
+                                width,
+                                height,
+                            )?,
+                            rotation,
+                        );
                         // Stamp capture time, not delivery time: the
                         // conversion above can take longer than a frame.
                         frame.timestamp = now;
                         last_frame_at = Some(now);
-                        let _ = tx.send(frame);
+                        match tx.try_send(frame) {
+                            Ok(()) => {}
+                            Err(TrySendError::Full(_)) => {}
+                            Err(TrySendError::Disconnected(_)) => {
+                                recorder_waker.shutdown()?;
+                                return Ok(());
+                            }
+                        }
                     }
 
                     // 最后释放帧，不然获取不到当前帧的数据
@@ -251,6 +257,75 @@ fn run_sdr(
             }
         }
     }
+}
+
+/// Map a screen-space region into DXGI's unrotated duplication surface.
+fn sdr_crop(
+    region: Option<CaptureRegion>,
+    source_width: u32,
+    source_height: u32,
+    rotation: DXGI_MODE_ROTATION,
+) -> XCapResult<(u32, u32, u32, u32)> {
+    if source_width == 0 || source_height == 0 {
+        return Err(XCapError::new("DXGI returned an empty desktop frame"));
+    }
+    let Some(region) = region else {
+        return Ok((0, 0, source_width, source_height));
+    };
+    let quarter_turn = matches!(
+        rotation,
+        DXGI_MODE_ROTATION_ROTATE90 | DXGI_MODE_ROTATION_ROTATE270
+    );
+    let (screen_width, screen_height) = if quarter_turn {
+        (source_height, source_width)
+    } else {
+        (source_width, source_height)
+    };
+    let x = region.x.min(screen_width - 1);
+    let y = region.y.min(screen_height - 1);
+    let width = region.width.clamp(1, screen_width - x);
+    let height = region.height.clamp(1, screen_height - y);
+
+    Ok(match rotation {
+        DXGI_MODE_ROTATION_ROTATE90 => (y, screen_width - x - width, height, width),
+        DXGI_MODE_ROTATION_ROTATE180 => (
+            screen_width - x - width,
+            screen_height - y - height,
+            width,
+            height,
+        ),
+        DXGI_MODE_ROTATION_ROTATE270 => (screen_height - y - height, x, height, width),
+        _ => (x, y, width, height),
+    })
+}
+
+/// Rotate a cropped surface back to the display's screen orientation.
+fn orient_frame(mut frame: Frame, rotation: DXGI_MODE_ROTATION) -> Frame {
+    let (width, height) = match rotation {
+        DXGI_MODE_ROTATION_ROTATE90 | DXGI_MODE_ROTATION_ROTATE270 => (frame.height, frame.width),
+        DXGI_MODE_ROTATION_ROTATE180 => (frame.width, frame.height),
+        _ => return frame,
+    };
+    let source_width = frame.width as usize;
+    let source_height = frame.height as usize;
+    let mut raw = vec![0u8; width as usize * height as usize * 4];
+    for y in 0..height as usize {
+        for x in 0..width as usize {
+            let (source_x, source_y) = match rotation {
+                DXGI_MODE_ROTATION_ROTATE90 => (source_width - 1 - y, x),
+                DXGI_MODE_ROTATION_ROTATE180 => (source_width - 1 - x, source_height - 1 - y),
+                DXGI_MODE_ROTATION_ROTATE270 => (y, source_height - 1 - x),
+                _ => unreachable!(),
+            };
+            let source = (source_y * source_width + source_x) * 4;
+            let target = (y * width as usize + x) * 4;
+            raw[target..target + 4].copy_from_slice(&frame.raw[source..source + 4]);
+        }
+    }
+    frame.raw = raw;
+    frame.width = width;
+    frame.height = height;
+    frame
 }
 
 /// HDR frames arrive as scRGB and are already cropped by the D3D copy, so the
@@ -271,7 +346,9 @@ fn run_hdr(
     });
     let mut last_frame_at: Option<Duration> = None;
     loop {
-        recorder_waker.wait()?;
+        if !recorder_waker.wait_active()? {
+            return Ok(());
+        }
 
         // Throttle before acquiring: converting a 4K HDR frame only to throw
         // it away costs far more than the frame check does.
@@ -288,6 +365,76 @@ fn run_hdr(
         last_frame_at = Some(captured_at);
         let width = image.width();
         let height = image.height();
-        let _ = tx.send(Frame::new_hdr(width, height, image, captured_at));
+        match tx.try_send(Frame::new_hdr(width, height, image, captured_at)) {
+            Ok(()) => {}
+            Err(TrySendError::Full(_)) => {}
+            Err(TrySendError::Disconnected(_)) => {
+                recorder_waker.shutdown()?;
+                return Ok(());
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows::Win32::Graphics::Dxgi::Common::DXGI_MODE_ROTATION_IDENTITY;
+
+    fn region() -> CaptureRegion {
+        CaptureRegion {
+            x: 100,
+            y: 50,
+            width: 200,
+            height: 100,
+        }
+    }
+
+    #[test]
+    fn screen_regions_map_into_unrotated_surfaces() {
+        assert_eq!(
+            sdr_crop(Some(region()), 1920, 1080, DXGI_MODE_ROTATION_IDENTITY).unwrap(),
+            (100, 50, 200, 100)
+        );
+        assert_eq!(
+            sdr_crop(Some(region()), 1920, 1080, DXGI_MODE_ROTATION_ROTATE90).unwrap(),
+            (50, 780, 100, 200)
+        );
+        assert_eq!(
+            sdr_crop(Some(region()), 1920, 1080, DXGI_MODE_ROTATION_ROTATE180).unwrap(),
+            (1620, 930, 200, 100)
+        );
+        assert_eq!(
+            sdr_crop(Some(region()), 1920, 1080, DXGI_MODE_ROTATION_ROTATE270).unwrap(),
+            (1770, 100, 100, 200)
+        );
+    }
+
+    #[test]
+    fn cropped_frames_return_to_screen_orientation() {
+        let frame = Frame::new(
+            2,
+            3,
+            (0..6).flat_map(|pixel| [pixel as u8, 0, 0, 255]).collect(),
+        );
+        let values = |frame: Frame| {
+            frame
+                .raw
+                .chunks_exact(4)
+                .map(|pixel| pixel[0])
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            values(orient_frame(frame.clone(), DXGI_MODE_ROTATION_ROTATE90)),
+            [1, 3, 5, 0, 2, 4]
+        );
+        assert_eq!(
+            values(orient_frame(frame.clone(), DXGI_MODE_ROTATION_ROTATE180)),
+            [5, 4, 3, 2, 1, 0]
+        );
+        assert_eq!(
+            values(orient_frame(frame, DXGI_MODE_ROTATION_ROTATE270)),
+            [4, 2, 0, 5, 3, 1]
+        );
     }
 }
