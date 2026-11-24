@@ -103,7 +103,11 @@ pub fn capture(display_id: CGDirectDisplayID) -> XCapResult<HdrImage> {
                 log::info!(
                     "xcap macOS HDR: output hdrImage={} sdrImage={}",
                     if hdr.is_some() { "present" } else { "nil" },
-                    if unsafe { output.sdrImage() }.is_some() { "present" } else { "nil" }
+                    if unsafe { output.sdrImage() }.is_some() {
+                        "present"
+                    } else {
+                        "nil"
+                    }
                 );
                 match hdr {
                     Some(image) => hdr_from_cg_image(&image),

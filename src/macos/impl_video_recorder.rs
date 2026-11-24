@@ -184,7 +184,8 @@ impl StreamOutputVars {
                 return;
             }
 
-            let _ = self.tx.send(frame);
+            // Never block the SCK callback: stopCapture waits for it to return.
+            let _ = self.tx.try_send(frame);
         }
     }
 }
@@ -329,7 +330,7 @@ impl ImplVideoRecorder {
             _ => (pixel_width, pixel_height),
         };
 
-        let (tx, rx) = sync_channel(0);
+        let (tx, rx) = sync_channel(4);
         let running = Arc::new(AtomicBool::new(false));
         // HDR streaming needs Apple Silicon and macOS 15; asking on an older
         // Mac silently keeps the SDR stream, so only build the lookup when the
