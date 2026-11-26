@@ -8,6 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use scopeguard::defer;
 use windows::{
     Win32::Graphics::{
         Direct3D11::{
@@ -43,9 +44,8 @@ const FRAME_QUEUE_CAPACITY: usize = 4;
 
 /// Where frames come from: ordinary BGRA duplication, or an HDR duplication
 /// session that decodes scRGB. The HDR variant is only chosen when the display
-/// is composited in HDR mode, so `Frame::hdr` presence still decides what the
-/// encoder sees.
-#[derive(Debug, Clone)]
+/// is composited in HDR mode, so checking `Frame::hdr` decides the range.
+#[derive(Debug)]
 enum Backend {
     Sdr {
         d3d_device: ID3D11Device,
@@ -55,16 +55,19 @@ enum Backend {
     Hdr(dxgi::Session),
 }
 
+#[derive(Debug)]
+struct WakerGuard(Arc<RecorderWaker>);
+
+impl Drop for WakerGuard {
+    fn drop(&mut self) {
+        let _ = self.0.shutdown();
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ImplVideoRecorder {
-    backend: Backend,
     recorder_waker: Arc<RecorderWaker>,
-    tx: SyncSender<Frame>,
-    queue_depth: Arc<AtomicUsize>,
-    region: Option<CaptureRegion>,
-    /// Minimum time between delivered frames, from the frame-rate cap.
-    interval: Duration,
-    created: Instant,
+    _waker_guard: Arc<WakerGuard>,
 }
 
 impl ImplVideoRecorder {
@@ -74,8 +77,7 @@ impl ImplVideoRecorder {
     ) -> XCapResult<(Self, Receiver<Frame>)> {
         // `VideoRecorderOptions::output_size` is a macOS compositor hint with
         // no DXGI equivalent: `OutputSize::Logical` is deliberately ignored,
-        // this backend copies a sub-region at native resolution, and the
-        // caller downscales the delivered frames itself.
+        // and this backend copies a sub-region at native resolution.
         let backend = if options.dynamic_range == DynamicRange::Hdr {
             match dxgi::Session::open(h_monitor) {
                 Ok(session) => Backend::Hdr(session),
@@ -93,25 +95,52 @@ impl ImplVideoRecorder {
 
         let (tx, rx) = sync_channel(FRAME_QUEUE_CAPACITY);
         let queue_depth = Arc::new(AtomicUsize::new(0));
+        let recorder_waker = Arc::new(RecorderWaker::new());
+        let region = options.region;
+        let interval = Duration::from_secs_f64(1.0 / options.fps.clamp(1, 60) as f64);
+        let created = Instant::now();
+
+        let worker_waker = recorder_waker.clone();
+        thread::spawn(move || {
+            let result = match backend {
+                Backend::Sdr {
+                    d3d_device,
+                    d3d_context,
+                    duplication,
+                } => run_sdr(
+                    d3d_device,
+                    d3d_context,
+                    duplication,
+                    worker_waker,
+                    tx,
+                    region,
+                    interval,
+                    created,
+                ),
+                Backend::Hdr(session) => run_hdr(
+                    session,
+                    worker_waker,
+                    tx,
+                    queue_depth,
+                    region,
+                    interval,
+                    created,
+                ),
+            };
+            if let Err(err) = result {
+                log::warn!("the DXGI video recorder stopped: {err}");
+            }
+        });
+
         let recorder = Self {
-            backend,
-            recorder_waker: Arc::new(RecorderWaker::new()),
-            tx,
-            queue_depth,
-            region: options.region,
-            interval: Duration::from_secs_f64(1.0 / options.fps.clamp(1, 60) as f64),
-            created: Instant::now(),
+            _waker_guard: Arc::new(WakerGuard(recorder_waker.clone())),
+            recorder_waker,
         };
-        recorder.on_frame()?;
         Ok((recorder, rx))
     }
 
     fn open_sdr(h_monitor: HMONITOR) -> XCapResult<Backend> {
         let (adapter, output) = dxgi::find_output(h_monitor)?;
-        let output_desc = unsafe { output.GetDesc()? };
-        if output_desc.Monitor != h_monitor {
-            return Err(XCapError::NotSupported);
-        }
         let adapter = adapter.cast::<IDXGIAdapter>()?;
         let d3d_device = create_d3d_device(
             D3D11_CREATE_DEVICE_BGRA_SUPPORT | D3D11_CREATE_DEVICE_SINGLETHREADED,
@@ -129,50 +158,10 @@ impl ImplVideoRecorder {
         })
     }
 
-    pub fn on_frame(&self) -> XCapResult<()> {
-        let recorder_waker = self.recorder_waker.clone();
-        let tx = self.tx.clone();
-        let queue_depth = self.queue_depth.clone();
-        let region = self.region;
-        let interval = self.interval;
-        let created = self.created;
-        let backend = self.backend.clone();
-
-        thread::spawn(move || {
-            let result = match backend {
-                Backend::Sdr {
-                    d3d_device,
-                    d3d_context,
-                    duplication,
-                } => run_sdr(
-                    d3d_device,
-                    d3d_context,
-                    duplication,
-                    recorder_waker,
-                    tx,
-                    region,
-                    interval,
-                    created,
-                ),
-                Backend::Hdr(session) => run_hdr(
-                    session,
-                    recorder_waker,
-                    tx,
-                    queue_depth.clone(),
-                    region,
-                    interval,
-                    created,
-                ),
-            };
-            if let Err(err) = result {
-                log::warn!("the DXGI video recorder stopped: {err}");
-            }
-        });
-
-        Ok(())
-    }
-
     pub fn start(&self) -> XCapResult<()> {
+        if self.recorder_waker.is_stopped() {
+            return Err(XCapError::new("DXGI video recorder has already stopped"));
+        }
         self.recorder_waker.wake()?;
 
         Ok(())
@@ -207,67 +196,64 @@ fn run_sdr(
         let mut resource: Option<IDXGIResource> = None;
         unsafe {
             match duplication.AcquireNextFrame(200, &mut frame_info, &mut resource) {
+                Err(err) if err.code() == DXGI_ERROR_WAIT_TIMEOUT => continue,
                 Err(err) => {
-                    // 尝试释放当前帧，不然不能获取到下一帧数据
+                    // Release any held frame before propagating the failure.
                     let _ = duplication.ReleaseFrame();
-                    if err.code() != DXGI_ERROR_WAIT_TIMEOUT {
-                        return Err(XCapError::new("DXGI_ERROR_UNSUPPORTED"));
-                    }
+                    return Err(err.into());
                 }
-                _ => {
-                    // 如何确定 AcquireNextFrame 执行成功
-                    if frame_info.LastPresentTime != 0 {
-                        let resource = resource.ok_or(XCapError::new("AcquireNextFrame failed"))?;
-                        let source_texture = resource.cast::<ID3D11Texture2D>()?;
-                        let mut source_texture_desc = D3D11_TEXTURE2D_DESC::default();
-                        source_texture.GetDesc(&mut source_texture_desc);
+                Ok(()) => {}
+            }
+            defer! {
+                let _ = duplication.ReleaseFrame();
+            }
 
-                        let now = created.elapsed();
-                        if let Some(last) = last_frame_at {
-                            // One millisecond of tolerance keeps a 60 Hz
-                            // source from skipping every other frame at a
-                            // 60 fps cap.
-                            if now.saturating_sub(last) + Duration::from_millis(1) < interval {
-                                let _ = duplication.ReleaseFrame();
-                                continue;
-                            }
-                        }
+            if frame_info.LastPresentTime == 0 {
+                continue;
+            }
+            let resource = resource.ok_or_else(|| XCapError::new("AcquireNextFrame failed"))?;
+            let source_texture = resource.cast::<ID3D11Texture2D>()?;
+            let mut source_texture_desc = D3D11_TEXTURE2D_DESC::default();
+            source_texture.GetDesc(&mut source_texture_desc);
 
-                        let (x, y, width, height) = sdr_crop(
-                            region,
-                            source_texture_desc.Width,
-                            source_texture_desc.Height,
-                            rotation,
-                        )?;
+            let now = created.elapsed();
+            if let Some(last) = last_frame_at {
+                // One millisecond of tolerance keeps a 60 Hz source from
+                // skipping every other frame at a 60 fps cap.
+                if now.saturating_sub(last) + Duration::from_millis(1) < interval {
+                    continue;
+                }
+            }
 
-                        let mut frame = orient_frame(
-                            texture_to_frame(
-                                &d3d_device,
-                                &d3d_context,
-                                &source_texture,
-                                x,
-                                y,
-                                width,
-                                height,
-                            )?,
-                            rotation,
-                        );
-                        // Stamp capture time, not delivery time: the
-                        // conversion above can take longer than a frame.
-                        frame.timestamp = now;
-                        last_frame_at = Some(now);
-                        match tx.try_send(frame) {
-                            Ok(()) => {}
-                            Err(TrySendError::Full(_)) => {}
-                            Err(TrySendError::Disconnected(_)) => {
-                                recorder_waker.shutdown()?;
-                                return Ok(());
-                            }
-                        }
-                    }
+            let (x, y, width, height) = sdr_crop(
+                region,
+                source_texture_desc.Width,
+                source_texture_desc.Height,
+                rotation,
+            )?;
 
-                    // 最后释放帧，不然获取不到当前帧的数据
-                    duplication.ReleaseFrame()?;
+            let mut frame = orient_frame(
+                texture_to_frame(
+                    &d3d_device,
+                    &d3d_context,
+                    &source_texture,
+                    x,
+                    y,
+                    width,
+                    height,
+                )?,
+                rotation,
+            );
+            // Stamp capture time, not delivery time: the conversion above can
+            // take longer than a frame.
+            frame.timestamp = now;
+            last_frame_at = Some(now);
+            match tx.try_send(frame) {
+                Ok(()) => {}
+                Err(TrySendError::Full(_)) => {}
+                Err(TrySendError::Disconnected(_)) => {
+                    recorder_waker.shutdown()?;
+                    return Ok(());
                 }
             }
         }
@@ -327,9 +313,9 @@ fn orient_frame(mut frame: Frame, rotation: DXGI_MODE_ROTATION) -> Frame {
     for y in 0..height as usize {
         for x in 0..width as usize {
             let (source_x, source_y) = match rotation {
-                DXGI_MODE_ROTATION_ROTATE90 => (source_width - 1 - y, x),
+                DXGI_MODE_ROTATION_ROTATE90 => (y, source_height - 1 - x),
                 DXGI_MODE_ROTATION_ROTATE180 => (source_width - 1 - x, source_height - 1 - y),
-                DXGI_MODE_ROTATION_ROTATE270 => (y, source_height - 1 - x),
+                DXGI_MODE_ROTATION_ROTATE270 => (source_width - 1 - y, x),
                 _ => unreachable!(),
             };
             let source = (source_y * source_width + source_x) * 4;
@@ -370,20 +356,22 @@ fn run_hdr(
         // it away costs far more than the frame check does.
         if let Some(last) = last_frame_at {
             let wait = interval.saturating_sub(created.elapsed().saturating_sub(last));
-            if !wait.is_zero() {
-                thread::sleep(wait);
+            if !recorder_waker.wait_timeout(wait)? {
+                return Ok(());
             }
         }
         let Some(permit) = QueuePermit::acquire(queue_depth.clone(), FRAME_QUEUE_CAPACITY) else {
             // The receiver has not made room yet. Skip before DXGI grab and
             // HDR decode rather than paying for a frame that would be dropped.
-            thread::sleep(interval);
+            if !recorder_waker.wait_timeout(interval)? {
+                return Ok(());
+            }
             continue;
         };
-        let captured_at = created.elapsed();
-        let Some(image) = session.grab(crop, Duration::from_millis(200))? else {
+        let Some((image, acquired_at)) = session.grab(crop, Duration::from_millis(200))? else {
             continue;
         };
+        let captured_at = acquired_at.saturating_duration_since(created);
         last_frame_at = Some(captured_at);
         let width = image.width();
         let height = image.height();
@@ -449,7 +437,7 @@ mod tests {
         };
         assert_eq!(
             values(orient_frame(frame.clone(), DXGI_MODE_ROTATION_ROTATE90)),
-            [1, 3, 5, 0, 2, 4]
+            [4, 2, 0, 5, 3, 1]
         );
         assert_eq!(
             values(orient_frame(frame.clone(), DXGI_MODE_ROTATION_ROTATE180)),
@@ -457,7 +445,52 @@ mod tests {
         );
         assert_eq!(
             values(orient_frame(frame, DXGI_MODE_ROTATION_ROTATE270)),
-            [4, 2, 0, 5, 3, 1]
+            [1, 3, 5, 0, 2, 4]
         );
+    }
+
+    #[test]
+    fn sdr_crop_and_orient_frame_round_trip_for_all_rotations() {
+        let full = Frame::new(
+            2,
+            3,
+            (0..6).flat_map(|pixel| [pixel as u8, 0, 0, 255]).collect(),
+        );
+        let crop_surface = |(sx, sy, sw, sh): (u32, u32, u32, u32)| {
+            let mut raw = Vec::with_capacity((sw * sh * 4) as usize);
+            for y in sy..sy + sh {
+                for x in sx..sx + sw {
+                    let at = ((y * full.width + x) * 4) as usize;
+                    raw.extend_from_slice(&full.raw[at..at + 4]);
+                }
+            }
+            Frame::new(sw, sh, raw)
+        };
+        for rotation in [
+            DXGI_MODE_ROTATION_IDENTITY,
+            DXGI_MODE_ROTATION_ROTATE90,
+            DXGI_MODE_ROTATION_ROTATE180,
+            DXGI_MODE_ROTATION_ROTATE270,
+        ] {
+            let oriented_full = orient_frame(full.clone(), rotation);
+            for sy in 0..oriented_full.height {
+                for sx in 0..oriented_full.width {
+                    let region = CaptureRegion {
+                        x: sx,
+                        y: sy,
+                        width: 1,
+                        height: 1,
+                    };
+                    let rect = sdr_crop(Some(region), full.width, full.height, rotation).unwrap();
+                    let oriented_crop = orient_frame(crop_surface(rect), rotation);
+                    let expected = ((sy * oriented_full.width + sx) * 4) as usize;
+                    assert_eq!(
+                        oriented_crop.raw,
+                        oriented_full.raw[expected..expected + 4],
+                        "mismatch at ({sx}, {sy}) for {rotation:?}"
+                    );
+                }
+            }
+        }
     }
 }

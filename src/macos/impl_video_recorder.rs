@@ -1,7 +1,7 @@
 use std::{
     slice,
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicBool, AtomicU32, Ordering},
         mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel},
     },
@@ -107,6 +107,46 @@ fn ycbcr_matrix(pixel_buffer: &CVPixelBuffer) -> YcbcrMatrix {
     }
 }
 
+struct YcbcrLuts {
+    luma: [i32; 256],
+    cb_green: [i32; 256],
+    cb_blue: [i32; 256],
+    cr_red: [i32; 256],
+    cr_green: [i32; 256],
+}
+
+fn build_ycbcr_luts(matrix: YcbcrMatrix) -> YcbcrLuts {
+    let (cb_green, cb_blue, cr_red, cr_green) = match matrix {
+        YcbcrMatrix::Bt601 => (-0.391_762_3, 2.017_232_1, 1.596_026_8, -0.812_967_6),
+        YcbcrMatrix::Bt709 => (-0.187_324_3, 2.112_401_8, 1.792_741_1, -0.532_909_3),
+    };
+    let mut luts = YcbcrLuts {
+        luma: [0; 256],
+        cb_green: [0; 256],
+        cb_blue: [0; 256],
+        cr_red: [0; 256],
+        cr_green: [0; 256],
+    };
+    for value in 0..256 {
+        luts.luma[value] = ((value as f32 - 16.0) * 1.164_383_6).round() as i32;
+        let chroma_value = value as f32 - 128.0;
+        luts.cb_green[value] = (chroma_value * cb_green).round() as i32;
+        luts.cb_blue[value] = (chroma_value * cb_blue).round() as i32;
+        luts.cr_red[value] = (chroma_value * cr_red).round() as i32;
+        luts.cr_green[value] = (chroma_value * cr_green).round() as i32;
+    }
+    luts
+}
+
+fn ycbcr_luts(matrix: YcbcrMatrix) -> &'static YcbcrLuts {
+    static BT601: OnceLock<YcbcrLuts> = OnceLock::new();
+    static BT709: OnceLock<YcbcrLuts> = OnceLock::new();
+    match matrix {
+        YcbcrMatrix::Bt601 => BT601.get_or_init(|| build_ycbcr_luts(YcbcrMatrix::Bt601)),
+        YcbcrMatrix::Bt709 => BT709.get_or_init(|| build_ycbcr_luts(YcbcrMatrix::Bt709)),
+    }
+}
+
 fn rgba_from_420v(
     width: usize,
     height: usize,
@@ -116,24 +156,7 @@ fn rgba_from_420v(
     chroma_stride: usize,
     matrix: YcbcrMatrix,
 ) -> Vec<u8> {
-    let (cb_green, cb_blue, cr_red, cr_green) = match matrix {
-        YcbcrMatrix::Bt601 => (-0.391_762_3, 2.017_232_1, 1.596_026_8, -0.812_967_6),
-        YcbcrMatrix::Bt709 => (-0.187_324_3, 2.112_401_8, 1.792_741_1, -0.532_909_3),
-    };
-    let mut luma_lut = [0i32; 256];
-    let mut cb_green_lut = [0i32; 256];
-    let mut cb_blue_lut = [0i32; 256];
-    let mut cr_red_lut = [0i32; 256];
-    let mut cr_green_lut = [0i32; 256];
-    for value in 0..256 {
-        luma_lut[value] = ((value as f32 - 16.0) * 1.164_383_6).round() as i32;
-        let chroma_value = value as f32 - 128.0;
-        cb_green_lut[value] = (chroma_value * cb_green).round() as i32;
-        cb_blue_lut[value] = (chroma_value * cb_blue).round() as i32;
-        cr_red_lut[value] = (chroma_value * cr_red).round() as i32;
-        cr_green_lut[value] = (chroma_value * cr_green).round() as i32;
-    }
-
+    let luts = ycbcr_luts(matrix);
     let chroma_width = width.div_ceil(2);
     let mut rgba = vec![0; width * height * 4];
     for y in 0..height {
@@ -143,11 +166,11 @@ fn rgba_from_420v(
         for x in 0..width {
             let cb = chroma_row[(x / 2) * 2] as usize;
             let cr = chroma_row[(x / 2) * 2 + 1] as usize;
-            let luma = luma_lut[luma_row[x] as usize];
+            let luma = luts.luma[luma_row[x] as usize];
             let out = &mut rgba[(y * width + x) * 4..(y * width + x + 1) * 4];
-            out[0] = (luma + cr_red_lut[cr]).clamp(0, 255) as u8;
-            out[1] = (luma + cb_green_lut[cb] + cr_green_lut[cr]).clamp(0, 255) as u8;
-            out[2] = (luma + cb_blue_lut[cb]).clamp(0, 255) as u8;
+            out[0] = (luma + luts.cr_red[cr]).clamp(0, 255) as u8;
+            out[1] = (luma + luts.cb_green[cb] + luts.cr_green[cr]).clamp(0, 255) as u8;
+            out[2] = (luma + luts.cb_blue[cb]).clamp(0, 255) as u8;
             out[3] = 255;
         }
     }
@@ -161,8 +184,8 @@ struct StreamOutputVars {
     created: Instant,
     /// Whether RGhA frames should be decoded as extended-range sRGB.
     hdr: bool,
-    /// Extended sRGB → linear lookup, built once per recording.
-    srgb_lut: Option<Box<[u16; 65_536]>>,
+    /// Cached extended sRGB → linear lookup for RGhA frames.
+    srgb_lut: Option<&'static [u16; 65_536]>,
     biplanar_logged: AtomicBool,
     unsupported_format_logged: AtomicU32,
 }
@@ -189,20 +212,36 @@ impl StreamOutputVars {
             let format_type = CVPixelBufferGetPixelFormatType(&pixel_buffer);
             let width = CVPixelBufferGetWidth(&pixel_buffer);
             let height = CVPixelBufferGetHeight(&pixel_buffer);
-            let bytes_per_row = CVPixelBufferGetBytesPerRow(&pixel_buffer);
-            let size = CVPixelBufferGetDataSize(&pixel_buffer);
-            let base_address = CVPixelBufferGetBaseAddress(&pixel_buffer);
-            if base_address.is_null() || width == 0 || height == 0 {
+            if width == 0 || height == 0 {
                 return;
             }
-            let data = slice::from_raw_parts(base_address.cast::<u8>(), size);
+            let (Ok(width_u32), Ok(height_u32)) = (u32::try_from(width), u32::try_from(height))
+            else {
+                return;
+            };
 
             let frame = match format_type {
                 PIXEL_FORMAT_32BGRA => {
-                    let row_len = width * 4;
+                    let bytes_per_row = CVPixelBufferGetBytesPerRow(&pixel_buffer);
+                    let size = CVPixelBufferGetDataSize(&pixel_buffer);
+                    let base_address = CVPixelBufferGetBaseAddress(&pixel_buffer);
+                    let Some(row_len) = width.checked_mul(4) else {
+                        return;
+                    };
+                    let Some(min_size) = (height - 1)
+                        .checked_mul(bytes_per_row)
+                        .and_then(|offset| offset.checked_add(row_len))
+                    else {
+                        return;
+                    };
+                    if base_address.is_null() || bytes_per_row < row_len || size < min_size {
+                        return;
+                    }
+                    let data = slice::from_raw_parts(base_address.cast::<u8>(), size);
                     let mut buffer = vec![0; row_len * height];
                     for (src_row, dst_row) in data
-                        .chunks_exact(bytes_per_row)
+                        .chunks(bytes_per_row)
+                        .take(height)
                         .zip(buffer.chunks_exact_mut(row_len))
                     {
                         for (src, dst) in src_row[..row_len]
@@ -217,7 +256,7 @@ impl StreamOutputVars {
                             dst[3] = src[3];
                         }
                     }
-                    Frame::new_at(width as u32, height as u32, buffer, timestamp)
+                    Frame::new_at(width_u32, height_u32, buffer, timestamp)
                 }
                 PIXEL_FORMAT_420V => {
                     let matrix = ycbcr_matrix(&pixel_buffer);
@@ -235,17 +274,35 @@ impl StreamOutputVars {
                     let chroma_height = height.div_ceil(2);
                     let luma_stride = CVPixelBufferGetBytesPerRowOfPlane(&pixel_buffer, 0);
                     let chroma_stride = CVPixelBufferGetBytesPerRowOfPlane(&pixel_buffer, 1);
+                    let luma_address = CVPixelBufferGetBaseAddressOfPlane(&pixel_buffer, 0);
                     let chroma_address = CVPixelBufferGetBaseAddressOfPlane(&pixel_buffer, 1);
-                    if chroma_address.is_null() {
+                    let Some(luma_len) = (height - 1)
+                        .checked_mul(luma_stride)
+                        .and_then(|offset| offset.checked_add(width))
+                    else {
+                        return;
+                    };
+                    let Some(chroma_row_len) = chroma_width.checked_mul(2) else {
+                        return;
+                    };
+                    let Some(chroma_len) = (chroma_height - 1)
+                        .checked_mul(chroma_stride)
+                        .and_then(|offset| offset.checked_add(chroma_row_len))
+                    else {
+                        return;
+                    };
+                    if luma_address.is_null()
+                        || chroma_address.is_null()
+                        || luma_stride < width
+                        || chroma_stride < chroma_row_len
+                    {
                         return;
                     }
-                    let luma_len = luma_stride * height;
-                    let chroma_len = (chroma_height - 1) * chroma_stride + chroma_width * 2;
-                    let luma = slice::from_raw_parts(base_address.cast::<u8>(), luma_len);
+                    let luma = slice::from_raw_parts(luma_address.cast::<u8>(), luma_len);
                     let chroma = slice::from_raw_parts(chroma_address.cast::<u8>(), chroma_len);
                     Frame::new_at(
-                        width as u32,
-                        height as u32,
+                        width_u32,
+                        height_u32,
                         rgba_from_420v(
                             width,
                             height,
@@ -259,33 +316,51 @@ impl StreamOutputVars {
                     )
                 }
                 PIXEL_FORMAT_64RGBA_HALF if self.hdr => {
+                    let bytes_per_row = CVPixelBufferGetBytesPerRow(&pixel_buffer);
+                    let size = CVPixelBufferGetDataSize(&pixel_buffer);
+                    let base_address = CVPixelBufferGetBaseAddress(&pixel_buffer);
+                    let Some(row_len) = width.checked_mul(8) else {
+                        return;
+                    };
+                    let Some(min_size) = (height - 1)
+                        .checked_mul(bytes_per_row)
+                        .and_then(|offset| offset.checked_add(row_len))
+                    else {
+                        return;
+                    };
+                    if base_address.is_null() || bytes_per_row < row_len || size < min_size {
+                        return;
+                    }
+                    let data = slice::from_raw_parts(base_address.cast::<u8>(), size);
                     let linear = pixel_buffer
                         .attachment(kCVImageBufferCGColorSpaceKey, std::ptr::null_mut())
                         .and_then(|space| space.downcast::<CGColorSpace>().ok())
                         .is_some_and(|space| hdr::is_linear(Some(&space)));
-                    let row_len = width * 8;
-                    let mut pixels = Vec::with_capacity(width * height * 6);
-                    for src_row in data.chunks_exact(bytes_per_row).take(height) {
-                        for pixel in src_row[..row_len].chunks_exact(8).take(width) {
+                    let Some(pixel_bytes) = width
+                        .checked_mul(height)
+                        .and_then(|pixels| pixels.checked_mul(6))
+                    else {
+                        return;
+                    };
+                    let mut pixels = Vec::with_capacity(pixel_bytes);
+                    for src_row in data.chunks(bytes_per_row).take(height) {
+                        for pixel in src_row[..row_len].as_chunks::<8>().0 {
                             for bytes in pixel.as_chunks::<2>().0.iter().take(3) {
                                 let bits = u16::from_le_bytes(*bytes);
                                 let out = if linear {
                                     bits
                                 } else {
-                                    self.srgb_lut
-                                        .as_ref()
-                                        .map_or(bits, |lut| lut[bits as usize])
+                                    self.srgb_lut.map_or(bits, |lut| lut[bits as usize])
                                 };
                                 pixels.extend_from_slice(&out.to_le_bytes());
                             }
                         }
                     }
-                    Frame::new_hdr(
-                        width as u32,
-                        height as u32,
-                        HdrImage::new(width as u32, height as u32, pixels, 203.0),
-                        timestamp,
-                    )
+                    let Ok(hdr_image) = HdrImage::try_new(width_u32, height_u32, pixels, 203.0)
+                    else {
+                        return;
+                    };
+                    Frame::new_hdr(width_u32, height_u32, hdr_image, timestamp)
                 }
                 _ => {
                     if self
@@ -343,7 +418,7 @@ impl StreamOutput {
         running: Arc<AtomicBool>,
         created: Instant,
         hdr: bool,
-        srgb_lut: Option<Box<[u16; 65_536]>>,
+        srgb_lut: Option<&'static [u16; 65_536]>,
     ) -> Retained<Self> {
         let this = Self::alloc().set_ivars(StreamOutputVars {
             tx,

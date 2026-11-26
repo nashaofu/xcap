@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(all(target_os = "windows", not(feature = "wgc")), test))]
 use std::sync::{Arc, atomic::AtomicUsize};
 
 use crate::{HdrImage, XCapResult, platform::impl_video_recorder::ImplVideoRecorder};
@@ -137,7 +137,10 @@ pub struct Frame {
     /// Time since the recorder was created.
     pub timestamp: Duration,
     /// Released when the receiver drops the frame, including decode failures.
-    #[cfg(any(target_os = "windows", test))]
+    ///
+    /// Note: on Windows HDR recording, cloning a [`Frame`] also retains its
+    /// queue permit until every clone is dropped.
+    #[cfg(any(all(target_os = "windows", not(feature = "wgc")), test))]
     queue_permit: Option<QueuePermit>,
 }
 
@@ -149,19 +152,19 @@ impl Clone for Frame {
             raw: self.raw.clone(),
             hdr: self.hdr.clone(),
             timestamp: self.timestamp,
-            #[cfg(any(target_os = "windows", test))]
+            #[cfg(any(all(target_os = "windows", not(feature = "wgc")), test))]
             queue_permit: self.queue_permit.clone(),
         }
     }
 }
 
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(all(target_os = "windows", not(feature = "wgc")), test))]
 #[derive(Debug)]
 pub(crate) struct QueuePermit {
     depth: Arc<AtomicUsize>,
 }
 
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(all(target_os = "windows", not(feature = "wgc")), test))]
 impl QueuePermit {
     pub(crate) fn acquire(depth: Arc<AtomicUsize>, capacity: usize) -> Option<Self> {
         let mut current = depth.load(Ordering::Relaxed);
@@ -182,7 +185,7 @@ impl QueuePermit {
     }
 }
 
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(all(target_os = "windows", not(feature = "wgc")), test))]
 impl Clone for QueuePermit {
     fn clone(&self) -> Self {
         self.depth.fetch_add(1, Ordering::Relaxed);
@@ -192,7 +195,7 @@ impl Clone for QueuePermit {
     }
 }
 
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(all(target_os = "windows", not(feature = "wgc")), test))]
 impl Drop for QueuePermit {
     fn drop(&mut self) {
         self.depth.fetch_sub(1, Ordering::Relaxed);
@@ -207,7 +210,7 @@ impl Frame {
             raw,
             hdr: None,
             timestamp: Duration::ZERO,
-            #[cfg(any(target_os = "windows", test))]
+            #[cfg(any(all(target_os = "windows", not(feature = "wgc")), test))]
             queue_permit: None,
         }
     }
@@ -219,7 +222,7 @@ impl Frame {
             raw,
             hdr: None,
             timestamp,
-            #[cfg(any(target_os = "windows", test))]
+            #[cfg(any(all(target_os = "windows", not(feature = "wgc")), test))]
             queue_permit: None,
         }
     }
@@ -231,12 +234,12 @@ impl Frame {
             raw: Vec::new(),
             hdr: Some(hdr),
             timestamp,
-            #[cfg(any(target_os = "windows", test))]
+            #[cfg(any(all(target_os = "windows", not(feature = "wgc")), test))]
             queue_permit: None,
         }
     }
 
-    #[cfg(any(target_os = "windows", test))]
+    #[cfg(any(all(target_os = "windows", not(feature = "wgc")), test))]
     pub(crate) fn with_queue_permit(mut self, permit: QueuePermit) -> Self {
         self.queue_permit = Some(permit);
         self
@@ -276,6 +279,10 @@ impl RecorderWaker {
         Ok(())
     }
     #[allow(dead_code)]
+    pub fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::Acquire)
+    }
+    #[allow(dead_code)]
     pub fn shutdown(&self) -> XCapResult<()> {
         let mut parking = self.parking.lock()?;
         *parking = false;
@@ -296,6 +303,29 @@ impl RecorderWaker {
     #[allow(dead_code)]
     pub fn wait_active(&self) -> XCapResult<bool> {
         self.wait()?;
+        Ok(!self.stopped.load(Ordering::Acquire))
+    }
+    #[allow(dead_code)]
+    pub fn wait_timeout(&self, duration: Duration) -> XCapResult<bool> {
+        if self.stopped.load(Ordering::Acquire) {
+            return Ok(false);
+        }
+        if duration.is_zero() {
+            return Ok(!self.stopped.load(Ordering::Acquire));
+        }
+        let deadline = std::time::Instant::now() + duration;
+        let mut parking = self.parking.lock()?;
+        while !self.stopped.load(Ordering::Acquire) {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            let (next_guard, result) = self.condvar.wait_timeout(parking, remaining)?;
+            parking = next_guard;
+            if result.timed_out() {
+                break;
+            }
+        }
         Ok(!self.stopped.load(Ordering::Acquire))
     }
 }

@@ -7,7 +7,7 @@
 //! result, so ordinary SDR desktops never touch a D3D device.
 
 use std::{
-    sync::Mutex,
+    sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
 
@@ -32,7 +32,7 @@ use windows::{
                 DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709,
                 DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020, DXGI_FORMAT,
                 DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT,
-                DXGI_MODE_ROTATION_IDENTITY, DXGI_SAMPLE_DESC,
+                DXGI_MODE_ROTATION_IDENTITY, DXGI_MODE_ROTATION_UNSPECIFIED, DXGI_SAMPLE_DESC,
             },
             Dxgi::{
                 CreateDXGIFactory1, DXGI_ERROR_NOT_FOUND, DXGI_ERROR_WAIT_TIMEOUT,
@@ -94,7 +94,19 @@ impl std::fmt::Debug for Session {
     }
 }
 
+enum ReadOutcome {
+    Frame {
+        width: u32,
+        height: u32,
+        format: DXGI_FORMAT,
+        acquired_at: Instant,
+    },
+    Empty,
+    Timeout,
+}
+
 /// Sub-rectangle of the desktop to copy, in physical pixels.
+#[cfg_attr(feature = "wgc", allow(dead_code))]
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Crop {
     pub x: u32,
@@ -133,16 +145,31 @@ impl Session {
         let mut format_choice = "none";
         if let Some(output5) = output5 {
             unsafe {
-                if let Ok(dup) =
-                    output5.DuplicateOutput1(&dxgi_device, 0, &[DXGI_FORMAT_R16G16B16A16_FLOAT])
-                {
-                    duplication = Some(dup);
-                    format_choice = "R16G16B16A16_FLOAT (scRGB)";
-                } else if let Ok(dup) =
-                    output5.DuplicateOutput1(&dxgi_device, 0, &[DXGI_FORMAT_R10G10B10A2_UNORM])
-                {
-                    duplication = Some(dup);
-                    format_choice = "R10G10B10A2_UNORM (HDR10 PQ)";
+                match output5.DuplicateOutput1(&dxgi_device, 0, &[DXGI_FORMAT_R16G16B16A16_FLOAT]) {
+                    Ok(dup) => {
+                        duplication = Some(dup);
+                        format_choice = "R16G16B16A16_FLOAT (scRGB)";
+                    }
+                    Err(err) => {
+                        log::debug!("xcap Windows HDR: scRGB DuplicateOutput1 failed: {err}");
+                        if color_space == Some(DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020) {
+                            match output5.DuplicateOutput1(
+                                &dxgi_device,
+                                0,
+                                &[DXGI_FORMAT_R10G10B10A2_UNORM],
+                            ) {
+                                Ok(dup) => {
+                                    duplication = Some(dup);
+                                    format_choice = "R10G10B10A2_UNORM (HDR10 PQ)";
+                                }
+                                Err(pq_err) => {
+                                    log::debug!(
+                                        "xcap Windows HDR: HDR10 PQ DuplicateOutput1 failed: {pq_err}"
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
             }
         } else {
@@ -153,9 +180,12 @@ impl Session {
 
         let desc = unsafe { duplication.GetDesc() };
         // AcquireNextFrame always returns the unrotated surface with the
-        // desktop image rotated inside it, so a rotated display would not line
-        // up with the selection. The GDI grab is correctly oriented.
-        if desc.Rotation != DXGI_MODE_ROTATION_IDENTITY {
+        // desktop image rotated inside it, so a rotated display cannot map
+        // screen-space coordinates directly. GDI handles rotation for SDR.
+        if !matches!(
+            desc.Rotation,
+            DXGI_MODE_ROTATION_IDENTITY | DXGI_MODE_ROTATION_UNSPECIFIED
+        ) {
             log::info!(
                 "xcap Windows HDR: rotated desktop {:?} -> NotSupported",
                 desc.Rotation
@@ -175,6 +205,10 @@ impl Session {
     }
 
     fn capture_frame(&self) -> XCapResult<HdrImage> {
+        let mut buffers = self
+            .buffers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let deadline = Instant::now() + FRAME_TIMEOUT;
         for attempt in 0..MAX_EMPTY_FRAMES {
             if attempt > 0 {
@@ -183,10 +217,23 @@ impl Session {
             }
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
-                break;
+                return Err(XCapError::new(
+                    "DXGI timed out waiting for an HDR desktop frame",
+                ));
             }
-            if let Some(image) = self.grab(None, remaining)? {
-                return Ok(image);
+            match self.read_frame(&mut buffers, None, remaining, true)? {
+                ReadOutcome::Frame {
+                    width,
+                    height,
+                    format,
+                    ..
+                } => return self.decode_frame(&buffers.raw, width, height, format),
+                ReadOutcome::Empty => continue,
+                ReadOutcome::Timeout => {
+                    return Err(XCapError::new(
+                        "DXGI timed out waiting for an HDR desktop frame",
+                    ));
+                }
             }
         }
         Err(XCapError::new("DXGI kept returning an empty desktop frame"))
@@ -194,28 +241,48 @@ impl Session {
 
     /// Grab the next desktop frame as scRGB, cropped to `crop` when given.
     ///
-    /// `Ok(None)` means nothing arrived within `timeout` or the driver handed
-    /// back an empty buffer; video recording treats both as "try again".
+    /// Returns the decoded image together with the [`Instant`] captured right
+    /// after `AcquireNextFrame` succeeded. `Ok(None)` means nothing arrived
+    /// within `timeout`.
+    #[cfg_attr(feature = "wgc", allow(dead_code))]
     pub(super) fn grab(
         &self,
         crop: Option<Crop>,
         timeout: Duration,
-    ) -> XCapResult<Option<HdrImage>> {
+    ) -> XCapResult<Option<(HdrImage, Instant)>> {
         let mut buffers = self
             .buffers
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let Some((width, height, format)) = self.read_frame(&mut buffers, crop, timeout)? else {
-            return Ok(None);
-        };
+        match self.read_frame(&mut buffers, crop, timeout, false)? {
+            ReadOutcome::Frame {
+                width,
+                height,
+                format,
+                acquired_at,
+            } => Ok(Some((
+                self.decode_frame(&buffers.raw, width, height, format)?,
+                acquired_at,
+            ))),
+            ReadOutcome::Empty | ReadOutcome::Timeout => Ok(None),
+        }
+    }
+
+    fn decode_frame(
+        &self,
+        raw: &[u8],
+        width: u32,
+        height: u32,
+        format: DXGI_FORMAT,
+    ) -> XCapResult<HdrImage> {
         let image = match mode_for_format(format) {
             Some(HdrMode::Float) => {
                 log::debug!("xcap Windows HDR: decoding frame as scRGB float");
-                float_to_scrgb(&buffers.raw, width, height)
+                float_to_scrgb(raw, width, height)?
             }
             Some(HdrMode::Pq) => {
                 log::debug!("xcap Windows HDR: decoding frame as HDR10 PQ 10-bit");
-                pq_to_scrgb(&buffers.raw, width, height)
+                pq_to_scrgb(raw, width, height)?
             }
             None => {
                 return Err(XCapError::new(format!(
@@ -223,19 +290,21 @@ impl Session {
                 )));
             }
         };
-        Ok(Some(image.with_sdr_white(self.sdr_white_nits)))
+        image.try_with_sdr_white(self.sdr_white_nits)
     }
 
     /// Acquire one desktop frame as tightly packed rows.
     ///
-    /// `Ok(None)` means the frame was entirely zero: some AMD drivers hand back
-    /// an uninitialised buffer on the first frame after `DuplicateOutput1`.
+    /// When `reject_all_zero` is set, an all-zero buffer returns
+    /// [`ReadOutcome::Empty`] because some drivers hand back an uninitialised
+    /// buffer on the first frame after `DuplicateOutput1`.
     fn read_frame(
         &self,
         buffers: &mut Buffers,
         crop: Option<Crop>,
         timeout: Duration,
-    ) -> XCapResult<Option<(u32, u32, DXGI_FORMAT)>> {
+        reject_all_zero: bool,
+    ) -> XCapResult<ReadOutcome> {
         unsafe {
             let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
             let mut resource: Option<IDXGIResource> = None;
@@ -246,14 +315,15 @@ impl Session {
             {
                 Ok(()) => {}
                 Err(err) if err.code() == DXGI_ERROR_WAIT_TIMEOUT => {
-                    return Ok(None);
+                    return Ok(ReadOutcome::Timeout);
                 }
                 Err(err) => {
-                    // 尝试释放当前帧，不然不能获取到下一帧数据
+                    // Release any previously acquired frame before propagating the error.
                     let _ = self.duplication.ReleaseFrame();
                     return Err(err.into());
                 }
             }
+            let acquired_at = Instant::now();
             defer! {
                 let _ = self.duplication.ReleaseFrame();
             }
@@ -317,8 +387,9 @@ impl Session {
                 front: 0,
                 back: 1,
             };
+            let staging_resource: ID3D11Resource = staging.cast()?;
             self.context.CopySubresourceRegion(
-                Some(&staging.cast()?),
+                Some(&staging_resource),
                 0,
                 0,
                 0,
@@ -328,7 +399,6 @@ impl Session {
                 Some(&region),
             );
 
-            let staging_resource: ID3D11Resource = staging.cast()?;
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
             self.context.Map(
                 Some(&staging_resource),
@@ -341,11 +411,15 @@ impl Session {
                 self.context.Unmap(Some(&staging_resource), 0);
             }
 
-            let row_bytes = width as usize * bytes_per_pixel;
+            let row_bytes = (width as usize)
+                .checked_mul(bytes_per_pixel)
+                .ok_or_else(|| XCapError::new("DXGI frame row size overflows usize"))?;
             if mapped.pData.is_null() || (mapped.RowPitch as usize) < row_bytes {
                 return Err(XCapError::new("DXGI mapped an unusable desktop frame"));
             }
-            let raw_len = row_bytes * height as usize;
+            let raw_len = row_bytes
+                .checked_mul(height as usize)
+                .ok_or_else(|| XCapError::new("DXGI frame byte size overflows usize"))?;
             buffers.raw.resize(raw_len, 0);
             let src = mapped.pData as *const u8;
             for row in 0..height as usize {
@@ -355,18 +429,23 @@ impl Session {
                     row_bytes,
                 );
             }
-            if buffers.raw.iter().all(|&byte| byte == 0) {
-                return Ok(None);
+            if reject_all_zero && buffers.raw.iter().all(|&byte| byte == 0) {
+                return Ok(ReadOutcome::Empty);
             }
-            Ok(Some((width, height, desc.Format)))
+            Ok(ReadOutcome::Frame {
+                width,
+                height,
+                format: desc.Format,
+                acquired_at,
+            })
         }
     }
 
-    unsafe fn create_staging(
+    fn create_staging(
         &self,
         width: u32,
         height: u32,
-        format: windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT,
+        format: DXGI_FORMAT,
     ) -> XCapResult<ID3D11Texture2D> {
         let desc = D3D11_TEXTURE2D_DESC {
             Width: width,
@@ -390,12 +469,16 @@ impl Session {
 }
 
 /// `R16G16B16A16_FLOAT` RGBA → six-byte RGB.
-fn float_to_scrgb(raw: &[u8], width: u32, height: u32) -> HdrImage {
-    let mut rgb = Vec::with_capacity(width as usize * height as usize * 6);
+fn float_to_scrgb(raw: &[u8], width: u32, height: u32) -> XCapResult<HdrImage> {
+    let pixel_bytes = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(6))
+        .ok_or_else(|| XCapError::new("HDR frame dimensions overflow RGB buffer"))?;
+    let mut rgb = Vec::with_capacity(pixel_bytes);
     for pixel in raw.as_chunks::<8>().0 {
         rgb.extend_from_slice(&pixel[..6]);
     }
-    HdrImage::new(width, height, rgb, 80.0)
+    HdrImage::try_new(width, height, rgb, 80.0)
 }
 
 /// `R10G10B10A2_UNORM` HDR10 → scRGB.
@@ -403,14 +486,22 @@ fn float_to_scrgb(raw: &[u8], width: u32, height: u32) -> HdrImage {
 /// The frame is PQ-encoded BT.2020: decode to absolute light, express it in
 /// scRGB's 80-nit unit, then move to sRGB primaries so every `HdrImage` shares
 /// one color space.
-fn pq_to_scrgb(raw: &[u8], width: u32, height: u32) -> HdrImage {
-    // 10-bit input, so a 1024-entry table replaces two `powf` calls per sample.
-    let mut lut = [0f32; 1024];
-    for (index, slot) in lut.iter_mut().enumerate() {
-        *slot = pq_eotf(index as f32 / 1023.0) * (10_000.0 / 80.0);
-    }
+fn pq_to_scrgb(raw: &[u8], width: u32, height: u32) -> XCapResult<HdrImage> {
+    // 10-bit input, so one cached 1024-entry table replaces two `powf` calls per sample.
+    static LUT: OnceLock<[f32; 1024]> = OnceLock::new();
+    let lut = LUT.get_or_init(|| {
+        let mut table = [0f32; 1024];
+        for (index, slot) in table.iter_mut().enumerate() {
+            *slot = pq_eotf(index as f32 / 1023.0) * (10_000.0 / 80.0);
+        }
+        table
+    });
     let m = &BT2020_TO_SCRGB;
-    let mut rgb = Vec::with_capacity(width as usize * height as usize * 6);
+    let pixel_bytes = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|pixels| pixels.checked_mul(6))
+        .ok_or_else(|| XCapError::new("HDR frame dimensions overflow RGB buffer"))?;
+    let mut rgb = Vec::with_capacity(pixel_bytes);
     for pixel in raw.as_chunks::<4>().0 {
         let value = u32::from_le_bytes(*pixel);
         let [r, g, b] = [value & 0x3ff, (value >> 10) & 0x3ff, (value >> 20) & 0x3ff]
@@ -423,11 +514,11 @@ fn pq_to_scrgb(raw: &[u8], width: u32, height: u32) -> HdrImage {
             rgb.extend_from_slice(&crate::hdr_image::f32_to_f16_bits(linear).to_le_bytes());
         }
     }
-    HdrImage::new(width, height, rgb, 80.0)
+    HdrImage::try_new(width, height, rgb, 80.0)
 }
 
-/// linear BT.2020 → linear sRGB; the inverse of the sRGB → BT.2020 matrix the
-/// PNG exporter applies.
+/// Linear BT.2020 → linear sRGB; inverse of the sRGB → BT.2020 conversion
+/// matrix.
 const BT2020_TO_SCRGB: [[f32; 3]; 3] = [
     [1.660_491, -0.587_641, -0.072_849_9],
     [-0.124_550_5, 1.132_9, -0.008_349_4],
@@ -472,7 +563,8 @@ fn sdr_white_nits(h_monitor: HMONITOR) -> f32 {
             },
             SDRWhiteLevel: 0,
         };
-        let status = DisplayConfigGetDeviceInfo(&mut level.header);
+        let status =
+            DisplayConfigGetDeviceInfo((&mut level as *mut DISPLAYCONFIG_SDR_WHITE_LEVEL).cast());
         if status != 0 || level.SDRWhiteLevel == 0 {
             return UNIT_NITS;
         }
@@ -523,7 +615,9 @@ fn path_for_device(device: &[u16]) -> Option<DISPLAYCONFIG_PATH_INFO> {
                     },
                     viewGdiDeviceName: [0; 32],
                 };
-                DisplayConfigGetDeviceInfo(&mut name.header) == 0
+                DisplayConfigGetDeviceInfo(
+                    (&mut name as *mut DISPLAYCONFIG_SOURCE_DEVICE_NAME).cast(),
+                ) == 0
                     && trim_utf16(&name.viewGdiDeviceName) == device
             });
         }
@@ -649,7 +743,7 @@ mod tests {
         for value in [1.0f32, 2.0, 4.0, 0.5] {
             raw.extend_from_slice(&half(value));
         }
-        let image = float_to_scrgb(&raw, 1, 1);
+        let image = float_to_scrgb(&raw, 1, 1).unwrap();
         assert_eq!(image.pixel_f32(0, 0), [1.0, 2.0, 4.0]);
         assert_eq!(image.reference_white_nits(), 80.0);
     }
@@ -657,12 +751,12 @@ mod tests {
     #[test]
     fn pq_frames_decode_to_absolute_nits() {
         // 10-bit code 1023 is 10 000 nits: 125 scRGB units at 80 nits.
-        let white = pq_to_scrgb(&pq_pixel(1023), 1, 1);
+        let white = pq_to_scrgb(&pq_pixel(1023), 1, 1).unwrap();
         for channel in white.pixel_f32(0, 0) {
             assert!((channel - 125.0).abs() < 0.1, "{channel}");
         }
         // Neutral input stays neutral through BT.2020 -> sRGB.
-        let mid = pq_to_scrgb(&pq_pixel(512), 1, 1);
+        let mid = pq_to_scrgb(&pq_pixel(512), 1, 1).unwrap();
         let [r, g, b] = mid.pixel_f32(0, 0);
         assert!((r - g).abs() < 0.01 && (g - b).abs() < 0.01, "{r} {g} {b}");
         assert!(r > 0.0 && r < 125.0);

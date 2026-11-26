@@ -106,6 +106,12 @@ impl HdrImage {
 
     /// Read a pixel as linear scRGB `[r, g, b]`.
     pub fn pixel_f32(&self, x: u32, y: u32) -> [f32; 3] {
+        assert!(
+            x < self.width && y < self.height,
+            "pixel ({x}, {y}) out of bounds for {}x{}",
+            self.width,
+            self.height
+        );
         let base = ((y as usize * self.width as usize) + x as usize) * 6;
         let raw = &self.raw;
         [
@@ -117,28 +123,24 @@ impl HdrImage {
 
     /// Whether any sample rises above SDR white.
     ///
-    /// Callers use this to keep ordinary screenshots on the existing 8-bit
-    /// path: an HDR display showing only SDR content gains nothing from a
-    /// 16-bit file, and the size difference is large.
+    /// Callers can use this to keep SDR-only captures on an 8-bit path: an HDR
+    /// display showing only SDR content gains nothing from a 16-bit image.
     pub fn has_highlights(&self) -> bool {
-        // Positive half-floats order like their bit patterns, so the white
-        // point is a comparison rather than a decode per sample.
+        // Positive finite half-floats order like their bit patterns, so the
+        // white point is a comparison rather than a decode per sample.
         let limit = f32_to_f16_bits(self.sdr_white_nits / self.white_nits);
         self.raw.as_chunks::<2>().0.iter().any(|bits| {
             let value = u16::from_le_bytes(*bits);
-            // Negative components are wide-gamut colors, not highlights.
-            value & 0x8000 == 0 && value > limit
+            // Exclude negatives (wide-gamut colors) and non-finite values (+Inf / NaN).
+            value & 0x8000 == 0 && value < 0x7c00 && value > limit
         })
     }
 
-    /// Tone the frame down to an 8-bit RGBA image for the overlay, clipboard,
-    /// pins, history and OCR.
+    /// Tone the frame down to an 8-bit RGBA image.
     ///
     /// SDR content is scaled so the SDR white point lands on `1.0`, matching
     /// what an SDR capture would show (on Windows HDR that means undoing the
-    /// desktop's SDR brightness boost); only highlights are clipped. That is
-    /// the trade-off the system grab APIs make, and it keeps the editor preview
-    /// consistent across displays.
+    /// desktop's SDR brightness boost); only highlights are clipped.
     pub fn to_sdr(&self) -> RgbaImage {
         let width = self.width as usize;
         let height = self.height as usize;
@@ -149,36 +151,41 @@ impl HdrImage {
         }
 
         let scale = self.white_nits / self.sdr_white_nits;
-
-        let threads = std::thread::available_parallelism()
-            .map(std::num::NonZeroUsize::get)
-            .unwrap_or(4)
-            .clamp(2, 8)
-            .min(height);
-        let band_rows = height.div_ceil(threads.max(1));
-        let raw = &self.raw;
-        std::thread::scope(|scope| {
-            for (band, chunk) in out.chunks_mut(band_rows * width * 4).enumerate() {
-                let first_row = band * band_rows;
-                scope.spawn(move || {
-                    for (row, out_row) in chunk.chunks_mut(width * 4).enumerate() {
-                        let at = (first_row + row) * width * 6;
-                        let raw = &raw[at..at + width * 6];
-                        for (px, out) in raw
-                            .as_chunks::<6>()
-                            .0
-                            .iter()
-                            .zip(out_row.as_chunks_mut::<4>().0)
-                        {
-                            out[0] = encode_sample(px[0], px[1], scale);
-                            out[1] = encode_sample(px[2], px[3], scale);
-                            out[2] = encode_sample(px[4], px[5], scale);
-                            out[3] = 255;
-                        }
-                    }
-                });
+        let table = srgb_encode_table();
+        let convert_band = |band_out: &mut [u8], first_row: usize| {
+            for (row, out_row) in band_out.chunks_mut(width * 4).enumerate() {
+                let at = (first_row + row) * width * 6;
+                let raw = &self.raw[at..at + width * 6];
+                for (px, out) in raw
+                    .as_chunks::<6>()
+                    .0
+                    .iter()
+                    .zip(out_row.as_chunks_mut::<4>().0)
+                {
+                    out[0] = encode_sample(px[0], px[1], scale, table);
+                    out[1] = encode_sample(px[2], px[3], scale, table);
+                    out[2] = encode_sample(px[4], px[5], scale, table);
+                    out[3] = 255;
+                }
             }
-        });
+        };
+
+        if width * height < 65_536 || height < 2 {
+            convert_band(&mut out, 0);
+        } else {
+            let threads = std::thread::available_parallelism()
+                .map(std::num::NonZeroUsize::get)
+                .unwrap_or(4)
+                .clamp(2, 8)
+                .min(height);
+            let band_rows = height.div_ceil(threads);
+            std::thread::scope(|scope| {
+                for (band, chunk) in out.chunks_mut(band_rows * width * 4).enumerate() {
+                    let first_row = band * band_rows;
+                    scope.spawn(move || convert_band(chunk, first_row));
+                }
+            });
+        }
         RgbaImage::from_raw(self.width, self.height, out)
             .expect("RGBA buffer is the same size as the HDR frame")
     }
@@ -224,9 +231,9 @@ fn srgb_encode_table() -> &'static [u8; 4096] {
     })
 }
 
-fn encode_sample(hi: u8, lo: u8, scale: f32) -> u8 {
-    let linear = (f16_to_f32(u16::from_le_bytes([hi, lo])) * scale).clamp(0.0, 1.0);
-    srgb_encode_table()[(linear * 4095.0).round() as usize]
+fn encode_sample(lo: u8, hi: u8, scale: f32, table: &[u8; 4096]) -> u8 {
+    let linear = (f16_to_f32(u16::from_le_bytes([lo, hi])) * scale).clamp(0.0, 1.0);
+    table[(linear * 4095.0).round() as usize]
 }
 
 fn linear_to_srgb_u8(linear: f32) -> u8 {
@@ -264,18 +271,49 @@ pub(crate) fn f16_to_f32(bits: u16) -> f32 {
     f32::from_bits(f32_bits)
 }
 
-/// f32 → the bits of an IEEE 754 half-precision value (round toward zero).
+/// f32 → the bits of an IEEE 754 half-precision value (round to nearest-even).
 pub(crate) fn f32_to_f16_bits(value: f32) -> u16 {
     let bits = value.to_bits();
     let sign = ((bits >> 16) & 0x8000) as u16;
-    let exponent = ((bits >> 23) & 0xff) as i32 - 127 + 15;
+    let exponent = ((bits >> 23) & 0xff) as i32;
     let mantissa = bits & 0x007f_ffff;
-    if exponent >= 31 {
+    if exponent == 255 {
+        return if mantissa == 0 {
+            sign | 0x7c00
+        } else {
+            sign | 0x7e00 | ((mantissa >> 13) as u16)
+        };
+    }
+    let exp16 = exponent - 127 + 15;
+    if exp16 >= 31 {
+        return sign | 0x7c00;
+    }
+    if exp16 <= 0 {
+        let shift = (14 - exp16) as u32;
+        if shift > 24 {
+            return sign;
+        }
+        let full_mantissa = mantissa | 0x0080_0000;
+        let round_bit = 1u32 << (shift - 1);
+        let sticky_mask = round_bit - 1;
+        let mut subnormal = (full_mantissa >> shift) as u16;
+        if (full_mantissa & round_bit) != 0
+            && ((full_mantissa & sticky_mask) != 0 || (subnormal & 1) != 0)
+        {
+            subnormal += 1;
+        }
+        return sign | subnormal;
+    }
+    let round = mantissa & 0x1fff;
+    let mut half_mantissa = (mantissa >> 13) as u16;
+    if round > 0x1000 || (round == 0x1000 && (half_mantissa & 1) != 0) {
+        half_mantissa += 1;
+    }
+    let packed = ((exp16 as u16) << 10) + half_mantissa;
+    if packed >= 0x7c00 {
         sign | 0x7c00
-    } else if exponent <= 0 {
-        sign
     } else {
-        sign | ((exponent as u16) << 10) | ((mantissa >> 13) as u16)
+        sign | packed
     }
 }
 
@@ -362,8 +400,31 @@ mod tests {
         // 200 nits by default), so 2.5 in scRGB units is ordinary UI there.
         let sdr = sample(1, 1, &[[2.0, 0.0, 0.0]]).with_sdr_white(200.0);
         assert!(!sdr.has_highlights());
+        // Exact SDR white across Windows brightness slider steps must not falsely
+        // report highlights when stored in half-float (round-to-nearest-even).
+        for sdr_white in [96.0_f32, 112.0, 132.0, 196.0, 200.0] {
+            let level = sdr_white / 80.0;
+            let frame = sample(1, 1, &[[level, level, level]]).with_sdr_white(sdr_white);
+            assert!(
+                !frame.has_highlights(),
+                "false positive highlight at sdr_white={sdr_white}"
+            );
+        }
+        let non_finite = sample(1, 1, &[[f32::INFINITY, f32::NAN, 0.0]]);
+        assert!(!non_finite.has_highlights());
         let hdr = sample(1, 1, &[[3.0, 0.0, 0.0]]).with_sdr_white(200.0);
         assert!(hdr.has_highlights());
+    }
+
+    #[test]
+    fn half_float_preserves_subnormals_and_nan() {
+        let sub_bits = f32_to_f16_bits(1e-5);
+        assert_ne!(sub_bits, 0);
+        assert!((f16_to_f32(sub_bits) - 1e-5).abs() < 1e-6);
+
+        let nan_bits = f32_to_f16_bits(f32::NAN);
+        assert!(f16_to_f32(nan_bits).is_nan());
+        assert_eq!(f32_to_f16_bits(f32::INFINITY), 0x7c00);
     }
 
     #[test]

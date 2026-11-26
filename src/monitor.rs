@@ -102,7 +102,7 @@ impl Monitor {
 
     /// Capture the monitor as half-float scRGB pixels.
     ///
-    /// Returns [`XCapError::NotSupported`] when the display is not currently
+    /// Returns [`crate::XCapError::NotSupported`] when the display is not currently
     /// in HDR mode. Only macOS and Windows implement this.
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     pub fn capture_image_hdr(&self) -> XCapResult<HdrImage> {

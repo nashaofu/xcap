@@ -6,7 +6,7 @@
 //! that the system has no public API that returns values above SDR white, so
 //! the caller keeps the regular 8-bit path.
 
-use std::sync::mpsc::sync_channel;
+use std::sync::{OnceLock, mpsc::sync_channel};
 use std::time::Duration;
 
 use block2::RcBlock;
@@ -160,7 +160,10 @@ fn hdr_from_cg_image(image: &CGImage) -> Result<HdrImage, String> {
             "unexpected HDR screenshot layout: {bits_per_component} bits per component, {bits_per_pixel} bits per pixel"
         ));
     }
-    if stride < width * 8 {
+    let Some(row_bytes) = width.checked_mul(8) else {
+        return Err(format!("HDR screenshot width {width} overflows row size"));
+    };
+    if stride < row_bytes {
         return Err(format!(
             "HDR screenshot stride {stride} is too small for {width} pixels"
         ));
@@ -171,7 +174,15 @@ fn hdr_from_cg_image(image: &CGImage) -> Result<HdrImage, String> {
     let data = CGDataProvider::data(Some(&provider))
         .ok_or_else(|| "HDR screenshot has no data".to_string())?;
     let len = data.length() as usize;
-    if len < (height - 1) * stride + width * 8 {
+    let Some(min_len) = (height - 1)
+        .checked_mul(stride)
+        .and_then(|offset| offset.checked_add(row_bytes))
+    else {
+        return Err(format!(
+            "HDR screenshot dimensions {width}x{height} overflow byte size"
+        ));
+    };
+    if len < min_len {
         return Err(format!(
             "HDR screenshot data is {len} bytes, too short for {width}x{height}"
         ));
@@ -184,17 +195,25 @@ fn hdr_from_cg_image(image: &CGImage) -> Result<HdrImage, String> {
     let srgb_lut =
         (!is_linear(CGImage::color_space(Some(image)).as_deref())).then(srgb_to_linear_lut);
 
-    let mut pixels = Vec::with_capacity(width * height * 6);
+    let Some(pixel_bytes) = width
+        .checked_mul(height)
+        .and_then(|pixels| pixels.checked_mul(6))
+    else {
+        return Err(format!(
+            "HDR screenshot dimensions {width}x{height} overflow RGB buffer"
+        ));
+    };
+    let mut pixels = Vec::with_capacity(pixel_bytes);
     // `chunks` rather than `chunks_exact`: a provider is allowed to trim the
     // padding of its last row, which would otherwise drop that row.
     for row in raw.chunks(stride).take(height) {
-        if row.len() < width * 8 {
+        if row.len() < row_bytes {
             break;
         }
-        for pixel in row[..width * 8].as_chunks::<8>().0 {
+        for pixel in row[..row_bytes].as_chunks::<8>().0 {
             for channel in pixel.as_chunks::<2>().0.iter().take(3) {
                 let bits = u16::from_le_bytes(*channel);
-                let out = match &srgb_lut {
+                let out = match srgb_lut {
                     Some(lut) => lut[bits as usize],
                     None => bits,
                 };
@@ -202,27 +221,33 @@ fn hdr_from_cg_image(image: &CGImage) -> Result<HdrImage, String> {
             }
         }
     }
-    if pixels.len() != width * height * 6 {
+    if pixels.len() != pixel_bytes {
         return Err(format!(
             "HDR screenshot is missing pixels: {} by {} came back short",
             width, height
         ));
     }
-    Ok(HdrImage::new(width as u32, height as u32, pixels, 203.0))
+    let width =
+        u32::try_from(width).map_err(|_| format!("HDR screenshot width {width} exceeds u32"))?;
+    let height =
+        u32::try_from(height).map_err(|_| format!("HDR screenshot height {height} exceeds u32"))?;
+    HdrImage::try_new(width, height, pixels, 203.0).map_err(|err| err.to_string())
 }
 
 /// Extended sRGB → linear scRGB for every half-float bit pattern.
 ///
 /// The transfer function is two `powf` calls per sample, and a 5K frame has
 /// ~45 M samples. Samples are half-float, so one 128 KiB table over their
-/// 16-bit patterns turns the conversion into a lookup. The video recorder
-/// builds it once per recording; the still capture builds one per screenshot.
-pub(super) fn srgb_to_linear_lut() -> Box<[u16; 65_536]> {
-    let mut lut = Box::new([0u16; 65_536]);
-    for (bits, slot) in lut.iter_mut().enumerate() {
-        *slot = f32_to_f16_bits(srgb_to_linear(f16_to_f32(bits as u16)));
-    }
-    lut
+/// 16-bit patterns turns the conversion into a cached lookup.
+pub(super) fn srgb_to_linear_lut() -> &'static [u16; 65_536] {
+    static LUT: OnceLock<Box<[u16; 65_536]>> = OnceLock::new();
+    LUT.get_or_init(|| {
+        let mut lut = Box::new([0u16; 65_536]);
+        for (bits, slot) in lut.iter_mut().enumerate() {
+            *slot = f32_to_f16_bits(srgb_to_linear(f16_to_f32(bits as u16)));
+        }
+        lut
+    })
 }
 
 /// Whether a Core Graphics color space holds linear samples. ScreenCaptureKit
