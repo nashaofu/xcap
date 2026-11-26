@@ -2,6 +2,8 @@ use std::sync::OnceLock;
 
 use image::RgbaImage;
 
+use crate::{XCapError, XCapResult};
+
 /// A high-dynamic-range screen capture in scRGB.
 ///
 /// Pixels are three IEEE 754 half-precision values in RGB order, little-endian,
@@ -23,22 +25,34 @@ pub struct HdrImage {
 impl HdrImage {
     /// Build a frame from raw half-float samples (RGB, little-endian, six
     /// bytes per pixel) and the luminance of `1.0` in nits.
+    ///
+    /// The white level must be finite and greater than zero. Use
+    /// [`try_new`](Self::try_new) when the value comes from an external source.
     pub fn new(width: u32, height: u32, raw: Vec<u8>, white_nits: f32) -> Self {
+        Self::try_new(width, height, raw, white_nits).expect("valid HDR frame")
+    }
+
+    /// Fallible constructor for raw half-float samples and their reference
+    /// white. Invalid luminance or sample lengths are rejected instead of
+    /// poisoning later tone-mapping and HDR export maths.
+    pub fn try_new(width: u32, height: u32, raw: Vec<u8>, white_nits: f32) -> XCapResult<Self> {
+        let white_nits = checked_white(white_nits)?;
         let expected = (width as usize)
             .checked_mul(height as usize)
             .and_then(|pixels| pixels.checked_mul(6));
-        assert_eq!(
-            expected,
-            Some(raw.len()),
-            "HDR samples are 6 bytes per pixel"
-        );
-        Self {
+        if expected != Some(raw.len()) {
+            return Err(XCapError::new(format!(
+                "HDR samples are 6 bytes per pixel: expected {expected:?}, got {}",
+                raw.len()
+            )));
+        }
+        Ok(Self {
             width,
             height,
             raw,
             white_nits,
             sdr_white_nits: white_nits,
-        }
+        })
     }
 
     /// Declare the luminance SDR content occupies in this frame.
@@ -48,9 +62,15 @@ impl HdrImage {
     /// user's SDR brightness before compositing, so ordinary UI sits well above
     /// the 80-nit scRGB unit. Everything that converts to SDR or decides
     /// whether a frame has highlights needs this level.
-    pub fn with_sdr_white(mut self, nits: f32) -> Self {
-        self.sdr_white_nits = nits.max(self.white_nits);
-        self
+    pub fn with_sdr_white(self, nits: f32) -> Self {
+        self.try_with_sdr_white(nits).expect("valid SDR white")
+    }
+
+    /// Fallible SDR-white setter. Values below the reference white are raised
+    /// to it; non-finite and non-positive values are rejected.
+    pub fn try_with_sdr_white(mut self, nits: f32) -> XCapResult<Self> {
+        self.sdr_white_nits = checked_white(nits)?.max(self.white_nits);
+        Ok(self)
     }
 
     /// Luminance of SDR white in nits; `reference_white_nits` when unset.
@@ -183,6 +203,16 @@ impl HdrImage {
     }
 }
 
+fn checked_white(nits: f32) -> XCapResult<f32> {
+    if nits.is_finite() && nits > 0.0 {
+        Ok(nits)
+    } else {
+        Err(XCapError::new(format!(
+            "HDR white luminance must be finite and positive, got {nits}"
+        )))
+    }
+}
+
 fn srgb_encode_table() -> &'static [u8; 4096] {
     static TABLE: OnceLock<[u8; 4096]> = OnceLock::new();
     TABLE.get_or_init(|| {
@@ -261,6 +291,48 @@ mod tests {
             raw.extend_from_slice(&f32_to_f16_bits(*b).to_le_bytes());
         }
         HdrImage::new(width, height, raw, 80.0)
+    }
+
+    #[test]
+    fn white_levels_reject_non_finite_and_non_positive_values() {
+        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0, -1.0] {
+            assert!(HdrImage::try_new(1, 1, vec![0; 6], value).is_err());
+            assert!(sample(1, 1, &[[0.0; 3]]).try_with_sdr_white(value).is_err());
+        }
+        assert_eq!(
+            HdrImage::try_new(1, 1, vec![0; 6], 80.0)
+                .unwrap()
+                .try_with_sdr_white(40.0)
+                .unwrap()
+                .sdr_white_nits(),
+            80.0
+        );
+        assert_eq!(
+            HdrImage::try_new(1, 1, vec![0; 6], 80.0)
+                .unwrap()
+                .try_with_sdr_white(200.0)
+                .unwrap()
+                .sdr_white_nits(),
+            200.0
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "valid HDR frame")]
+    fn infallible_constructor_rejects_invalid_white() {
+        HdrImage::new(1, 1, vec![0; 6], f32::NAN);
+    }
+
+    #[test]
+    #[should_panic(expected = "valid SDR white")]
+    fn infallible_setter_rejects_invalid_white() {
+        sample(1, 1, &[[0.0; 3]]).with_sdr_white(0.0);
+    }
+
+    #[test]
+    fn fallible_constructor_rejects_invalid_sample_length() {
+        assert!(HdrImage::try_new(1, 1, vec![0; 5], 80.0).is_err());
+        assert!(HdrImage::try_new(u32::MAX, u32::MAX, Vec::new(), 80.0).is_err());
     }
 
     #[test]
