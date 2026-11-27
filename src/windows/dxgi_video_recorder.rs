@@ -24,7 +24,9 @@ use windows::{
 
 use crate::{
     XCapError, XCapResult,
-    video_recorder::{CaptureRegion, Frame, RecorderWaker, VideoRecorderOptions},
+    video_recorder::{
+        CaptureRegion, Frame, RecorderWaker, VideoRecorderOptions, throttle_tolerance,
+    },
 };
 
 use super::utils::{create_d3d_device, texture_to_frame};
@@ -38,7 +40,7 @@ pub(crate) struct ImplVideoRecorder {
     tx: SyncSender<Frame>,
     region: Option<CaptureRegion>,
     /// Minimum time between delivered frames, from the frame-rate cap.
-    interval: Duration,
+    interval: Option<Duration>,
     created: Instant,
 }
 
@@ -78,7 +80,7 @@ impl ImplVideoRecorder {
                         recorder_waker: Arc::new(RecorderWaker::new()),
                         tx,
                         region: options.region,
-                        interval: Duration::from_secs_f64(1.0 / options.fps.clamp(1, 60) as f64),
+                        interval: options.resolved_frame_interval(),
                         created: Instant::now(),
                     };
                     s.on_frame()?;
@@ -126,11 +128,11 @@ impl ImplVideoRecorder {
                                 source_texture.GetDesc(&mut source_texture_desc);
 
                                 let now = created.elapsed();
-                                if let Some(last) = last_frame_at {
-                                    // One millisecond of tolerance keeps a
-                                    // 60 Hz source from skipping every other
-                                    // frame at a 60 fps cap.
-                                    if now.saturating_sub(last) + Duration::from_millis(1)
+                                if let (Some(last), Some(interval)) = (last_frame_at, interval) {
+                                    // Allow slight sub-millisecond jitter so a
+                                    // matched source refresh rate does not skip
+                                    // every other VSync.
+                                    if now.saturating_sub(last) + throttle_tolerance(interval)
                                         < interval
                                     {
                                         let _ = duplication.ReleaseFrame();

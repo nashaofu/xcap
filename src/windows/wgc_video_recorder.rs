@@ -22,7 +22,7 @@ use windows::{
 
 use crate::{
     XCapResult,
-    video_recorder::{CaptureRegion, Frame, VideoRecorderOptions},
+    video_recorder::{CaptureRegion, Frame, VideoRecorderOptions, throttle_tolerance},
 };
 
 use super::wgc::{IDXGIDEVICE, get_next_frame};
@@ -61,7 +61,7 @@ pub(crate) struct ImplVideoRecorder {
     runtime: Arc<Mutex<Option<WgcRuntime>>>,
     tx: SyncSender<Frame>,
     region: Option<CaptureRegion>,
-    interval: Duration,
+    interval: Option<Duration>,
     created: Instant,
 }
 
@@ -102,9 +102,11 @@ impl ImplVideoRecorder {
                 move |frame_pool, _| {
                     let now = created.elapsed();
                     if let Ok(mut last) = callback_last_frame_at.lock() {
-                        if last.is_some_and(|last| {
-                            now.saturating_sub(last) + Duration::from_millis(1) < interval
-                        }) {
+                        if let Some(interval) = interval
+                            && last.is_some_and(|last| {
+                                now.saturating_sub(last) + throttle_tolerance(interval) < interval
+                            })
+                        {
                             return Ok(());
                         }
                         *last = Some(now);
@@ -157,7 +159,7 @@ impl ImplVideoRecorder {
             runtime: Arc::new(Mutex::new(None)),
             tx,
             region: options.region,
-            interval: Duration::from_secs_f64(1.0 / options.fps.clamp(1, 60) as f64),
+            interval: options.resolved_frame_interval(),
             created: Instant::now(),
         };
 
