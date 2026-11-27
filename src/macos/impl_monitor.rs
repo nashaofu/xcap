@@ -12,6 +12,7 @@ use objc2_core_graphics::{
 use objc2_foundation::{NSNumber, NSString};
 
 use crate::{
+    HdrImage,
     error::{XCapError, XCapResult},
     video_recorder::{Frame, VideoRecorderOptions},
 };
@@ -239,6 +240,10 @@ impl ImplMonitor {
         };
 
         capture(cg_rect, CGWindowListOption::OptionAll, 0)
+    }
+
+    pub fn capture_image_hdr(&self) -> XCapResult<HdrImage> {
+        super::hdr::capture(self.cg_direct_display_id)
     }
 
     pub fn video_recorder(

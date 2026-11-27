@@ -39,7 +39,8 @@ use crate::{
 use super::utils::{create_d3d_device, texture_to_frame};
 
 pub(super) static ID3D11DEVICE: LazyLock<ID3D11Device> = LazyLock::new(|| {
-    create_d3d_device(D3D11_CREATE_DEVICE_BGRA_SUPPORT).expect("Failed to create D3D11 device")
+    create_d3d_device(D3D11_CREATE_DEVICE_BGRA_SUPPORT, None)
+        .expect("Failed to create D3D11 device")
 });
 
 pub(super) static ID3D11DEVICE_CONTEXT: LazyLock<ID3D11DeviceContext> = LazyLock::new(|| unsafe {

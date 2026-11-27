@@ -59,6 +59,7 @@ objc2-core-graphics = { version = "0.3.2", default-features = false, features = 
     "CGDisplayConfiguration",
     "CGError",
     "CGGeometry",
+    "CGColorSpace",
     "CGImage",
     "CGWindow",
 ] }
@@ -78,6 +79,7 @@ objc2-screen-capture-kit = { version = "0.3.2", default-features = false, featur
     "objc2-core-foundation",
     "objc2-core-graphics",
     "objc2-core-media",
+    "SCScreenshotManager",
     "SCShareableContent",
     "SCStream",
 ] }

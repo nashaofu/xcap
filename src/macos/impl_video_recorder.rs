@@ -1,9 +1,9 @@
 use std::{
     slice,
     sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{Receiver, SyncSender, sync_channel},
+        Arc, OnceLock,
+        atomic::{AtomicBool, AtomicU32, Ordering},
+        mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel},
     },
     time::{Duration, Instant},
 };
@@ -15,25 +15,30 @@ use objc2::{
     rc::Retained,
     runtime::{NSObjectProtocol, ProtocolObject},
 };
-use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-use objc2_core_graphics::CGDirectDisplayID;
+use objc2_core_foundation::{CFString, CGPoint, CGRect, CGSize};
+use objc2_core_graphics::{CGColorSpace, CGDirectDisplayID};
 use objc2_core_media::{CMSampleBuffer, CMTime};
 use objc2_core_video::{
-    CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow, CVPixelBufferGetDataSize,
+    CVPixelBuffer, CVPixelBufferGetBaseAddress, CVPixelBufferGetBaseAddressOfPlane,
+    CVPixelBufferGetBytesPerRow, CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferGetDataSize,
     CVPixelBufferGetHeight, CVPixelBufferGetPixelFormatType, CVPixelBufferGetWidth,
     CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
-    kCVPixelFormatType_32BGRA,
+    kCVImageBufferCGColorSpaceKey, kCVImageBufferYCbCrMatrix_ITU_R_601_4,
+    kCVImageBufferYCbCrMatrixKey, kCVPixelFormatType_32BGRA as PIXEL_FORMAT_32BGRA,
+    kCVPixelFormatType_64RGBAHalf as PIXEL_FORMAT_64RGBA_HALF,
+    kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange as PIXEL_FORMAT_420V,
 };
 use objc2_foundation::{NSArray, NSError, NSObject};
 use objc2_screen_capture_kit::{
-    SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration, SCStreamOutput,
-    SCStreamOutputType, SCWindow,
+    SCCaptureDynamicRange, SCContentFilter, SCShareableContent, SCStream, SCStreamConfiguration,
+    SCStreamOutput, SCStreamOutputType, SCWindow,
 };
 use scopeguard::defer;
 
+use super::hdr;
 use crate::{
-    XCapError, XCapResult,
-    video_recorder::{Frame, OutputSize, VideoRecorderOptions},
+    HdrImage, XCapError, XCapResult,
+    video_recorder::{DynamicRange, Frame, OutputSize, VideoRecorderOptions},
 };
 
 /// How long to wait for ScreenCaptureKit before giving up.
@@ -59,7 +64,16 @@ fn shareable_content() -> XCapResult<Retained<SCShareableContent>> {
             let _ = tx.send(result);
         },
     );
-    unsafe { SCShareableContent::getShareableContentWithCompletionHandler(&handler) };
+    // Restrict enumeration to on-screen, non-desktop windows: on a busy
+    // desktop the full list carries ~150 off-screen windows we immediately
+    // discard, and the extra marshalling costs ~15 ms on every call (much
+    // more under load). `displays()` is unaffected, and the caller's own
+    // windows are on-screen, so the exclusion list stays identical.
+    unsafe {
+        SCShareableContent::getShareableContentExcludingDesktopWindows_onScreenWindowsOnly_completionHandler(
+            true, true, &handler,
+        )
+    };
 
     match rx.recv_timeout(START_TIMEOUT) {
         Ok(Ok(content)) => Ok(content),
@@ -70,11 +84,110 @@ fn shareable_content() -> XCapResult<Retained<SCShareableContent>> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum YcbcrMatrix {
+    Bt601,
+    Bt709,
+}
+
+fn ycbcr_matrix(pixel_buffer: &CVPixelBuffer) -> YcbcrMatrix {
+    let matrix = unsafe {
+        pixel_buffer
+            .attachment(kCVImageBufferYCbCrMatrixKey, std::ptr::null_mut())
+            .and_then(|value| value.downcast::<CFString>().ok())
+    };
+    let bt601 = unsafe { kCVImageBufferYCbCrMatrix_ITU_R_601_4 };
+    if matrix
+        .as_deref()
+        .is_some_and(|value| value.to_string() == bt601.to_string())
+    {
+        YcbcrMatrix::Bt601
+    } else {
+        YcbcrMatrix::Bt709
+    }
+}
+
+struct YcbcrLuts {
+    luma: [i32; 256],
+    cb_green: [i32; 256],
+    cb_blue: [i32; 256],
+    cr_red: [i32; 256],
+    cr_green: [i32; 256],
+}
+
+fn build_ycbcr_luts(matrix: YcbcrMatrix) -> YcbcrLuts {
+    let (cb_green, cb_blue, cr_red, cr_green) = match matrix {
+        YcbcrMatrix::Bt601 => (-0.391_762_3, 2.017_232_1, 1.596_026_8, -0.812_967_6),
+        YcbcrMatrix::Bt709 => (-0.187_324_3, 2.112_401_8, 1.792_741_1, -0.532_909_3),
+    };
+    let mut luts = YcbcrLuts {
+        luma: [0; 256],
+        cb_green: [0; 256],
+        cb_blue: [0; 256],
+        cr_red: [0; 256],
+        cr_green: [0; 256],
+    };
+    for value in 0..256 {
+        luts.luma[value] = ((value as f32 - 16.0) * 1.164_383_6).round() as i32;
+        let chroma_value = value as f32 - 128.0;
+        luts.cb_green[value] = (chroma_value * cb_green).round() as i32;
+        luts.cb_blue[value] = (chroma_value * cb_blue).round() as i32;
+        luts.cr_red[value] = (chroma_value * cr_red).round() as i32;
+        luts.cr_green[value] = (chroma_value * cr_green).round() as i32;
+    }
+    luts
+}
+
+fn ycbcr_luts(matrix: YcbcrMatrix) -> &'static YcbcrLuts {
+    static BT601: OnceLock<YcbcrLuts> = OnceLock::new();
+    static BT709: OnceLock<YcbcrLuts> = OnceLock::new();
+    match matrix {
+        YcbcrMatrix::Bt601 => BT601.get_or_init(|| build_ycbcr_luts(YcbcrMatrix::Bt601)),
+        YcbcrMatrix::Bt709 => BT709.get_or_init(|| build_ycbcr_luts(YcbcrMatrix::Bt709)),
+    }
+}
+
+fn rgba_from_420v(
+    width: usize,
+    height: usize,
+    luma: &[u8],
+    luma_stride: usize,
+    chroma: &[u8],
+    chroma_stride: usize,
+    matrix: YcbcrMatrix,
+) -> Vec<u8> {
+    let luts = ycbcr_luts(matrix);
+    let chroma_width = width.div_ceil(2);
+    let mut rgba = vec![0; width * height * 4];
+    for y in 0..height {
+        let luma_row = &luma[y * luma_stride..y * luma_stride + width];
+        let chroma_row =
+            &chroma[(y / 2) * chroma_stride..(y / 2) * chroma_stride + chroma_width * 2];
+        for x in 0..width {
+            let cb = chroma_row[(x / 2) * 2] as usize;
+            let cr = chroma_row[(x / 2) * 2 + 1] as usize;
+            let luma = luts.luma[luma_row[x] as usize];
+            let out = &mut rgba[(y * width + x) * 4..(y * width + x + 1) * 4];
+            out[0] = (luma + luts.cr_red[cr]).clamp(0, 255) as u8;
+            out[1] = (luma + luts.cb_green[cb] + luts.cr_green[cr]).clamp(0, 255) as u8;
+            out[2] = (luma + luts.cb_blue[cb]).clamp(0, 255) as u8;
+            out[3] = 255;
+        }
+    }
+    rgba
+}
+
 #[derive(Debug)]
 struct StreamOutputVars {
     tx: SyncSender<Frame>,
     running: Arc<AtomicBool>,
     created: Instant,
+    /// Whether RGhA frames should be decoded as extended-range sRGB.
+    hdr: bool,
+    /// Cached extended sRGB → linear lookup for RGhA frames.
+    srgb_lut: Option<&'static [u16; 65_536]>,
+    biplanar_logged: AtomicBool,
+    unsupported_format_logged: AtomicU32,
 }
 
 impl StreamOutputVars {
@@ -89,59 +202,187 @@ impl StreamOutputVars {
                 return;
             };
 
-            CVPixelBufferLockBaseAddress(&pixel_buffer, CVPixelBufferLockFlags::ReadOnly);
+            if CVPixelBufferLockBaseAddress(&pixel_buffer, CVPixelBufferLockFlags::ReadOnly) != 0 {
+                return;
+            }
             defer! {
                 CVPixelBufferUnlockBaseAddress(&pixel_buffer, CVPixelBufferLockFlags::ReadOnly);
             };
 
             let format_type = CVPixelBufferGetPixelFormatType(&pixel_buffer);
-            if format_type != kCVPixelFormatType_32BGRA {
-                log::error!(
-                    "unexpected ScreenCaptureKit pixel format 0x{format_type:08X}, expected BGRA"
-                );
-                return;
-            }
-
             let width = CVPixelBufferGetWidth(&pixel_buffer);
             let height = CVPixelBufferGetHeight(&pixel_buffer);
-            let bytes_per_row = CVPixelBufferGetBytesPerRow(&pixel_buffer);
-            let size = CVPixelBufferGetDataSize(&pixel_buffer);
-            let base_address = CVPixelBufferGetBaseAddress(&pixel_buffer);
-            if base_address.is_null() || width == 0 || height == 0 {
+            if width == 0 || height == 0 {
                 return;
             }
-            let data = slice::from_raw_parts(base_address.cast::<u8>(), size);
+            let (Ok(width_u32), Ok(height_u32)) = (u32::try_from(width), u32::try_from(height))
+            else {
+                return;
+            };
 
-            let row_len = width * 4;
-            let mut buffer = vec![0; row_len * height];
-            for (src_row, dst_row) in data
-                .chunks_exact(bytes_per_row)
-                .zip(buffer.chunks_exact_mut(row_len))
-            {
-                for (src, dst) in src_row[..row_len]
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .zip(dst_row.as_chunks_mut::<4>().0)
-                {
-                    dst[0] = src[2];
-                    dst[1] = src[1];
-                    dst[2] = src[0];
-                    dst[3] = src[3];
+            let frame = match format_type {
+                PIXEL_FORMAT_32BGRA => {
+                    let bytes_per_row = CVPixelBufferGetBytesPerRow(&pixel_buffer);
+                    let size = CVPixelBufferGetDataSize(&pixel_buffer);
+                    let base_address = CVPixelBufferGetBaseAddress(&pixel_buffer);
+                    let Some(row_len) = width.checked_mul(4) else {
+                        return;
+                    };
+                    let Some(min_size) = (height - 1)
+                        .checked_mul(bytes_per_row)
+                        .and_then(|offset| offset.checked_add(row_len))
+                    else {
+                        return;
+                    };
+                    if base_address.is_null() || bytes_per_row < row_len || size < min_size {
+                        return;
+                    }
+                    let data = slice::from_raw_parts(base_address.cast::<u8>(), size);
+                    let mut buffer = vec![0; row_len * height];
+                    for (src_row, dst_row) in data
+                        .chunks(bytes_per_row)
+                        .take(height)
+                        .zip(buffer.chunks_exact_mut(row_len))
+                    {
+                        for (src, dst) in src_row[..row_len]
+                            .as_chunks::<4>()
+                            .0
+                            .iter()
+                            .zip(dst_row.as_chunks_mut::<4>().0)
+                        {
+                            dst[0] = src[2];
+                            dst[1] = src[1];
+                            dst[2] = src[0];
+                            dst[3] = src[3];
+                        }
+                    }
+                    Frame::new_at(width_u32, height_u32, buffer, timestamp)
                 }
-            }
+                PIXEL_FORMAT_420V => {
+                    let matrix = ycbcr_matrix(&pixel_buffer);
+                    if self
+                        .biplanar_logged
+                        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+                        .is_ok()
+                    {
+                        log::info!(
+                            "ScreenCaptureKit delivered SDR 420v; recording as SDR (hdr_requested={} matrix={matrix:?})",
+                            self.hdr
+                        );
+                    }
+                    let chroma_width = width.div_ceil(2);
+                    let chroma_height = height.div_ceil(2);
+                    let luma_stride = CVPixelBufferGetBytesPerRowOfPlane(&pixel_buffer, 0);
+                    let chroma_stride = CVPixelBufferGetBytesPerRowOfPlane(&pixel_buffer, 1);
+                    let luma_address = CVPixelBufferGetBaseAddressOfPlane(&pixel_buffer, 0);
+                    let chroma_address = CVPixelBufferGetBaseAddressOfPlane(&pixel_buffer, 1);
+                    let Some(luma_len) = (height - 1)
+                        .checked_mul(luma_stride)
+                        .and_then(|offset| offset.checked_add(width))
+                    else {
+                        return;
+                    };
+                    let Some(chroma_row_len) = chroma_width.checked_mul(2) else {
+                        return;
+                    };
+                    let Some(chroma_len) = (chroma_height - 1)
+                        .checked_mul(chroma_stride)
+                        .and_then(|offset| offset.checked_add(chroma_row_len))
+                    else {
+                        return;
+                    };
+                    if luma_address.is_null()
+                        || chroma_address.is_null()
+                        || luma_stride < width
+                        || chroma_stride < chroma_row_len
+                    {
+                        return;
+                    }
+                    let luma = slice::from_raw_parts(luma_address.cast::<u8>(), luma_len);
+                    let chroma = slice::from_raw_parts(chroma_address.cast::<u8>(), chroma_len);
+                    Frame::new_at(
+                        width_u32,
+                        height_u32,
+                        rgba_from_420v(
+                            width,
+                            height,
+                            luma,
+                            luma_stride,
+                            chroma,
+                            chroma_stride,
+                            matrix,
+                        ),
+                        timestamp,
+                    )
+                }
+                PIXEL_FORMAT_64RGBA_HALF if self.hdr => {
+                    let bytes_per_row = CVPixelBufferGetBytesPerRow(&pixel_buffer);
+                    let size = CVPixelBufferGetDataSize(&pixel_buffer);
+                    let base_address = CVPixelBufferGetBaseAddress(&pixel_buffer);
+                    let Some(row_len) = width.checked_mul(8) else {
+                        return;
+                    };
+                    let Some(min_size) = (height - 1)
+                        .checked_mul(bytes_per_row)
+                        .and_then(|offset| offset.checked_add(row_len))
+                    else {
+                        return;
+                    };
+                    if base_address.is_null() || bytes_per_row < row_len || size < min_size {
+                        return;
+                    }
+                    let data = slice::from_raw_parts(base_address.cast::<u8>(), size);
+                    let linear = pixel_buffer
+                        .attachment(kCVImageBufferCGColorSpaceKey, std::ptr::null_mut())
+                        .and_then(|space| space.downcast::<CGColorSpace>().ok())
+                        .is_some_and(|space| hdr::is_linear(Some(&space)));
+                    let Some(pixel_bytes) = width
+                        .checked_mul(height)
+                        .and_then(|pixels| pixels.checked_mul(6))
+                    else {
+                        return;
+                    };
+                    let mut pixels = Vec::with_capacity(pixel_bytes);
+                    for src_row in data.chunks(bytes_per_row).take(height) {
+                        for pixel in src_row[..row_len].as_chunks::<8>().0 {
+                            for bytes in pixel.as_chunks::<2>().0.iter().take(3) {
+                                let bits = u16::from_le_bytes(*bytes);
+                                let out = if linear {
+                                    bits
+                                } else {
+                                    self.srgb_lut.map_or(bits, |lut| lut[bits as usize])
+                                };
+                                pixels.extend_from_slice(&out.to_le_bytes());
+                            }
+                        }
+                    }
+                    let Ok(hdr_image) = HdrImage::try_new(width_u32, height_u32, pixels, 203.0)
+                    else {
+                        return;
+                    };
+                    Frame::new_hdr(width_u32, height_u32, hdr_image, timestamp)
+                }
+                _ => {
+                    if self
+                        .unsupported_format_logged
+                        .compare_exchange(0, format_type, Ordering::Acquire, Ordering::Relaxed)
+                        .is_ok()
+                    {
+                        log::error!(
+                            "unexpected ScreenCaptureKit pixel format 0x{format_type:08X}, expected BGRA, 420v or RGhA"
+                        );
+                    }
+                    return;
+                }
+            };
 
             // The stream may be stopped while this callback is converting.
             if !self.running.load(Ordering::Acquire) {
                 return;
             }
 
-            let _ = self.tx.send(Frame::new_at(
-                width as u32,
-                height as u32,
-                buffer,
-                timestamp,
-            ));
+            // Never block the SCK callback: stopCapture waits for it to return.
+            let _ = self.tx.try_send(frame);
         }
     }
 }
@@ -172,11 +413,21 @@ define_class!(
 );
 
 impl StreamOutput {
-    fn new(tx: SyncSender<Frame>, running: Arc<AtomicBool>, created: Instant) -> Retained<Self> {
+    fn new(
+        tx: SyncSender<Frame>,
+        running: Arc<AtomicBool>,
+        created: Instant,
+        hdr: bool,
+        srgb_lut: Option<&'static [u16; 65_536]>,
+    ) -> Retained<Self> {
         let this = Self::alloc().set_ivars(StreamOutputVars {
             tx,
             running,
             created,
+            hdr,
+            srgb_lut,
+            biplanar_logged: AtomicBool::new(false),
+            unsupported_format_logged: AtomicU32::new(0),
         });
         unsafe { msg_send![super(this), init] }
     }
@@ -278,9 +529,14 @@ impl ImplVideoRecorder {
             _ => (pixel_width, pixel_height),
         };
 
-        let (tx, rx) = sync_channel(0);
+        let (tx, rx) = sync_channel(4);
         let running = Arc::new(AtomicBool::new(false));
-        let output = StreamOutput::new(tx, running.clone(), created);
+        // HDR streaming needs Apple Silicon and macOS 15; asking on an older
+        // Mac silently keeps the SDR stream, so only build the lookup when the
+        // frames can actually arrive as RGhA.
+        let hdr_enabled = options.dynamic_range == DynamicRange::Hdr && hdr::supported();
+        let srgb_lut = hdr_enabled.then(hdr::srgb_to_linear_lut);
+        let output = StreamOutput::new(tx, running.clone(), created, hdr_enabled, srgb_lut);
         let queue = DispatchQueue::new("XCapStreamOutput", DispatchQueueAttr::SERIAL);
 
         unsafe {
@@ -293,7 +549,13 @@ impl ImplVideoRecorder {
             let configuration = SCStreamConfiguration::new();
             configuration.setWidth(output_width);
             configuration.setHeight(output_height);
-            configuration.setPixelFormat(kCVPixelFormatType_32BGRA);
+            if hdr_enabled {
+                // The configuration picks the RGhA pixel format and the
+                // extended-range color space for us.
+                configuration.setCaptureDynamicRange(SCCaptureDynamicRange::HDRLocalDisplay);
+            } else {
+                configuration.setPixelFormat(PIXEL_FORMAT_32BGRA);
+            }
             configuration.setSourceRect(source_rect);
             configuration.setScalesToFit(false);
             configuration.setShowsCursor(options.captures_cursor);
@@ -360,12 +622,120 @@ impl ImplVideoRecorder {
     pub fn stop(&self) -> XCapResult<()> {
         self.running.store(false, Ordering::Release);
         let (tx, rx) = sync_channel(1);
-        let handler = RcBlock::new(move |_: *mut NSError| {
-            let _ = tx.send(());
+        let handler = RcBlock::new(move |error: *mut NSError| {
+            let result = if error.is_null() {
+                Ok(())
+            } else {
+                Err(error_message(unsafe { &*error }))
+            };
+            let _ = tx.send(result);
         });
         unsafe { self.stream.stopCaptureWithCompletionHandler(Some(&handler)) };
-        let _ = rx.recv_timeout(START_TIMEOUT);
+        match rx.recv_timeout(START_TIMEOUT) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(message)) => Err(XCapError::new(message)),
+            Err(RecvTimeoutError::Timeout) => {
+                Err(XCapError::new("ScreenCaptureKit did not stop in time"))
+            }
+            Err(RecvTimeoutError::Disconnected) => Err(XCapError::new(
+                "ScreenCaptureKit stop completion was dropped",
+            )),
+        }
+    }
+}
 
-        Ok(())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn biplanar_video_range_black_white_and_neutral_decode_to_rgba() {
+        let mut luma = vec![0; 8 * 2];
+        luma[..4].copy_from_slice(&[16, 16, 16, 16]);
+        luma[8..12].copy_from_slice(&[235, 235, 235, 235]);
+        let rgba = rgba_from_420v(4, 2, &luma, 8, &[128, 128, 128, 128], 6, YcbcrMatrix::Bt709);
+        assert_eq!(&rgba[..16], &[0, 0, 0, 255].repeat(4));
+        assert_eq!(&rgba[16..], &[255, 255, 255, 255].repeat(4));
+
+        let neutral = rgba_from_420v(
+            2,
+            2,
+            &[126, 126, 126, 126],
+            2,
+            &[128, 128],
+            2,
+            YcbcrMatrix::Bt709,
+        );
+        assert_eq!(neutral, [128, 128, 128, 255].repeat(4));
+    }
+
+    #[test]
+    fn each_chroma_pair_colours_its_two_by_two_block() {
+        let luma = [63; 16];
+        let rgba = rgba_from_420v(
+            4,
+            4,
+            &luma,
+            4,
+            &[90, 240, 90, 240, 90, 240, 90, 240],
+            4,
+            YcbcrMatrix::Bt709,
+        );
+        for y in 0..4 {
+            for x in 0..2 {
+                let at = (y * 4 + x) * 4;
+                let pixel = &rgba[at..at + 3];
+                assert!(pixel[0] > 250 && pixel[1] < 5 && pixel[2] < 5);
+            }
+        }
+    }
+
+    #[test]
+    fn bt601_matrix_decodes_its_reference_colours() {
+        let rgba = rgba_from_420v(
+            6,
+            1,
+            &[81, 81, 145, 145, 41, 41],
+            6,
+            &[90, 240, 54, 30, 240, 110],
+            6,
+            YcbcrMatrix::Bt601,
+        );
+        let expected = [
+            [255, 0, 0, 255],
+            [255, 0, 0, 255],
+            [0, 255, 1, 255],
+            [0, 255, 1, 255],
+            [0, 0, 255, 255],
+            [0, 0, 255, 255],
+        ];
+        for (pixel, expected) in rgba.as_chunks::<4>().0.iter().zip(expected) {
+            for (value, expected) in pixel.iter().zip(expected) {
+                assert!(
+                    (i32::from(*value) - expected).abs() <= 2,
+                    "{pixel:?} component {value} != {expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn odd_dimensions_use_rounded_up_chroma_planes() {
+        let rgba = rgba_from_420v(
+            3,
+            3,
+            &[126; 9],
+            3,
+            &[128, 128, 128, 128, 128, 128, 128, 128],
+            4,
+            YcbcrMatrix::Bt709,
+        );
+        assert_eq!(rgba.len(), 3 * 3 * 4);
+        assert!(
+            rgba.as_chunks::<4>()
+                .0
+                .iter()
+                .all(|p| p == &[128, 128, 128, 255])
+        );
     }
 }
