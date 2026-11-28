@@ -1,6 +1,7 @@
 use core::slice;
 use std::{ffi::c_void, mem, ptr};
 
+use crate::WindowOptions;
 use image::RgbaImage;
 use widestring::U16CString;
 use windows::{
@@ -61,7 +62,7 @@ fn is_window_cloaked(hwnd: HWND) -> bool {
 }
 
 // https://webrtc.googlesource.com/src.git/+/refs/heads/main/modules/desktop_capture/win/window_capture_utils.cc#52
-fn is_valid_window(hwnd: HWND) -> bool {
+fn is_valid_window(hwnd: HWND, excludes_own_windows: bool) -> bool {
     unsafe {
         // ignore invisible windows
         if !IsWindow(Some(hwnd)).as_bool() || !IsWindowVisible(hwnd).as_bool() {
@@ -110,9 +111,11 @@ fn is_valid_window(hwnd: HWND) -> bool {
         // windows owned by the current process. Consumers should either ensure that
         // the thread running their message loop never waits on this operation, or use
         // the option to exclude these windows from the source list.
-        let lp_dw_process_id = get_window_pid(hwnd);
-        if lp_dw_process_id == GetCurrentProcessId() {
-            return false;
+        if excludes_own_windows {
+            let lp_dw_process_id = get_window_pid(hwnd);
+            if lp_dw_process_id == GetCurrentProcessId() {
+                return false;
+            }
         }
 
         // Skip Program Manager window.
@@ -144,10 +147,10 @@ fn is_valid_window(hwnd: HWND) -> bool {
 
 extern "system" fn enum_valid_windows(hwnd: HWND, state: LPARAM) -> BOOL {
     unsafe {
-        let state = Box::leak(Box::from_raw(state.0 as *mut Vec<HWND>));
+        let state = Box::leak(Box::from_raw(state.0 as *mut (Vec<HWND>, bool)));
 
-        if is_valid_window(hwnd) {
-            state.push(hwnd);
+        if is_valid_window(hwnd, state.1) {
+            state.0.push(hwnd);
         }
 
         TRUE
@@ -312,16 +315,21 @@ impl ImplWindow {
     }
 
     pub fn all() -> XCapResult<Vec<ImplWindow>> {
-        let hwnds_mut_ptr: *mut Vec<HWND> = Box::into_raw(Box::default());
+        Self::all_with_options(WindowOptions::default())
+    }
 
-        let hwnds = unsafe {
-            EnumWindows(Some(enum_valid_windows), LPARAM(hwnds_mut_ptr as isize))?;
-            Box::from_raw(hwnds_mut_ptr)
+    pub fn all_with_options(options: WindowOptions) -> XCapResult<Vec<ImplWindow>> {
+        let state_mut_ptr: *mut (Vec<HWND>, bool) =
+            Box::into_raw(Box::new((Vec::new(), options.excludes_own_windows)));
+
+        let state = unsafe {
+            EnumWindows(Some(enum_valid_windows), LPARAM(state_mut_ptr as isize))?;
+            Box::from_raw(state_mut_ptr)
         };
 
         let mut impl_windows = Vec::new();
 
-        for &hwnd in hwnds.iter() {
+        for &hwnd in state.0.iter() {
             impl_windows.push(ImplWindow::new(hwnd));
         }
 
