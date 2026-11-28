@@ -70,7 +70,11 @@ impl ImplVideoRecorder {
                 let duplication = output1.DuplicateOutput(&dxgi_device)?;
 
                 if output_desc.Monitor == h_monitor {
-                    let (tx, sx) = sync_channel(0);
+                    let channel_cap = options
+                        .channel_capacity
+                        .map(|c| c.clamp(1, 16))
+                        .unwrap_or(0);
+                    let (tx, sx) = sync_channel(channel_cap);
                     let s = Self {
                         d3d_device,
                         d3d_context,
