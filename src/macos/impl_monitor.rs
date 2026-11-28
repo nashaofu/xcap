@@ -250,6 +250,7 @@ impl ImplMonitor {
             self.width()?,
             self.height()?,
             self.scale_factor()?,
+            self.frequency().unwrap_or(0.0),
             options,
         )
     }
